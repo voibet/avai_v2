@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Ensure navigation is always clickable */
+nav a {
+  pointer-events: auto !important;
+  position: relative !important;
+}
