@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { executeTransaction, withErrorHandler } from '@/lib/db-utils';
 
 async function deleteLeague(
-  request: Request,
+  _request: Request,
   { params }: { params: { id: string } }
 ) {
   try {

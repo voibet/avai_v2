@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { withErrorHandler, executeQuery } from '../../../../../lib/db-utils';
 import axios from 'axios';
 
+export const dynamic = 'force-dynamic';
+
 interface ApiFootballInjury {
   player: {
     id: number;

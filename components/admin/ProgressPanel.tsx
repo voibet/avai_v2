@@ -1,13 +1,13 @@
 import React from 'react';
 
+
 interface ProgressPanelProps {
-  league: string;
   current: number;
   total: number;
   message: string;
 }
 
-export default function ProgressPanel({ league, current, total, message }: ProgressPanelProps) {
+export default function ProgressPanel({ current, total, message }: ProgressPanelProps) {
   const progressPercentage = (current / total) * 100;
 
   return (

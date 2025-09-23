@@ -51,7 +51,7 @@ export function useApi<T>(
 
   useEffect(() => {
     fetchData();
-  }, [url, enabled, options?.method, JSON.stringify(options?.body)]);
+  }, [url, enabled, options?.method, options?.body]);
 
   return {
     data,

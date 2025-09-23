@@ -9,6 +9,7 @@ export interface Column<T> {
   render: (item: T, index?: number) => React.ReactNode;
   className?: string;
   sortable?: boolean; // Defaults to true if not specified
+  filterable?: boolean; // Defaults to true if not specified
   sortKey?: string; // If different from key, specify the field to sort by
   sortType?: 'string' | 'number' | 'date' | 'custom';
   customSort?: (a: T, b: T, direction: 'asc' | 'desc') => number;
@@ -17,7 +18,6 @@ export interface Column<T> {
 export interface DataTableProps<T> {
   title: string;
   subtitle?: string;
-  data: T[];
   columns: Column<T>[];
   getItemId: (item: T) => string | number;
   getItemHref?: (item: T) => string;
@@ -25,34 +25,38 @@ export interface DataTableProps<T> {
   className?: string;
   headerClassName?: string;
   rowClassName?: string;
-  loading?: boolean;
-  error?: string | null;
   // Selection support
   selectable?: boolean;
   selectedIds?: Set<string | number>;
   onSelectionChange?: (selectedIds: Set<string | number>) => void;
   onSelectAll?: () => void;
   onClearSelection?: () => void;
-  // Filtering support
+  // Filtering support - now URL-based
   filterable?: boolean;
-  initialFilters?: Record<string, Set<string>>; // Initial filter state
-  filterValueApi?: (field: string) => string | Promise<string[]>; // API URL or function returning values
-  // Server-side callbacks
-  onSort?: (sortKey: string, direction: 'asc' | 'desc') => void;
-  onFilter?: (filters: Record<string, Set<string>>) => void;
+  currentFilters?: Record<string, Set<string>>; // Current filter state from URL
+  onFilterChange?: (columnKey: string, value: string | null) => void; // Callback to update URL
+  onClearAllFilters?: () => void; // Callback to clear all filters in URL
+  filterValueApi?: (field: string) => string | Promise<string[]>;
+  // Sorting support - now URL-based
+  currentSort?: { key: string; direction: 'asc' | 'desc' } | null; // Current sort state from URL
+  onSortChange?: (sortKey: string, direction: 'asc' | 'desc') => void; // Callback to update URL
   // Actions
   actions?: React.ReactNode;
   // Expandable rows support
   expandable?: boolean;
   renderExpandedContent?: (item: T, index?: number) => React.ReactNode;
   getExpandedRowClassName?: (item: T) => string;
-  onRowExpand?: (itemId: string | number, isExpanded: boolean) => void;
+  onRowExpand?: (itemId: string | number, isExpanded: boolean, item?: T) => void;
+  // Data source - either client-side data or server-side API
+  data?: T[]; // Client-side data (optional, overrides server-side fetching)
+  apiEndpoint?: string; // Server-side API endpoint (optional if data provided)
+  currentPage?: number; // Required if using server-side
+  onPageChange?: (page: number) => void; // Required if using server-side
 }
 
 export default function DataTable<T>({
   title,
   subtitle,
-  data,
   columns,
   getItemId,
   getItemHref,
@@ -60,8 +64,6 @@ export default function DataTable<T>({
   className = "",
   headerClassName = "",
   rowClassName = "",
-  loading = false,
-  error = null,
   selectable = false,
   selectedIds = new Set(),
   onSelectionChange,
@@ -73,25 +75,92 @@ export default function DataTable<T>({
   getExpandedRowClassName,
   onRowExpand,
   filterable = true,
-  initialFilters = {},
+  currentFilters = {},
+  onFilterChange,
+  onClearAllFilters,
+  currentSort = null,
+  onSortChange,
   filterValueApi,
-  onSort,
-  onFilter,
+  // Data source - either client-side or server-side
+  data,
+  apiEndpoint,
+  currentPage = 1,
+  onPageChange,
 }: DataTableProps<T>) {
+  // Data state - either server-side or client-side
+  const [serverData, setServerData] = useState<T[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // Use client data if provided, otherwise use server data
+  const displayData = data || serverData;
+  const isUsingClientData = !!data;
+  
+  // UI state
   const [expandedRows, setExpandedRows] = useState<Set<string | number>>(new Set());
-  const [sortConfig, setSortConfig] = useState<{
-    key: string;
-    direction: 'asc' | 'desc';
-    type: 'string' | 'number' | 'date' | 'custom';
-  } | null>(null);
-  const [filters, setFilters] = useState<Record<string, Set<string>>>(initialFilters);
   const [showFilterDropdown, setShowFilterDropdown] = useState<string | null>(null);
   const [filterSearchTerms, setFilterSearchTerms] = useState<Record<string, string>>({});
 
-  // Update filters state when initialFilters prop changes
+  // Data fetching - only fetch server data if no client data provided
   useEffect(() => {
-    setFilters(initialFilters);
-  }, [initialFilters]); // Only runs when initialFilters reference changes
+    if (!data && apiEndpoint) {
+      fetchServerData();
+    }
+  }, [data, apiEndpoint, currentSort, currentFilters, currentPage]);
+
+  const fetchServerData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const searchParams = new URLSearchParams();
+      
+      // Add pagination
+      searchParams.append('page', currentPage.toString());
+      searchParams.append('limit', '50');
+      
+      // Add sorting
+      if (currentSort) {
+        searchParams.append('sortColumn', currentSort.key);
+        searchParams.append('sortDirection', currentSort.direction);
+      }
+      
+      // Add filters
+      Object.entries(currentFilters).forEach((filterEntry, index) => {
+        const [columnKey, filterValues] = filterEntry;
+        if (filterValues.size > 0) {
+          const value = Array.from(filterValues)[0];
+          searchParams.append(`filters[${index}][column]`, columnKey);
+          searchParams.append(`filters[${index}][value]`, value);
+          searchParams.append(`filters[${index}][operator]`, 'eq');
+        }
+      });
+      
+      const response = await fetch(`${apiEndpoint}?${searchParams}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      setServerData(result.data || []);
+      setTotalCount(result.total || 0);
+      setTotalPages(result.totalPages || 1);
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch data');
+      setServerData([]);
+      setTotalCount(0);
+      setTotalPages(1);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close filter dropdown when clicking outside
@@ -132,7 +201,7 @@ export default function DataTable<T>({
     if (onSelectAll) {
       onSelectAll();
     } else if (onSelectionChange) {
-      const allIds = new Set(filteredData.map(item => getItemId(item)));
+      const allIds = new Set(displayData.map(item => getItemId(item)));
       onSelectionChange(allIds);
     }
   };
@@ -145,7 +214,7 @@ export default function DataTable<T>({
     }
   };
 
-  const toggleRowExpansion = (itemId: string | number) => {
+  const toggleRowExpansion = (itemId: string | number, item?: T) => {
     const newExpanded = new Set(expandedRows);
     const wasExpanded = newExpanded.has(itemId);
 
@@ -158,12 +227,12 @@ export default function DataTable<T>({
 
     // Call the callback if provided
     if (onRowExpand) {
-      onRowExpand(itemId, !wasExpanded);
+      onRowExpand(itemId, !wasExpanded, item);
     }
   };
 
   const expandAllRows = () => {
-    setExpandedRows(new Set(filteredData.map(item => getItemId(item))));
+    setExpandedRows(new Set(displayData.map(item => getItemId(item))));
   };
 
   const collapseAllRows = () => {
@@ -171,142 +240,26 @@ export default function DataTable<T>({
   };
 
   const handleSort = (column: Column<T>) => {
-    if (column.sortable === false) return;
+    if (column.sortable === false || !onSortChange) return;
 
     const sortKey = column.sortKey || column.key;
-    const sortType = column.sortType || 'string';
 
     let newDirection: 'asc' | 'desc' = 'asc';
-    if (sortConfig?.key === sortKey) {
+    if (currentSort?.key === sortKey) {
       // Toggle direction if same column
-      newDirection = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+      newDirection = currentSort.direction === 'asc' ? 'desc' : 'asc';
     }
 
-    setSortConfig({
-      key: sortKey,
-      direction: newDirection,
-      type: sortType
-    });
-
-    // Call server-side sort callback if provided
-    if (onSort) {
-      onSort(sortKey, newDirection);
-    }
+    onSortChange(sortKey, newDirection);
   };
 
+  // Get filter values for dropdown
   const getSortValue = (item: T, column: Column<T>): any => {
     const sortKey = column.sortKey || column.key;
-
-    // If custom sort function is provided, use it
-    if (column.customSort) {
-      return item;
+    if (typeof item === 'object' && item !== null && sortKey in item) {
+      return (item as any)[sortKey];
     }
-
-    // Handle different data structures
-    if (typeof item === 'object' && item !== null) {
-      // If it's an array-like object or has the key directly
-      if (sortKey in item) {
-        return (item as any)[sortKey];
-      }
-
-      // Handle nested properties with dot notation
-      const keys = sortKey.split('.');
-      let value: any = item;
-
-      for (const key of keys) {
-        if (value && typeof value === 'object' && key in value) {
-          value = value[key];
-        } else {
-          // For debugging - you can uncomment this to see what values are being extracted
-          // console.log('Sort key not found:', sortKey, 'in item:', item);
-          // Return appropriate default based on sort type
-          const sortType = columns.find(col => (col.sortKey || col.key) === sortKey)?.sortType || 'string';
-          return sortType === 'number' ? 0 : '';
-        }
-      }
-
-      return value;
-    }
-
-    // If item is not an object, return it directly
-    return item;
-  };
-
-  const sortData = (data: T[]): T[] => {
-    // If server-side sorting is enabled, don't sort client-side
-    if (onSort) return data;
-
-    if (!sortConfig) return data;
-
-    const column = columns.find(col => (col.sortKey || col.key) === sortConfig.key);
-    if (!column) return data;
-
-    return [...data].sort((a, b) => {
-      // Use custom sort function if provided
-      if (column.customSort) {
-        return column.customSort(a, b, sortConfig.direction);
-      }
-
-      const aValue = getSortValue(a, column);
-      const bValue = getSortValue(b, column);
-
-      // Debug logging (uncomment to troubleshoot sorting issues)
-      // if (sortConfig.type === 'number') {
-      //   console.log('Sorting numbers:', { aValue, bValue, a: a, b: b });
-      // }
-
-      let comparison = 0;
-
-      switch (sortConfig.type) {
-        case 'number':
-          // Handle various number formats and edge cases
-          let aNum: number, bNum: number;
-
-          if (typeof aValue === 'number' && !isNaN(aValue)) {
-            aNum = aValue;
-          } else if (typeof aValue === 'string') {
-            aNum = parseFloat(aValue.replace(/[^\d.-]/g, '')) || 0;
-          } else {
-            aNum = 0;
-          }
-
-          if (typeof bValue === 'number' && !isNaN(bValue)) {
-            bNum = bValue;
-          } else if (typeof bValue === 'string') {
-            bNum = parseFloat(bValue.replace(/[^\d.-]/g, '')) || 0;
-          } else {
-            bNum = 0;
-          }
-
-          comparison = aNum - bNum;
-          break;
-
-        case 'date':
-          const aDate = new Date(aValue);
-          const bDate = new Date(bValue);
-
-          // Handle invalid dates
-          if (isNaN(aDate.getTime()) && isNaN(bDate.getTime())) {
-            comparison = 0;
-          } else if (isNaN(aDate.getTime())) {
-            comparison = 1; // b comes first
-          } else if (isNaN(bDate.getTime())) {
-            comparison = -1; // a comes first
-          } else {
-            comparison = aDate.getTime() - bDate.getTime();
-          }
-          break;
-
-        case 'string':
-        default:
-          const aStr = String(aValue || '').toLowerCase();
-          const bStr = String(bValue || '').toLowerCase();
-          comparison = aStr.localeCompare(bStr);
-          break;
-      }
-
-      return sortConfig.direction === 'desc' ? -comparison : comparison;
-    });
+    return '';
   };
 
   // State for filter values from API
@@ -333,7 +286,7 @@ export default function DataTable<T>({
     if (!filterValueApi) {
       // Fallback to computing from current data
       const values = new Set<string>();
-      data.forEach(item => {
+      displayData.forEach(item => {
         const value = getSortValue(item, column);
         if (value !== null && value !== undefined && value !== '') {
           values.add(String(value));
@@ -377,7 +330,7 @@ export default function DataTable<T>({
       console.error(`Error fetching filter values for ${fieldKey}:`, error);
       // Fallback to computing from current data
       const values = new Set<string>();
-      data.forEach(item => {
+      displayData.forEach(item => {
         const value = getSortValue(item, column);
         if (value !== null && value !== undefined && value !== '') {
           values.add(String(value));
@@ -395,47 +348,28 @@ export default function DataTable<T>({
 
 
   const toggleFilterValue = (columnKey: string, value: string) => {
-    setFilters(prev => {
-      const columnFilters = prev[columnKey] || new Set<string>();
+    if (!onFilterChange) return;
+    
+    const columnFilters = currentFilters[columnKey] || new Set<string>();
 
-      let newFilters: Record<string, Set<string>>;
-      if (columnFilters.has(value)) {
-        // If clicking the same value, remove it (clear the filter for this column)
-        const { [columnKey]: removed, ...rest } = prev;
-        newFilters = rest;
-      } else {
-        // Replace any existing value with the new one (single value per column)
-        newFilters = {
-          ...prev,
-          [columnKey]: new Set([value])
-        };
-      }
-
-      // Call server-side filter callback if provided
-      if (onFilter) {
-        onFilter(newFilters);
-      }
-
-      return newFilters;
-    });
+    if (columnFilters.has(value)) {
+      // If clicking the same value, remove it (clear the filter for this column)
+      onFilterChange(columnKey, null);
+    } else {
+      // Replace any existing value with the new one (single value per column)
+      onFilterChange(columnKey, value);
+    }
   };
 
   const clearColumnFilter = (columnKey: string) => {
-    setFilters(prev => {
-      const { [columnKey]: removed, ...rest } = prev;
-      // Call server-side filter callback if provided
-      if (onFilter) {
-        onFilter(rest);
-      }
-      return rest;
-    });
+    if (onFilterChange) {
+      onFilterChange(columnKey, null);
+    }
   };
 
   const clearAllFilters = () => {
-    setFilters({});
-    // Call server-side filter callback if provided
-    if (onFilter) {
-      onFilter({});
+    if (onClearAllFilters) {
+      onClearAllFilters();
     }
   };
 
@@ -446,27 +380,8 @@ export default function DataTable<T>({
     }));
   };
 
-  const applyFilters = (data: T[]): T[] => {
-    // If server-side filtering is enabled, don't filter client-side
-    if (onFilter) return data;
-
-    if (Object.keys(filters).length === 0) return data;
-
-    return data.filter(item => {
-      return Object.entries(filters).every(([columnKey, filterValues]) => {
-        const column = columns.find(col => col.key === columnKey);
-        if (!column) return true;
-
-        const itemValue = getSortValue(item, column);
-        return filterValues.has(String(itemValue));
-      });
-    });
-  };
-
-  const sortedData = sortData(data);
-  const filteredData = applyFilters(sortedData);
-
-  if (loading) {
+  // Show loading only for server-side data
+  if (loading && !isUsingClientData) {
     return (
       <div className="space-y-1">
         <div className="flex justify-between items-center py-2 border-b border-gray-600">
@@ -480,7 +395,7 @@ export default function DataTable<T>({
     );
   }
 
-  if (error) {
+  if (error && !isUsingClientData) {
     return (
       <div className="space-y-1">
         <div className="flex justify-between items-center py-2 border-b border-gray-600">
@@ -505,11 +420,11 @@ export default function DataTable<T>({
               <span className={`text-xs font-mono ${expandedRows.size > 0 ? 'text-purple-400' : 'text-gray-500'}`}>
                 {expandedRows.size > 0 ? `${expandedRows.size} expanded` : 'Click rows to expand'}
               </span>
-              {filteredData.length > 1 && (
+              {displayData.length > 1 && (
                 <>
                   <button
                     onClick={expandAllRows}
-                    disabled={expandedRows.size === filteredData.length}
+                    disabled={expandedRows.size === displayData.length}
                     className="text-blue-400 hover:text-blue-300 disabled:text-gray-600 disabled:cursor-not-allowed text-xs font-mono underline"
                     style={{ pointerEvents: 'auto' }}
                   >
@@ -536,11 +451,11 @@ export default function DataTable<T>({
             <span className="text-gray-400 text-xs font-mono">{subtitle}</span>
           )}
           <span className="text-gray-400 text-xs font-mono">
-            {filteredData.length} total
-            {sortConfig ? ' (sorted)' : ''}
-            {Object.keys(filters).length > 0 ? ` (${Object.keys(filters).length} filtered)` : ''}
+            {isUsingClientData ? displayData.length : totalCount} total
+            {currentSort ? ' (sorted)' : ''}
+            {Object.keys(currentFilters).length > 0 ? ` (${Object.keys(currentFilters).length} filtered)` : ''}
           </span>
-          {Object.keys(filters).length > 0 && (
+          {Object.keys(currentFilters).length > 0 && (
             <button
               onClick={clearAllFilters}
               className="text-red-400 hover:text-red-300 text-xs font-mono underline ml-2"
@@ -563,7 +478,7 @@ export default function DataTable<T>({
           <div className="col-span-1">
             <input
               type="checkbox"
-              checked={selectedIds.size === filteredData.length && filteredData.length > 0}
+              checked={selectedIds.size === displayData.length && displayData.length > 0}
               onChange={(e) => {
                 if (e.target.checked) {
                   handleSelectAll();
@@ -578,10 +493,10 @@ export default function DataTable<T>({
         )}
         {columns.map((column) => {
           const sortKey = column.sortKey || column.key;
-          const isSorted = sortConfig?.key === sortKey;
+          const isSorted = currentSort?.key === sortKey;
           const isSortable = column.sortable !== false; // Defaults to true
-          const hasFilter = filters[column.key]?.size > 0;
-          const isFilterable = filterable !== false && column.key !== 'actions';
+          const hasFilter = currentFilters[column.key]?.size > 0;
+          const isFilterable = filterable !== false && column.filterable !== false && column.key !== 'actions';
 
           return (
             <div
@@ -598,7 +513,7 @@ export default function DataTable<T>({
                   {isSortable && (
                     <span className="text-xs">
                       {isSorted ? (
-                        sortConfig.direction === 'asc' ? '↑' : '↓'
+                        currentSort.direction === 'asc' ? '↑' : '↓'
                       ) : (
                         <span className="text-gray-500">↕</span>
                       )}
@@ -613,7 +528,7 @@ export default function DataTable<T>({
                       className={`text-xs px-1 hover:bg-gray-600 rounded transition-colors ${
                         hasFilter ? 'text-yellow-400' : 'text-gray-500'
                       }`}
-                      title={hasFilter ? `Filtered (${filters[column.key]?.size} selected)` : 'Filter'}
+                      title={hasFilter ? `Filtered (${currentFilters[column.key]?.size} selected)` : 'Filter'}
                       style={{ pointerEvents: 'auto' }}
                     >
                       {hasFilter ? '⚫' : '○'}
@@ -687,7 +602,7 @@ export default function DataTable<T>({
                       }
 
                       return filteredValues.map((value) => {
-                        const isSelected = filters[column.key]?.has(value) ?? false;
+                        const isSelected = currentFilters[column.key]?.has(value) ?? false;
                         return (
                           <label
                             key={value}
@@ -719,12 +634,12 @@ export default function DataTable<T>({
 
       {/* Data Rows */}
       <div className="space-y-0">
-        {data.length === 0 ? (
+        {displayData.length === 0 ? (
           <div className="py-4 border-b border-gray-600">
             <span className="text-gray-500 text-xs font-mono">{emptyMessage}</span>
           </div>
         ) : (
-          filteredData.map((item, index) => {
+          displayData.map((item, index) => {
             const itemId = getItemId(item);
             const href = getItemHref?.(item);
             const isExpanded = expandedRows.has(itemId);
@@ -732,7 +647,7 @@ export default function DataTable<T>({
             const RowContent = (
               <div
                 className={`grid ${expandable && selectable ? 'grid-cols-15' : expandable || selectable ? 'grid-cols-14' : 'grid-cols-13'} gap-1 py-1 border-b border-gray-600 text-xs font-mono ${rowClassName} ${expandable ? 'cursor-pointer hover:bg-gray-800' : ''}`}
-                onClick={expandable ? () => toggleRowExpansion(itemId) : undefined}
+                onClick={expandable ? () => toggleRowExpansion(itemId, item) : undefined}
                 style={{ pointerEvents: expandable ? 'auto' : 'none' }}
               >
                 {selectable && (
@@ -772,7 +687,7 @@ export default function DataTable<T>({
                     onClick={expandable ? (e) => {
                       // If expandable, prevent navigation and toggle expansion instead
                       e.preventDefault();
-                      toggleRowExpansion(itemId);
+                      toggleRowExpansion(itemId, item);
                     } : undefined}
                   >
                     {RowContent}
@@ -793,6 +708,68 @@ export default function DataTable<T>({
           })
         )}
       </div>
+
+      {/* Pagination Controls */}
+      {!isUsingClientData && totalPages > 1 && (
+        <div className="flex items-center justify-between py-2 border-gray-600">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onPageChange && onPageChange(currentPage - 1)}
+              disabled={currentPage <= 1}
+              className="px-3 py-1 text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white rounded transition-colors"
+              style={{ pointerEvents: 'auto' }}
+            >
+              ← Previous
+            </button>
+
+            <span className="text-xs font-mono text-gray-400">
+              Page {currentPage} of {totalPages}
+            </span>
+
+            <button
+              onClick={() => onPageChange && onPageChange(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+              className="px-3 py-1 text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white rounded transition-colors"
+              style={{ pointerEvents: 'auto' }}
+            >
+              Next →
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {/* Page number buttons */}
+            {(() => {
+              const pages = [];
+              const maxVisiblePages = 5;
+              let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+              let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+              // Adjust start page if we're near the end
+              if (endPage - startPage + 1 < maxVisiblePages) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+              }
+
+              for (let i = startPage; i <= endPage; i++) {
+                pages.push(
+                  <button
+                    key={i}
+                    onClick={() => onPageChange && onPageChange(i)}
+                    className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
+                      i === currentPage
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    }`}
+                    style={{ pointerEvents: 'auto' }}
+                  >
+                    {i}
+                  </button>
+                );
+              }
+              return pages;
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

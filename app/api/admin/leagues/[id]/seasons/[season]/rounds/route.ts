@@ -3,7 +3,7 @@ import axios from 'axios';
 import { withErrorHandler } from '@/lib/db-utils';
 
 async function getLeagueRounds(
-  request: Request,
+  _request: Request,
   { params }: { params: { id: string; season: string } }
 ) {
   const apiKey = process.env.API_KEY;

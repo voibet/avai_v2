@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '@/lib/db-utils';
 
-async function getAdminLeagues(request: Request) {
+async function getAdminLeagues(_request: Request) {
   // Get leagues with their season data and xg_source information
   const query = `
     SELECT

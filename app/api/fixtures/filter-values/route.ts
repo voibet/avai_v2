@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '../../../../lib/db-utils';
 
+export const dynamic = 'force-dynamic';
+
 
 async function getFilterValues(request: Request) {
   const { searchParams } = new URL(request.url);

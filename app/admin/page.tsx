@@ -1,15 +1,6 @@
 'use client';
 
-/**
- * Admin Panel with Universal DataTable
- *
- * Uses the universal DataTable component for consistent styling and functionality:
- * - Fetch Fixtures: Table with leagues, expandable to show seasons
- * - Add Leagues: Table with available leagues, expandable to show seasons
- * - Consistent with /leagues, /fixtures pages
- */
-
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import DataTable, { Column } from '../../components/ui/data-table';
 import {
   TabNavigation,
@@ -19,17 +10,10 @@ import {
   ProgressPanel,
   ResultsPanel
 } from '../../components/admin';
+import { League } from '../../types/database';
 
 
 type AdminTab = 'fetch-fixtures' | 'add-leagues';
-
-interface League {
-  id: number;
-  name: string;
-  country: string;
-  seasons: Record<string, { start: string; end: string; current: boolean }>;
-  xg_source: Record<string, { rounds: Record<string, { url: string }> }> | null;
-}
 
 interface AvailableLeague {
   id: number;
@@ -42,7 +26,6 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<AdminTab>('fetch-fixtures');
   const [leagues, setLeagues] = useState<League[]>([]);
   const [availableLeagues, setAvailableLeagues] = useState<AvailableLeague[]>([]);
-  // Note: expandedLeagues state removed - DataTable handles expansion internally
   const [selectedSeasons, setSelectedSeasons] = useState<Record<string, Set<string>>>({});
   const [selectedLeagues, setSelectedLeagues] = useState<Set<number>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
@@ -143,50 +126,6 @@ export default function AdminPage() {
     setSelectedSeasons(newSelected);
   };
 
-  const selectAllSeasonsForLeague = (leagueId: number, seasons: Record<string, any> | string[]) => {
-    const key = `${leagueId}`;
-    const newSelected = { ...selectedSeasons };
-
-    if (Array.isArray(seasons)) {
-      // Available leagues - seasons is string[]
-      newSelected[key] = new Set(seasons);
-    } else {
-      // Existing leagues - seasons is Record<string, any>
-      newSelected[key] = new Set(Object.keys(seasons));
-    }
-
-    setSelectedSeasons(newSelected);
-  };
-
-  const clearAllSeasonsForLeague = (leagueId: number) => {
-    const key = `${leagueId}`;
-    const newSelected = { ...selectedSeasons };
-    delete newSelected[key];
-    setSelectedSeasons(newSelected);
-  };
-
-  const selectAllSeasons = () => {
-    const currentLeagues = activeTab === 'fetch-fixtures' ? leagues : availableLeagues;
-    const newSelected: Record<string, Set<string>> = {};
-
-    currentLeagues.forEach(league => {
-      const key = `${league.id}`;
-      if (activeTab === 'fetch-fixtures') {
-        // Select all seasons for existing leagues
-        newSelected[key] = new Set(Object.keys(league.seasons));
-      } else {
-        // Select all seasons for available leagues - cast to AvailableLeague
-        const availableLeague = league as AvailableLeague;
-        newSelected[key] = new Set(availableLeague.seasons);
-      }
-    });
-
-    setSelectedSeasons(newSelected);
-  };
-
-  const clearAllSelections = () => {
-    setSelectedSeasons({});
-  };
 
   const fetchXGForLeague = async (leagueId: number, leagueName: string) => {
     setIsLoading(true);
@@ -692,9 +631,7 @@ export default function AdminPage() {
         league.country.toLowerCase().includes(searchQuery.toLowerCase())
       );
 
-  const selectedCount = useMemo(() => {
-    return selectedLeagues.size + Object.values(selectedSeasons).reduce((total, seasons) => total + seasons.size, 0);
-  }, [selectedLeagues, selectedSeasons]);
+  const selectedCount = selectedLeagues.size + Object.values(selectedSeasons).reduce((total, seasons) => total + seasons.size, 0);
 
   // Column definitions for Fetch Fixtures tab
   const fetchFixturesColumns: Column<League>[] = [
@@ -923,7 +860,7 @@ export default function AdminPage() {
 
         {/* Universal DataTable */}
         {activeTab === 'fetch-fixtures' ? (
-          <DataTable
+          <DataTable<League>
             title="Existing Leagues"
             subtitle={`${filteredLeagues.length} leagues`}
             data={filteredLeagues as League[]}
@@ -959,7 +896,7 @@ export default function AdminPage() {
             }
           />
         ) : (
-          <DataTable
+          <DataTable<AvailableLeague>
             title="Available Leagues"
             subtitle={`${filteredLeagues.length} leagues`}
             data={filteredLeagues as AvailableLeague[]}
@@ -992,7 +929,6 @@ export default function AdminPage() {
         {/* Progress Panel */}
         {progress && (
           <ProgressPanel
-            league={progress.league}
             current={progress.current}
             total={progress.total}
             message={progress.message}

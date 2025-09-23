@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '../../../../lib/db-utils';
 
-async function getFixture(request: Request, { params }: { params: { id: string } }) {
+async function getFixture(_request: Request, { params }: { params: { id: string } }) {
   const fixtureId = parseInt(params.id);
 
   if (isNaN(fixtureId)) {

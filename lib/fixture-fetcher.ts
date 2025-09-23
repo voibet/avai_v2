@@ -166,7 +166,7 @@ export class FixtureFetcher {
           const apiFixtures = await this.fetchFixturesFromAPI(leagueInfo.id, leagueInfo.season);
           console.log(`Fetched ${apiFixtures.length} fixtures from API for ${leagueInfo.name}`);
 
-          const updated = await this.updateDatabaseWithFixtures(apiFixtures, leagueInfo.name);
+          const updated = await this.updateDatabaseWithFixtures(apiFixtures);
 
           totalUpdated += updated;
         } catch (error) {
@@ -361,7 +361,7 @@ export class FixtureFetcher {
     }
   }
 
-  private async updateDatabaseWithFixtures(apiFixtures: ApiFootballFixture[], leagueName: string): Promise<number> {
+  private async updateDatabaseWithFixtures(apiFixtures: ApiFootballFixture[]): Promise<number> {
     let updatedCount = 0;
 
     if (apiFixtures.length === 0) return 0;
@@ -375,37 +375,7 @@ export class FixtureFetcher {
     // Fetch team countries for all teams in these fixtures
     const teamCountryMap = await this.fetchMissingTeamCountries(allTeamIds);
 
-    // Get league data including xg_source for this league
-    const leagueResult = await executeQuery(`
-      SELECT xg_source FROM football_leagues WHERE id = $1
-    `, [apiFixtures[0]?.league.id]);
 
-    let xgSourceData: Record<string, { rounds: Record<string, { url: string }> }> = {};
-    if (leagueResult.rows.length > 0 && leagueResult.rows[0].xg_source) {
-      xgSourceData = typeof leagueResult.rows[0].xg_source === 'string'
-        ? JSON.parse(leagueResult.rows[0].xg_source)
-        : leagueResult.rows[0].xg_source;
-    }
-
-    // Helper function to get xg_source for a specific fixture
-    const getXGSourceForFixture = (season: number, round: string): string | null => {
-      const seasonStr = season.toString();
-
-      if (xgSourceData[seasonStr]?.rounds) {
-        const seasonRounds = xgSourceData[seasonStr].rounds;
-
-        // First check for specific round
-        if (seasonRounds[round]) {
-          return seasonRounds[round].url;
-        }
-        // Then check for "ALL" round
-        else if (seasonRounds["ALL"]) {
-          return seasonRounds["ALL"].url;
-        }
-      }
-
-      return null;
-    };
 
     // Build transaction queries
     const queries = await Promise.all(apiFixtures.map(async (fixture) => {

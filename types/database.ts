@@ -3,22 +3,13 @@ export interface League {
   name: string;
   type: string;
   country: string;
-  seasons: any; // JSONB field
+  seasons: Record<string, { start: string; end: string; current: boolean }>; // JSONB field
   xg_source?: Record<string, { rounds: Record<string, { url: string }> }>; // JSONB field with structured xg_source data: { season: { rounds: { roundName: { url } } } }
   created_at: string;
   updated_at: string;
   pinnacle_league_id?: number;
   betfair_competition_id?: number;
   veikkaus_league_id?: number;
-}
-
-export interface Team {
-  id: number;
-  name: string;
-  country: string;
-  venue?: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface Fixture {

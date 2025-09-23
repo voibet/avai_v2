@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
-import { executeQuery, executeTransaction, withErrorHandler } from '@/lib/db-utils';
+import { executeTransaction, withErrorHandler } from '@/lib/db-utils';
 
 interface ApiFootballLeague {
   league: {

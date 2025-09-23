@@ -12,16 +12,6 @@ interface ApiFootballLineupPlayer {
   };
 }
 
-interface ApiFootballInjury {
-  player: {
-    id: number;
-    name: string;
-    photo: string;
-  };
-  player_position: string;
-  type: string;
-  reason: string;
-}
 
 interface ApiFootballLineup {
   team: {
@@ -51,7 +41,7 @@ interface ApiFootballLineup {
   substitutes: ApiFootballLineupPlayer[];
 }
 
-async function getFixtureLineups(request: Request, { params }: { params: { id: string } }) {
+async function getFixtureLineups(_request: Request, { params }: { params: { id: string } }) {
   const fixtureId = parseInt(params.id);
 
   if (isNaN(fixtureId)) {

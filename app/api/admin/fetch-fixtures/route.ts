@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { FixtureFetcher } from '@/lib/fixture-fetcher';
 
 export async function POST(request: Request) {

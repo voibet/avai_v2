@@ -1,12 +1,6 @@
 import React from 'react';
+import { League } from '../../types/database';
 
-interface League {
-  id: number;
-  name: string;
-  country: string;
-  seasons: Record<string, { start: string; end: string; current: boolean }>;
-  xg_source: Record<string, { rounds: Record<string, { url: string }> }> | null;
-}
 
 interface XGSourceModalProps {
   isOpen: boolean;

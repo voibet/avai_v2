@@ -1,12 +1,5 @@
 import React from 'react';
-
-interface League {
-  id: number;
-  name: string;
-  country: string;
-  seasons: Record<string, { start: string; end: string; current: boolean }>;
-  xg_source: Record<string, { rounds: Record<string, { url: string }> }> | null;
-}
+import { League } from '../../types/database';
 
 interface DeleteConfirmationModalProps {
   isOpen: boolean;

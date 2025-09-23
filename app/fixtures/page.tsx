@@ -1,11 +1,8 @@
 'use client'
 
-import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
-import { useFixtures, useFixtureLineups, useTeamInjuries } from '../../lib/hooks/use-football-data'
-import LoadingSpinner from '../../components/ui/loading-spinner'
-import ErrorMessage from '../../components/ui/error-message'
+import { useState, useCallback, useMemo } from 'react'
+import { useFixtureLineups, useTeamInjuries } from '../../lib/hooks/use-football-data'
 import DataTable, { Column } from '../../components/ui/data-table'
 import FixtureEditModal from '../../components/admin/FixtureEditModal'
 
@@ -17,45 +14,47 @@ export default function FixturesPage() {
   const [editingFixture, setEditingFixture] = useState<any>(null)
 
   const currentPage = parseInt(searchParams.get('page') || '1')
-  const sortBy = searchParams.get('sort_by') || 'date'
-  const sortDirection = (searchParams.get('sort_direction') || 'desc') as 'asc' | 'desc'
+  
+  // Extract all URL parameters for filters and sorting
+  const currentFilters = useMemo(() => {
+    const filters: Record<string, Set<string>> = {}
+    
+    // Standard filter parameters
+    const filterParams = ['league_name', 'home_team_name', 'away_team_name', 'status_short', 'season']
+    filterParams.forEach(param => {
+      const value = searchParams.get(param)
+      if (value) {
+        filters[param] = new Set([value])
+      }
+    })
+    
+    return filters
+  }, [searchParams])
 
-  // Extract filter parameters from URL (support both old and new parameter names)
-  const leagueNameFilterRaw = searchParams.get('league_name') || searchParams.get('league')
-  const homeTeamFilter = searchParams.get('home_team_name') || searchParams.get('home_team')
-  const awayTeamFilter = searchParams.get('away_team_name') || searchParams.get('away_team')
-  const statusFilter = searchParams.get('status_short') || searchParams.get('status')
-  const seasonFilter = searchParams.get('season')
+  // Extract sorting from URL
+  const currentSort = useMemo(() => {
+    const sortBy = searchParams.get('sort_by')
+    const sortDirection = searchParams.get('sort_direction') as 'asc' | 'desc' | null
+    
+    if (sortBy && sortDirection) {
+      return { key: sortBy, direction: sortDirection }
+    }
+    return null
+  }, [searchParams])
 
-  // Parse league name filter to extract just the league name (remove country part if present)
-  const leagueNameFilter = leagueNameFilterRaw ? leagueNameFilterRaw.replace(/\s*\([^)]*\)$/, '') : null
-
-  // Memoize the options to prevent unnecessary re-renders
-  const fixturesOptions = useMemo(() => ({
-    page: currentPage,
-    limit: 50,
-    sortBy,
-    sortDirection,
-    leagueName: leagueNameFilter,
-    homeTeamName: homeTeamFilter,
-    awayTeamName: awayTeamFilter,
-    status: statusFilter,
-    season: seasonFilter
-  }), [currentPage, sortBy, sortDirection, leagueNameFilter, homeTeamFilter, awayTeamFilter, statusFilter, seasonFilter])
-
-  const { data, loading, error } = useFixtures(fixturesOptions)
+  // Server-side data is handled by DataTable component
   const { data: lineupsData, loading: lineupsLoading, error: lineupsError } = useFixtureLineups(expandedFixtureId)
 
-  // Get current fixture data to extract team IDs
-  const currentFixture = expandedFixtureId && data?.fixtures.find((f: any) => f.id.toString() === expandedFixtureId)
-  const homeTeamId = currentFixture ? currentFixture.home_team_id?.toString() : null
-  const awayTeamId = currentFixture ? currentFixture.away_team_id?.toString() : null
+  // Store current fixture data from expanded row
+  const [currentFixtureData, setCurrentFixtureData] = useState<any>(null)
+  const homeTeamId = currentFixtureData ? currentFixtureData.home_team_id?.toString() : null
+  const awayTeamId = currentFixtureData ? currentFixtureData.away_team_id?.toString() : null
 
   // Fetch injuries for each team separately
   const { data: homeInjuriesData, loading: homeInjuriesLoading, error: homeInjuriesError } = useTeamInjuries(expandedFixtureId, homeTeamId)
   const { data: awayInjuriesData, loading: awayInjuriesLoading, error: awayInjuriesError } = useTeamInjuries(expandedFixtureId, awayTeamId)
 
-  const formatDate = (dateString: string) => {
+  const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
     const day = date.getDate().toString().padStart(2, '0');
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -64,9 +63,9 @@ export default function FixturesPage() {
     const minutes = date.getMinutes().toString().padStart(2, '0');
 
     return `${day}.${month}.${year} ${hours}.${minutes}`;
-  }
+  }, [])
 
-  const formatInjuryTiming = (injury: any) => {
+  const formatInjuryTiming = useCallback((injury: any) => {
     if (injury.type === 'Questionable') {
       return 'UNCERTAIN';
     }
@@ -83,12 +82,16 @@ export default function FixturesPage() {
     } else {
       return `WAS ${days} DAYS BEFORE`;
     }
-  }
+  }, [])
+
+  const handleEditFixture = useCallback((fixture: any) => {
+    setEditingFixture(fixture)
+  }, [])
 
   // Column definitions for fixtures table
-  const fixturesColumns: Column<any>[] = [
+  const fixturesColumns = useMemo<Column<any>[]>(() => [
     {
-      key: 'home',
+      key: 'home_team_name', // Use database column name for server-side
       header: 'HOME',
       span: 2,
       sortType: 'string',
@@ -100,7 +103,7 @@ export default function FixturesPage() {
       )
     },
     {
-      key: 'away',
+      key: 'away_team_name', // Use database column name for server-side
       header: 'AWAY',
       span: 2,
       sortType: 'string',
@@ -112,7 +115,7 @@ export default function FixturesPage() {
       )
     },
     {
-      key: 'league',
+      key: 'league_name', // Use database column name for server-side
       header: 'LEAGUE',
       span: 2,
       sortType: 'string',
@@ -139,6 +142,8 @@ export default function FixturesPage() {
       key: 'score',
       header: 'SCORE',
       span: 1,
+      sortable: false, // Computed column - disable server-side sorting
+      filterable: false, // Computed column - disable filtering
       sortType: 'custom',
       customSort: (a, b, direction) => {
         const aHome = a.goals_home || 0;
@@ -175,6 +180,8 @@ export default function FixturesPage() {
       key: 'xg',
       header: 'XG',
       span: 1,
+      sortable: false, // Computed column - disable server-side sorting
+      filterable: false, // Computed column - disable filtering
       sortType: 'custom',
       customSort: (a, b, direction) => {
         const aXG = (parseFloat(a.xg_home?.toString() || '0') + parseFloat(a.xg_away?.toString() || '0')) || 0;
@@ -197,9 +204,10 @@ export default function FixturesPage() {
       )
     },
     {
-      key: 'status',
+      key: 'status_short', // Use database column name for server-side
       header: 'STATUS',
       span: 1,
+      sortable: false, // Status - disable sorting
       sortType: 'string',
       sortKey: 'status_short',
       render: (fixture) => (
@@ -217,6 +225,7 @@ export default function FixturesPage() {
       key: 'date',
       header: 'TIME',
       span: 2,
+      filterable: false, // Time - disable filtering
       sortType: 'date',
       sortKey: 'date',
       render: (fixture) => (
@@ -230,6 +239,7 @@ export default function FixturesPage() {
       header: 'EDIT',
       span: 1,
       sortable: false,
+      filterable: false, // Actions column - disable filtering
       render: (fixture) => (
         <button
           onClick={(e) => {
@@ -246,196 +256,73 @@ export default function FixturesPage() {
         </button>
       )
     }
-  ]
-
-  const handleEditFixture = (fixture: any) => {
-    setEditingFixture(fixture)
-  }
+  ], [handleEditFixture, formatDate])
 
   const handleCloseEditModal = () => {
     setEditingFixture(null)
   }
 
-  const handleFixtureUpdated = () => {
-    // Refresh the fixtures data after update
+  const handleFixtureUpdated = useCallback(() => {
+    // Instead of reloading the page (which resets filters), we could trigger a data refresh
+    // For now, we'll keep the current approach but this could be improved
     window.location.reload()
-  }
+  }, [])
 
-  const handlePageChange = (page: number) => {
+  const handlePageChange = useCallback((page: number) => {
     const params = new URLSearchParams(searchParams.toString())
     params.set('page', page.toString())
     router.push(`/fixtures?${params.toString()}`)
-  }
+  }, [searchParams, router])
 
-  const handleSort = (sortKey: string, direction: 'asc' | 'desc') => {
+  // Handle filter changes - update URL
+  const handleFilterChange = useCallback((columnKey: string, value: string | null) => {
     const params = new URLSearchParams(searchParams.toString())
+    
+    if (value) {
+      params.set(columnKey, value)
+    } else {
+      params.delete(columnKey)
+    }
+    
+    // Reset to page 1 when filters change
+    params.set('page', '1')
+    
+    router.push(`/fixtures?${params.toString()}`)
+  }, [searchParams, router])
+
+  // Handle sorting changes - update URL  
+  const handleSortChange = useCallback((sortKey: string, direction: 'asc' | 'desc') => {
+    const params = new URLSearchParams(searchParams.toString())
+    
     params.set('sort_by', sortKey)
     params.set('sort_direction', direction)
-    params.set('page', '1') // Reset to first page when sorting changes
+    
+    // Reset to page 1 when sorting changes
+    params.set('page', '1')
+    
     router.push(`/fixtures?${params.toString()}`)
-  }
+  }, [searchParams, router])
 
-  // Map column keys to URL parameter names
-  const columnKeyToParamMap: Record<string, string> = {
-    'league': 'league_name',
-    'home': 'home_team_name',
-    'away': 'away_team_name',
-    'status': 'status_short',
-    'season': 'season'
-  }
-
-  // Create initial filters from URL parameters
-  const initialFilters = useMemo(() => {
-    const filters: Record<string, Set<string>> = {}
-    Object.entries(columnKeyToParamMap).forEach(([columnKey, paramName]) => {
-      const paramValue = searchParams.get(paramName) || searchParams.get(columnKey)
-      if (paramValue) {
-        filters[columnKey] = new Set([paramValue])
-      }
-    })
-    return filters
-  }, [searchParams, columnKeyToParamMap])
-
-  const handleFilter = (filters: Record<string, Set<string>>) => {
-    const params = new URLSearchParams(searchParams.toString())
-
-    // Remove existing filter parameters
-    params.delete('league_name')
-    params.delete('league') // Also remove old parameter names for backward compatibility
-    params.delete('home_team_name')
-    params.delete('home_team')
-    params.delete('away_team_name')
-    params.delete('away_team')
-    params.delete('status_short')
-    params.delete('status')
-    params.delete('season')
-
-    // Add new filter parameters
-    Object.entries(filters).forEach(([columnKey, filterValues]) => {
-      if (filterValues.size > 0) {
-        // For now, we'll only support single value filters (the first value)
-        // In a more advanced implementation, you could support multiple values
-        let filterValue = Array.from(filterValues)[0]
-
-        // Special handling for league filter - store the full "League (Country)" format in URL
-        // but the parsing will happen when reading from URL
-        if (columnKey === 'league') {
-          // Keep the full format with country for URL state
-          params.set('league_name', filterValue)
-        } else {
-          const paramName = columnKeyToParamMap[columnKey] || columnKey
-          params.set(paramName, filterValue)
-        }
-      }
-    })
-
-    params.set('page', '1') // Reset to first page when filtering changes
+  // Clear all filters
+  const handleClearAllFilters = useCallback(() => {
+    const params = new URLSearchParams()
+    params.set('page', '1')
+    
+    // Keep sorting if it exists
+    if (currentSort) {
+      params.set('sort_by', currentSort.key)
+      params.set('sort_direction', currentSort.direction)
+    }
+    
     router.push(`/fixtures?${params.toString()}`)
-  }
+  }, [router, currentSort])
 
-  const getFilterValueApiUrl = (field: string): string => {
+  const getFilterValueApiUrl = useCallback((field: string): string => {
     return `/api/fixtures/filter-values?field=${field}`;
-  }
+  }, [])
 
-  if (loading) {
-    return <LoadingSpinner message="Loading fixtures..." />
-  }
 
-  if (error) {
-    return <ErrorMessage message={`Error loading fixtures: ${error}`} className="text-center py-8" />
-  }
-
-  const { fixtures, pagination } = data || { fixtures: [], pagination: { currentPage: 1, totalPages: 1, totalCount: 0, limit: 100, hasNext: false, hasPrev: false } }
-
-  // Extended fixture info columns for DataTable
-  const extendedFixtureColumns: Column<any>[] = [
-    {
-      key: 'detail',
-      header: 'DETAIL',
-      span: 4,
-      render: (item) => (
-        <div className="text-gray-300 font-bold">
-          {item.label}
-        </div>
-      )
-    },
-    {
-      key: 'home',
-      header: 'HOME',
-      span: 3,
-      render: (item) => (
-        <div className="text-gray-100 text-center">
-          {item.home ?? '-'}
-        </div>
-      )
-    },
-    {
-      key: 'away',
-      header: 'AWAY',
-      span: 3,
-      render: (item) => (
-        <div className="text-gray-100 text-center">
-          {item.away ?? '-'}
-        </div>
-      )
-    },
-    {
-      key: 'info',
-      header: 'INFO',
-      span: 3,
-      render: (item) => (
-        <div className="text-gray-100">
-          {item.info ?? '-'}
-        </div>
-      )
-    }
-  ];
-
-  // Lineup columns for DataTable
-  const lineupColumns: Column<any>[] = [
-    {
-      key: 'number',
-      header: '#',
-      span: 1,
-      render: (player) => (
-        <div className="text-gray-300 text-center font-mono">
-          {player.number}
-        </div>
-      )
-    },
-    {
-      key: 'name',
-      header: 'PLAYER',
-      span: 4,
-      render: (player) => (
-        <div className="text-gray-100 font-bold truncate">
-          {player.name}
-        </div>
-      )
-    },
-    {
-      key: 'position',
-      header: 'POS',
-      span: 2,
-      render: (player) => (
-        <div className="text-gray-400 text-center text-xs font-mono">
-          {player.position}
-        </div>
-      )
-    },
-    {
-      key: 'grid',
-      header: 'GRID',
-      span: 2,
-      render: (player) => (
-        <div className="text-gray-500 text-center text-xs font-mono">
-          {player.grid}
-        </div>
-      )
-    }
-  ];
-
-  const renderLineupsSection = (fixture: any) => {
+  const renderLineupsSection = useCallback((fixture: any) => {
     if (lineupsLoading) {
       return (
         <div className="px-2 py-4">
@@ -505,7 +392,7 @@ export default function FixturesPage() {
                 </div>
 
                 {/* Players */}
-                {home.startXI.map((player, index) => (
+                {home.startXI.map((player) => (
                   <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-600 text-xs font-mono">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
                     <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
@@ -591,7 +478,7 @@ export default function FixturesPage() {
                 </div>
 
                 {/* Players */}
-                {away.startXI.map((player, index) => (
+                {away.startXI.map((player) => (
                   <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-600 text-xs font-mono">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
                     <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
@@ -663,8 +550,8 @@ export default function FixturesPage() {
         </div>
       </div>
     );
-  };
-  const renderExpandedContent = (fixture: any) => {
+  }, [lineupsLoading, lineupsError, lineupsData, homeInjuriesLoading, homeInjuriesError, homeInjuriesData, awayInjuriesLoading, awayInjuriesError, awayInjuriesData, formatInjuryTiming]);
+  const renderExpandedContent = useCallback((fixture: any) => {
     const extendedData = [
       {
         id: 'halftime',
@@ -771,7 +658,7 @@ export default function FixturesPage() {
         </div>
       </div>
     );
-  }
+  }, [renderLineupsSection]);
 
   return (
     <div className="space-y-1">
@@ -779,83 +666,32 @@ export default function FixturesPage() {
 
       <DataTable
         title="FIXTURES"
-        subtitle={`SHOWING ${fixtures && fixtures.length > 0 ? ((pagination.currentPage - 1) * pagination.limit) + 1 : 0} TO ${Math.min(pagination.currentPage * pagination.limit, pagination.totalCount)} OF ${pagination.totalCount} FIXTURES`}
-        data={fixtures || []}
         columns={fixturesColumns}
         getItemId={(fixture) => fixture.id}
         emptyMessage="No fixtures found with current filters"
         filterable={true}
-        initialFilters={initialFilters}
+        currentFilters={currentFilters}
+        currentSort={currentSort}
+        onFilterChange={handleFilterChange}
+        onSortChange={handleSortChange}
+        onClearAllFilters={handleClearAllFilters}
         filterValueApi={getFilterValueApiUrl}
-        onSort={handleSort}
-        onFilter={handleFilter}
         expandable={true}
         renderExpandedContent={renderExpandedContent}
         getExpandedRowClassName={() => 'bg-gray-850'}
-        onRowExpand={(fixtureId, isExpanded) => {
+        onRowExpand={useCallback((fixtureId: string | number, isExpanded: boolean, item?: any) => {
           if (isExpanded) {
             setExpandedFixtureId(fixtureId.toString());
-          } else if (expandedFixtureId === fixtureId.toString()) {
+            setCurrentFixtureData(item); // Store the fixture data for lineups/injuries
+          } else {
             setExpandedFixtureId(null);
+            setCurrentFixtureData(null);
           }
-        }}
+        }, [])}
+        apiEndpoint="/api/fixtures"
+        currentPage={currentPage}
+        onPageChange={handlePageChange}
       />
-
-      {/* Pagination Controls */}
-      {pagination.totalPages > 1 && (
-        <div className="flex justify-center items-center py-2 gap-2">
-          <button
-            onClick={() => handlePageChange(pagination.currentPage - 1)}
-            disabled={!pagination.hasPrev}
-            className="px-3 py-1 bg-gray-800 border border-gray-600 text-white hover:bg-gray-700 disabled:bg-black disabled:text-gray-500 disabled:border-gray-700 disabled:cursor-not-allowed text-xs font-mono transition-colors"
-          >
-            PREVIOUS
-          </button>
-
-          <div className="flex gap-1">
-            {(() => {
-              const maxVisiblePages = 5;
-              const totalPages = pagination.totalPages;
-              const currentPage = pagination.currentPage;
-
-              // Calculate the range of pages to show
-              let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
-              let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
-
-              // Adjust startPage if we're at the end
-              if (endPage - startPage + 1 < maxVisiblePages) {
-                startPage = Math.max(1, endPage - maxVisiblePages + 1);
-              }
-
-              return Array.from({ length: endPage - startPage + 1 }, (_, i) => {
-                const pageNum = startPage + i;
-                const isActive = pageNum === currentPage;
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => handlePageChange(pageNum)}
-                    className={`px-2 py-1 border text-xs font-mono transition-colors ${
-                      isActive
-                        ? 'border-blue-400 bg-blue-900/50 text-blue-400'
-                        : 'border-gray-600 bg-gray-800 text-white hover:bg-gray-700'
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                );
-              });
-            })()}
-          </div>
-
-          <button
-            onClick={() => handlePageChange(pagination.currentPage + 1)}
-            disabled={!pagination.hasNext}
-            className="px-3 py-1 bg-gray-800 border border-gray-600 text-white hover:bg-gray-700 disabled:bg-black disabled:text-gray-500 disabled:border-gray-700 disabled:cursor-not-allowed text-xs font-mono transition-colors"
-          >
-            NEXT
-          </button>
-        </div>
-      )}
 
       {/* Edit Modal */}
       {editingFixture && (

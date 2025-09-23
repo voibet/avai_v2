@@ -39,7 +39,7 @@ interface ApiFootballLeague {
   }>;
 }
 
-async function getAvailableLeagues(request: Request) {
+async function getAvailableLeagues(_request: Request) {
   const apiKey = process.env.API_KEY;
   const apiBaseUrl = process.env.API_BASE_URL;
 

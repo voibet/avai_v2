@@ -1,6 +1,7 @@
 import pool from './db';
 import { NextResponse } from 'next/server';
 
+
 export interface QueryResult<T = any> {
   rows: T[];
   rowCount: number;
@@ -56,22 +57,6 @@ export async function executeTransaction<T>(
 }
 
 /**
- * Standard error response for API routes
- */
-export function createErrorResponse(
-  message: string,
-  status: number = 500,
-  details?: any
-) {
-  console.error('API Error:', message, details);
-  return NextResponse.json(
-    { error: message, ...(details && { details }) },
-    { status }
-  );
-}
-
-
-/**
  * Wrap API route handlers with consistent error handling
  */
 export function withErrorHandler<T extends any[]>(
@@ -82,7 +67,11 @@ export function withErrorHandler<T extends any[]>(
       return await handler(...args);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'An unexpected error occurred';
-      return createErrorResponse(message);
+      console.error('API Error:', message);
+      return NextResponse.json(
+        { error: message },
+        { status: 500 }
+      );
     }
   };
 }

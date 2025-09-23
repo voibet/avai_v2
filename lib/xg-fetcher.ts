@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { executeQuery, executeTransaction } from './db-utils';
+import { executeQuery } from './db-utils';
 import { Fixture } from '../types/database';
 
 interface XGData {
@@ -334,7 +334,7 @@ export class XGFetcher {
     }
 
     // Process each source group efficiently
-    for (const [sourceUrl, sourceFixtures] of Array.from(fixturesBySource.entries())) {
+    for (const [_sourceUrl, sourceFixtures] of Array.from(fixturesBySource.entries())) {
       for (const fixture of sourceFixtures) {
         try {
           console.log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name} (Season: ${fixture.season}, Round: ${fixture.round})`);

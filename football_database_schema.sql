@@ -10,8 +10,8 @@
 -- - football_fixtures (main fixture data with xG)
 -- - football_leagues (league information)
 -- - football_teams (team information)
--- - football_odds (bookmaker odds with history)
--- - football_predictions (ML predictions and adjustments)
+-- - football_odds (bookmaker and predicted odds with history)
+-- - football_predictions (ML goals predictions and adjustments)
 -- - football_stats (team statistics)
 --
 
@@ -223,8 +223,6 @@ CREATE TABLE football_stats (
     -- Team_Elo_Rating_Home                 INTEGER,
     -- Team_Elo_Rating_Away                 INTEGER,
     -- League_Elo_Rating                    INTEGER,
-    -- Market_Expected_Goals_Home           INTEGER,
-    -- Market_Expected_Goals_Away           INTEGER,
     -- Rolling_Market_xG_Home               INTEGER,
     -- Rolling_Market_xGa_Home              INTEGER,
     -- Rolling_Market_xG_Away               INTEGER,  
@@ -258,6 +256,11 @@ CREATE INDEX IF NOT EXISTS idx_football_predictions_created_at ON football_predi
 
 -- football_stats indexes
 CREATE INDEX IF NOT EXISTS idx_football_stats_created_at ON football_stats (created_at);
+
+-- Indexes for JSONB fields
+CREATE INDEX IF NOT EXISTS idx_football_odds_odds_jsonb ON football_odds USING GIN (odds);
+CREATE INDEX IF NOT EXISTS idx_football_leagues_seasons_jsonb ON football_leagues USING GIN (seasons);
+
 
 -- ============================================
 -- TRIGGERS FOR AUTOMATIC TIMESTAMPS
