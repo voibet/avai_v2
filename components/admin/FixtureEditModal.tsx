@@ -51,7 +51,7 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate }: Fixture
   }, [fixture])
 
   const handleInputChange = (field: string, value: any) => {
-    setFormData(prev => ({
+    setFormData((prev: any) => ({
       ...prev,
       [field]: value
     }))

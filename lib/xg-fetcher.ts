@@ -139,6 +139,7 @@ export class XGFetcher {
       const fixtures = await this.getFixturesNeedingXG(leagueId);
       
       if (fixtures.length === 0) {
+        console.log(`Found ${fixtures.length} fixtures needing XG data`);
         return {
           success: true,
           message: 'No fixtures found that need XG data',
@@ -318,7 +319,10 @@ export class XGFetcher {
       const xgSourceConfig = leagueConfig.xgSource[seasonStr];
       
       if (xgSourceConfig && xgSourceConfig.rounds) {
-        const roundConfig = xgSourceConfig.rounds[fixture.round || ''] || xgSourceConfig.rounds['ALL'];
+        // Extract base round name by cutting off everything after " - "
+        const baseRoundName = fixture.round ? fixture.round.split(' - ')[0] : '';
+        const roundConfig = xgSourceConfig.rounds[baseRoundName] || xgSourceConfig.rounds['ALL'];
+        
         if (roundConfig) {
           const sourceKey = roundConfig.url;
           if (!fixturesBySource.has(sourceKey)) {
@@ -355,30 +359,38 @@ export class XGFetcher {
   }
 
   private async fetchXGForFixture(fixture: Fixture, leagueConfig: any, allFixturesForSource?: Fixture[]): Promise<XGData | null> {
-    const seasonStr = fixture.season.toString();
-    
-    const xgSourceConfig = leagueConfig.xgSource[seasonStr];
+    try {
+      const seasonStr = fixture.season.toString();
+      const xgSourceConfig = leagueConfig.xgSource[seasonStr];
 
-    if (!xgSourceConfig || !xgSourceConfig.rounds) {
+      if (!xgSourceConfig || !xgSourceConfig.rounds) {
+        return null;
+      }
+
+      // Extract base round name by cutting off everything after " - "
+      const baseRoundName = fixture.round ? fixture.round.split(' - ')[0] : '';
+      
+      // Check if fixture's base round or ALL rounds have XG source
+      const roundConfig = xgSourceConfig.rounds[baseRoundName] || xgSourceConfig.rounds['ALL'];
+      
+      if (!roundConfig) {
+        return null;
+      }
+
+      const xgSourceUrl = roundConfig.url;
+
+      if (xgSourceUrl === 'NATIVE') {
+        return await this.fetchNativeXG(fixture);
+      } else if (xgSourceUrl.includes('-')) {
+        // Sofascore format: tournamentId-seasonId
+        return await this.fetchSofascoreXG(fixture, xgSourceUrl, allFixturesForSource);
+      } else {
+        // Flashlive format: tournament_stage_id
+        return await this.fetchFlashliveXG(fixture, xgSourceUrl, allFixturesForSource);
+      }
+    } catch (error) {
+      console.error(`Error fetching XG for fixture ${fixture.id}:`, error);
       return null;
-    }
-
-    // Check if fixture's round or ALL rounds have XG source
-    const roundConfig = xgSourceConfig.rounds[fixture.round || ''] || xgSourceConfig.rounds['ALL'];
-    if (!roundConfig) {
-      return null;
-    }
-
-    const xgSourceUrl = roundConfig.url;
-
-    if (xgSourceUrl === 'NATIVE') {
-      return await this.fetchNativeXG(fixture);
-    } else if (xgSourceUrl.includes('-')) {
-      // Sofascore format: tournamentId-seasonId
-      return await this.fetchSofascoreXG(fixture, xgSourceUrl, allFixturesForSource);
-    } else {
-      // Flashlive format: tournament_stage_id
-      return await this.fetchFlashliveXG(fixture, xgSourceUrl, allFixturesForSource);
     }
   }
 
@@ -655,19 +667,18 @@ export class XGFetcher {
       // Find matching fixture using mappings + fuzzy matching
       const matchingEvent = await this.findMatchingFlashliveFixture(fixture, allEvents, teamMappings);
       if (!matchingEvent) {
-        console.log(`No matching Flashlive fixture found for fixture ${fixture.id}`);
         return null;
       }
 
       // Get statistics for the matched event
-      console.log(`📊 Calling Flashlive statistics API for event ${matchingEvent.EVENT_ID}...`);
       const statsResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/events/statistics', {
         headers: {
           'x-rapidapi-key': this.rapidApiKey,
           'x-rapidapi-host': 'flashlive-sports.p.rapidapi.com'
         },
         params: {
-          id: matchingEvent.EVENT_ID
+          event_id: matchingEvent.EVENT_ID,
+          locale: 'en_INT'
         },
         timeout: 30000 // 30 second timeout
       });
@@ -679,7 +690,6 @@ export class XGFetcher {
       
       // Check if DATA exists and is iterable
       if (!statsData.DATA || !Array.isArray(statsData.DATA)) {
-        console.log(`❌ Flashlive DATA not found or not an array`);
         return null;
       }
       

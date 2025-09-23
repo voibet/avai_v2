@@ -30,7 +30,7 @@ export default function ProgressPanel({ league, current, total, message }: Progr
         ></div>
       </div>
       <p className="text-gray-400 font-mono text-xs mt-1">
-        {current} / {total} leagues processed
+        {current} / {total} processed
       </p>
     </div>
   );

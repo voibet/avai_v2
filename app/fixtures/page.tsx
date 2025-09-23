@@ -138,7 +138,7 @@ export default function FixturesPage() {
     {
       key: 'score',
       header: 'SCORE',
-      span: 2,
+      span: 1,
       sortType: 'custom',
       customSort: (a, b, direction) => {
         const aHome = a.goals_home || 0;
@@ -174,7 +174,7 @@ export default function FixturesPage() {
     {
       key: 'xg',
       header: 'XG',
-      span: 2,
+      span: 1,
       sortType: 'custom',
       customSort: (a, b, direction) => {
         const aXG = (parseFloat(a.xg_home?.toString() || '0') + parseFloat(a.xg_away?.toString() || '0')) || 0;
@@ -216,7 +216,7 @@ export default function FixturesPage() {
     {
       key: 'date',
       header: 'TIME',
-      span: 1,
+      span: 2,
       sortType: 'date',
       sortKey: 'date',
       render: (fixture) => (
@@ -537,7 +537,7 @@ export default function FixturesPage() {
 
             {/* Injuries */}
             <div className="mt-2">
-              <h4 className="text-sm font-bold text-red-400 font-mono mb-2">INJURIES AND SUSPENSIONS</h4>
+              <h4 className="text-sm font-bold text-red-400 font-mono mb-2">OUT</h4>
               {homeInjuriesLoading ? (
                 <div className="text-center py-1">
                   <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
@@ -623,7 +623,7 @@ export default function FixturesPage() {
 
             {/* Injuries */}
             <div className="mt-2">
-              <h4 className="text-sm font-bold text-red-400 font-mono mb-2">INJURIES</h4>
+              <h4 className="text-sm font-bold text-red-400 font-mono mb-2">OUT</h4>
               {awayInjuriesLoading ? (
                 <div className="text-center py-1">
                   <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>

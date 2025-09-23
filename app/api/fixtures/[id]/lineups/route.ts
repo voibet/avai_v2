@@ -92,14 +92,14 @@ async function getFixtureLineups(request: Request, { params }: { params: { id: s
 
       acc[teamKey] = {
         formation: lineup.formation,
-        startXI: lineup.startXI.map(player => ({
+        startXI: (lineup.startXI || []).map(player => ({
           id: player.player.id,
           name: player.player.name,
           number: player.player.number,
           position: player.player.pos,
           grid: player.player.grid
         })),
-        substitutes: lineup.substitutes.map(player => ({
+        substitutes: (lineup.substitutes || []).map(player => ({
           id: player.player.id,
           name: player.player.name,
           number: player.player.number,
