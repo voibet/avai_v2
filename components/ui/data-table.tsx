@@ -31,13 +31,13 @@ export interface DataTableProps<T> {
   onSelectionChange?: (selectedIds: Set<string | number>) => void;
   onSelectAll?: () => void;
   onClearSelection?: () => void;
-  // Filtering support - now URL-based
+  // Filtering support
   filterable?: boolean;
   currentFilters?: Record<string, Set<string>>; // Current filter state from URL
   onFilterChange?: (columnKey: string, value: string | null) => void; // Callback to update URL
   onClearAllFilters?: () => void; // Callback to clear all filters in URL
   filterValueApi?: (field: string) => string | Promise<string[]>;
-  // Sorting support - now URL-based
+  // Sorting support 
   currentSort?: { key: string; direction: 'asc' | 'desc' } | null; // Current sort state from URL
   onSortChange?: (sortKey: string, direction: 'asc' | 'desc') => void; // Callback to update URL
   // Actions
@@ -47,7 +47,7 @@ export interface DataTableProps<T> {
   renderExpandedContent?: (item: T, index?: number) => React.ReactNode;
   getExpandedRowClassName?: (item: T) => string;
   onRowExpand?: (itemId: string | number, isExpanded: boolean, item?: T) => void;
-  // Data source - either client-side data or server-side API
+  // Data source
   data?: T[]; // Client-side data (optional, overrides server-side fetching)
   apiEndpoint?: string; // Server-side API endpoint (optional if data provided)
   currentPage?: number; // Required if using server-side
@@ -81,13 +81,13 @@ export default function DataTable<T>({
   currentSort = null,
   onSortChange,
   filterValueApi,
-  // Data source - either client-side or server-side
+  // Data source
   data,
   apiEndpoint,
   currentPage = 1,
   onPageChange,
 }: DataTableProps<T>) {
-  // Data state - either server-side or client-side
+  // Data state
   const [serverData, setServerData] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -349,7 +349,7 @@ export default function DataTable<T>({
 
   const toggleFilterValue = (columnKey: string, value: string) => {
     if (!onFilterChange) return;
-    
+
     const columnFilters = currentFilters[columnKey] || new Set<string>();
 
     if (columnFilters.has(value)) {
@@ -359,11 +359,13 @@ export default function DataTable<T>({
       // Replace any existing value with the new one (single value per column)
       onFilterChange(columnKey, value);
     }
+    setShowFilterDropdown(null); // Close the dropdown after selecting/clearing
   };
 
   const clearColumnFilter = (columnKey: string) => {
     if (onFilterChange) {
       onFilterChange(columnKey, null);
+      setShowFilterDropdown(null); // Close the dropdown after clearing
     }
   };
 
@@ -545,7 +547,10 @@ export default function DataTable<T>({
                       <span className="text-xs font-mono text-white">Filter {column.header}</span>
                       {hasFilter && (
                         <button
-                          onClick={() => clearColumnFilter(column.key)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearColumnFilter(column.key);
+                          }}
                           className="text-xs text-red-400 hover:text-red-300 font-mono"
                           style={{ pointerEvents: 'auto' }}
                         >
