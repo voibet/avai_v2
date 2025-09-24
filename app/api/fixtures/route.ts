@@ -18,7 +18,7 @@ const FIXTURES_BASE_QUERY = `
     score_extratime_home, score_extratime_away,
     score_penalty_home, score_penalty_away,
     league_id, league_name, league_country, season, round,
-    created_at, updated_at
+    updated_at
   FROM football_fixtures
 `;
 

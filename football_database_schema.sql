@@ -114,7 +114,6 @@ CREATE TABLE football_fixtures (
     league_country          VARCHAR(100),
     season                  INTEGER,
     round                   VARCHAR(50),
-    created_at              TIMESTAMP DEFAULT NOW(),
     updated_at              TIMESTAMP DEFAULT NOW(),
     
     -- Foreign Keys

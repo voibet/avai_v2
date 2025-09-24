@@ -43,7 +43,6 @@ export interface Fixture {
   league_country?: string;
   season: number;
   round?: string;
-  created_at: string;
   updated_at: string;
 }
 
