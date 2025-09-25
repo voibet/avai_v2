@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withErrorHandler } from '../../../lib/db-utils';
-import { createTableApiHandler } from '../../../lib/server-table-utils';
+import { parseTableParams, executeTableQuery } from '../../../lib/server-table-utils';
 import { Fixture } from '../../../types/database';
 
 
@@ -34,13 +34,60 @@ const COLUMN_MAPPING = {
 // Searchable columns
 const SEARCH_COLUMNS = ['home_team_name', 'away_team_name', 'league_name', 'venue_name', 'referee'];
 
-// Create server-side handler
-const fixturesHandler = createTableApiHandler<Fixture>(
-  FIXTURES_BASE_QUERY, COLUMN_MAPPING, { column: 'date', direction: 'desc' }, SEARCH_COLUMNS
-);
-
+// Custom handler to support date filters
 async function getFixtures(request: Request) {
-  const result = await fixturesHandler(request);
+  const url = new URL(request.url);
+  const params = parseTableParams(url.searchParams);
+  
+  // Add search columns
+  params.searchColumns = SEARCH_COLUMNS;
+  
+  // Handle custom date filter
+  const dateFilter = url.searchParams.get('date');
+  if (dateFilter) {
+    const now = new Date();
+    let startDate: Date | undefined;
+    let endDate: Date | undefined;
+    
+    if (dateFilter === 'yesterday') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    } else if (dateFilter === 'today') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    } else if (dateFilter === 'tomorrow') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2);
+    } else if (dateFilter === 'last_7_days') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    } else if (dateFilter === 'next_7_days') {
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+    }
+    
+    if (startDate && endDate) {
+      // Add date range filter to params
+      params.filters.push({
+        column: 'date',
+        value: startDate.toISOString(),
+        operator: 'gte'
+      });
+      params.filters.push({
+        column: 'date',
+        value: endDate.toISOString(),
+        operator: 'lt'
+      });
+    }
+  }
+  
+  const result = await executeTableQuery<Fixture>(
+    FIXTURES_BASE_QUERY,
+    params,
+    COLUMN_MAPPING,
+    { column: 'date', direction: 'desc' }
+  );
+  
   return NextResponse.json(result);
 }
 

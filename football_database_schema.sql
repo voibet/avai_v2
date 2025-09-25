@@ -129,50 +129,25 @@ CREATE TABLE football_fixtures (
 -- Odds
 CREATE TABLE IF NOT EXISTS football_odds (
   fixture_id   BIGINT       NOT NULL,
+  bookie_id    BIGINT       NOT NULL,
   bookie       VARCHAR(100) NOT NULL,
 
-  -- JSONB array of odds snapshots with complete historical data
-  -- Format: [
-  --   {
-  --     "t": 1758213041,          // timestamp (unix timestamp)
-  --     "lines": {
-  --       "ah": [-0.25, 0, 0.25], // Asian handicap lines
-  --       "ou": [2.0, 2.25, 2.5]  // Over/under goals lines
-  --     },
-  --     "x12": [165, 395, 480],     // [H, D, A] prices in basis points (1.65->165)
-  --     "ah_h": [185, 145, 120],    // Asian handicap home prices (aligns with lines.ah by index)
-  --     "ah_a": [185, 290, 530],    // Asian handicap away prices (aligns with lines.ah by index)
-  --     "ou_o": [180, 190, 200],    // Over prices (aligns with lines.ou by index)
-  --     "ou_u": [200, 190, 180]     // Under prices (aligns with lines.ou by index)
-  --   },
-  --   {
-  --     "t": 1758216120,            // Odds updated and lines changed
-  --     "lines": {
-  --       "ah": [-0.5, -0.25, 0, 0.25], // Updated Asian handicap lines
-  --       "ou": [2.0, 2.25, 2.5]       // Updated Over/under goals lines
-  --     },
-  --     "x12": [164, 400, 485],      // Updated [H, D, A] prices
-  --     "ah_h": [172, 183, 150, 118], // Updated Asian handicap home prices
-  --     "ah_a": [228, 187, 285, 540], // Updated Asian handicap away prices
-  --     "ou_o": [179, 188, 202],      // Updated Over prices
-  --     "ou_u": [201, 192, 178]       // Updated Under prices
-  --   }
-  -- ]
-  --
-  -- Field Explanations:
-  -- - t: Unix timestamp when these odds were recorded
-  -- - lines.ah: Array of Asian handicap lines (handicap values)
-  -- - lines.ou: Array of over/under goals lines (goal totals)
-  -- - x12: 1X2 (match outcome) prices in basis points (divide by 100 for decimal odds)
-  -- - ah_h: Asian handicap prices for home team (indices match lines.ah)
-  -- - ah_a: Asian handicap prices for away team (indices match lines.ah)
-  -- - ou_o: Over prices (indices match lines.ou)
-  -- - ou_u: Under prices (indices match lines.ou)
-  --
   -- Price Format: All odds are stored in basis points (e.g., 165 = 1.65 decimal odds)
-  odds         JSONB        NOT NULL,
-  -- scalar mirror for fast filtering/sorting without peeking into JSON
-  latest_t     BIGINT       NOT NULL,
+  -- JSONB array of odds snapshots with complete historical data
+  odds_x12     JSONB        NULLABLE,
+  -- [ { "t": 1758213041, "x12": [165,395,480] }, { "t": 1758213819, "x12": [169,390,460] }, ... ]
+  odds_ah      JSONB        NULLABLE,
+  -- [ { "t": 1758213041, "ah_h": [185, 145, 120], "ah_a": [185, 290, 530] }, ... ]
+  odds_ou      JSONB        NULLABLE,
+  -- [ { "t": 1758213041, "ou_o": [180, 190, 200], "ou_u": [200, 190, 180] }, ... ]
+  lines        JSONB        NULLABLE,
+  -- [ { "t": 1758213041, "ah": [-0.25, 0, 0.25], "ou": [2.0, 2.25, 2.5] }, ... ]
+  ids          JSONB        NULLABLE,
+  -- [ { "t": 1758213041, "line_id": 346756, "line_ids": { "x12": "554785", "ah": ["523624", "316974", "964878"], "ou": ["316447", "464879", "649743"] } }, ... ]
+  max_stakes   JSONB        NULLABLE,
+  -- [ { "t": 1758213041, "max_stake_x12": [500, 500, 500], "max_stake_ah": { "h": [300, 350, 400], "a": [300, 350, 400] }, "max_stake_ou": { "o": [250, 260, 270], "u": [250, 260, 270] } }, ... ]
+  latest_t     JSONB        NULLABLE,  
+  -- { "x12_ts": 1758213041, "ah_ts": 1758213041, "ou_ts": 1758213041, "ids_ts": 1758213041, "stakes_ts": 1758213041, "lines_ts": 1758213041 },
 
   decimals     INTEGER      NOT NULL DEFAULT 2,
   created_at   TIMESTAMP    NOT NULL DEFAULT now(),
@@ -181,9 +156,27 @@ CREATE TABLE IF NOT EXISTS football_odds (
   PRIMARY KEY (fixture_id, bookie),
   FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE,
 
-  -- sanity checks
-  CONSTRAINT chk_odds_is_array CHECK (jsonb_typeof(odds) = 'array')
+  -- sanity checks: ensure arrays
+  CONSTRAINT chk_odds_x12_is_array   CHECK (jsonb_typeof(odds_x12)   = 'array'),
+  CONSTRAINT chk_odds_ah_is_array    CHECK (jsonb_typeof(odds_ah)    = 'array'),
+  CONSTRAINT chk_odds_ou_is_array    CHECK (jsonb_typeof(odds_ou)    = 'array'),
+  CONSTRAINT chk_lines_is_array      CHECK (jsonb_typeof(lines)      = 'array'),
+  CONSTRAINT chk_ids_is_array        CHECK (jsonb_typeof(ids)        = 'array'),
+  CONSTRAINT chk_max_stakes_is_array CHECK (jsonb_typeof(max_stakes) = 'array'),
+  CONSTRAINT chk_latest_t_is_object  CHECK (jsonb_typeof(latest_t)   = 'object')
 );
+
+-- Helpful indexes
+CREATE INDEX IF NOT EXISTS idx_odds_fixture ON football_odds (fixture_id);
+
+-- updated_at auto-update
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_set_updated_at ON football_odds;
+CREATE TRIGGER trg_set_updated_at
+BEFORE UPDATE ON football_odds
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
 -- ML Predictions and Manual Adjustments
@@ -244,11 +237,14 @@ CREATE INDEX IF NOT EXISTS idx_football_fixtures_timestamp ON football_fixtures 
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_season ON football_fixtures (season);
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_status ON football_fixtures (status_short);
 
--- football_odds indexes
-CREATE INDEX IF NOT EXISTS idx_odds_latest      ON football_odds (fixture_id, bookie, latest_t DESC);
-CREATE INDEX IF NOT EXISTS idx_odds_latest_t    ON football_odds (latest_t DESC);
-CREATE INDEX IF NOT EXISTS idx_odds_fixture     ON football_odds (fixture_id);
-CREATE INDEX IF NOT EXISTS idx_odds_bookie      ON football_odds (bookie);
+-- Primary composite index for your main query pattern
+CREATE INDEX CONCURRENTLY idx_football_odds_fixture_bookie ON football_odds (fixture_id, bookie);
+
+-- Index for latest_t queries (if you ever filter by timestamp)
+CREATE INDEX CONCURRENTLY idx_football_odds_latest_t ON football_odds (latest_t);
+
+-- Index for bookie_id lookups (if used)
+CREATE INDEX CONCURRENTLY idx_football_odds_bookie_id ON football_odds (bookie_id);
 
 -- football_predictions indexes
 CREATE INDEX IF NOT EXISTS idx_football_predictions_created_at ON football_predictions (created_at);

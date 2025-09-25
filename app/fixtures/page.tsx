@@ -5,6 +5,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { useFixtureLineups, useTeamInjuries } from '../../lib/hooks/use-football-data'
 import DataTable, { Column } from '../../components/ui/data-table'
 import FixtureEditModal from '../../components/admin/FixtureEditModal'
+import { FixtureOdds } from '../../components/FixtureOdds'
 
 
 export default function FixturesPage() {
@@ -20,7 +21,7 @@ export default function FixturesPage() {
     const filters: Record<string, Set<string>> = {}
     
     // Standard filter parameters
-    const filterParams = ['league_name', 'home_team_name', 'away_team_name', 'status_short', 'season']
+    const filterParams = ['league_name', 'home_team_name', 'away_team_name', 'status_short', 'season', 'date']
     filterParams.forEach(param => {
       const value = searchParams.get(param)
       if (value) {
@@ -225,7 +226,7 @@ export default function FixturesPage() {
       key: 'date',
       header: 'TIME',
       span: 2,
-      filterable: false, // Time - disable filtering
+      filterable: true, // Enable filtering for Time column
       sortType: 'date',
       sortKey: 'date',
       render: (fixture) => (
@@ -357,22 +358,19 @@ export default function FixturesPage() {
     const { home, away } = lineupsData;
 
     return (
-      <div className="px-2 py-4">
+      <div className="px-2 py-2">
         {/* Team Headers */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-2">
           <div className="flex-1 text-center">
-            <h3 className="text-lg font-bold text-gray-200 font-mono">
+            <h3 className="text-base font-bold text-gray-200 font-mono">
               {fixture.home_team_name}
-              {home.formation && <span className="text-sm text-gray-400 ml-2">({home.formation})</span>}
+              {home.formation && <span className="text-xs text-gray-400 ml-2">({home.formation})</span>}
             </h3>
           </div>
-          <div className="mx-4">
-            <span className="text-sm text-gray-500 font-mono">STARTING XI</span>
-          </div>
           <div className="flex-1 text-center">
-            <h3 className="text-lg font-bold text-gray-200 font-mono">
+            <h3 className="text-base font-bold text-gray-200 font-mono">
               {fixture.away_team_name}
-              {away.formation && <span className="text-sm text-gray-400 ml-2">({away.formation})</span>}
+              {away.formation && <span className="text-xs text-gray-400 ml-2">({away.formation})</span>}
             </h3>
           </div>
         </div>
@@ -382,9 +380,9 @@ export default function FixturesPage() {
           {/* Home Team Lineup */}
           <div className="flex-1">
             {home.startXI.length > 0 ? (
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {/* Header */}
-                <div className="grid grid-cols-9 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                <div className="grid grid-cols-9 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
                   <div className="col-span-1 text-gray-400 text-center">#</div>
                   <div className="col-span-4 text-gray-400">PLAYER</div>
                   <div className="col-span-2 text-gray-400 text-center">POS</div>
@@ -393,7 +391,7 @@ export default function FixturesPage() {
 
                 {/* Players */}
                 {home.startXI.map((player) => (
-                  <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-600 text-xs font-mono">
+                  <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
                     <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
                     <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
@@ -402,16 +400,16 @@ export default function FixturesPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500 text-sm font-mono">No starting lineup available</div>
+              <div className="text-center py-0 text-gray-500 text-sm font-mono">No starting lineup available</div>
             )}
 
             {/* Substitutes */}
             {home.substitutes.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-sm font-bold text-gray-400 font-mono mb-2">SUBSTITUTES</h4>
-                <div className="space-y-1">
+              <div className="mt-2">
+                <h4 className="text-xs font-bold text-gray-400 font-mono mb-1">SUBSTITUTES</h4>
+                <div className="space-y-0.5">
                   {home.substitutes.map((player) => (
-                    <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-700 text-xs font-mono">
+                    <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-700 text-xs font-mono">
                       <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
                       <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
                       <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
@@ -423,8 +421,8 @@ export default function FixturesPage() {
             )}
 
             {/* Injuries */}
-            <div className="mt-2">
-              <h4 className="text-sm font-bold text-red-400 font-mono mb-2">OUT</h4>
+            <div className="mt-1">
+              <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
               {homeInjuriesLoading ? (
                 <div className="text-center py-1">
                   <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
@@ -435,15 +433,15 @@ export default function FixturesPage() {
                   <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
                 </div>
               ) : homeInjuriesData && homeInjuriesData.length > 0 ? (
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {/* Header */}
-                  <div className="grid grid-cols-10 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                  <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
                     <div className="col-span-4 text-gray-400">PLAYER</div>
                     <div className="col-span-3 text-gray-400 text-center">STATUS</div>
                     <div className="col-span-3 text-gray-400 text-center">REASON</div>
                   </div>
                   {homeInjuriesData.map((injury) => (
-                    <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-1 border-b border-gray-600 text-xs font-mono">
+                    <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
                       <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
                       <div className={`col-span-3 text-center font-bold ${injury.isThisMatch ? 'text-red-400' : 'text-orange-400'}`}>
                         {formatInjuryTiming(injury)}
@@ -468,9 +466,9 @@ export default function FixturesPage() {
           {/* Away Team Lineup */}
           <div className="flex-1">
             {away.startXI.length > 0 ? (
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {/* Header */}
-                <div className="grid grid-cols-9 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                <div className="grid grid-cols-9 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
                   <div className="col-span-1 text-gray-400 text-center">#</div>
                   <div className="col-span-4 text-gray-400">PLAYER</div>
                   <div className="col-span-2 text-gray-400 text-center">POS</div>
@@ -479,7 +477,7 @@ export default function FixturesPage() {
 
                 {/* Players */}
                 {away.startXI.map((player) => (
-                  <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-600 text-xs font-mono">
+                  <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
                     <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
                     <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
@@ -488,16 +486,16 @@ export default function FixturesPage() {
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500 text-sm font-mono">No starting lineup available</div>
+              <div className="text-center py-0 text-gray-500 text-sm font-mono">No starting lineup available</div>
             )}
 
             {/* Substitutes */}
             {away.substitutes.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-sm font-bold text-gray-400 font-mono mb-2">SUBSTITUTES</h4>
-                <div className="space-y-1">
+              <div className="mt-2">
+                <h4 className="text-xs font-bold text-gray-400 font-mono mb-1">SUBSTITUTES</h4>
+                <div className="space-y-0.5">
                   {away.substitutes.map((player) => (
-                    <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-700 text-xs font-mono">
+                    <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-700 text-xs font-mono">
                       <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
                       <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
                       <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
@@ -509,8 +507,8 @@ export default function FixturesPage() {
             )}
 
             {/* Injuries */}
-            <div className="mt-2">
-              <h4 className="text-sm font-bold text-red-400 font-mono mb-2">OUT</h4>
+            <div className="mt-1">
+              <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
               {awayInjuriesLoading ? (
                 <div className="text-center py-1">
                   <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
@@ -521,15 +519,15 @@ export default function FixturesPage() {
                   <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
                 </div>
               ) : awayInjuriesData && awayInjuriesData.length > 0 ? (
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {/* Header */}
-                  <div className="grid grid-cols-10 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                  <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
                     <div className="col-span-4 text-gray-400">PLAYER</div>
                     <div className="col-span-3 text-gray-400 text-center">STATUS</div>
                     <div className="col-span-3 text-gray-400 text-center">REASON</div>
                   </div>
                   {awayInjuriesData.map((injury) => (
-                    <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-1 border-b border-gray-600 text-xs font-mono">
+                    <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
                       <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
                       <div className={`col-span-3 text-center font-bold ${injury.isThisMatch ? 'text-red-400' : 'text-orange-400'}`}>
                         {formatInjuryTiming(injury)}
@@ -551,6 +549,11 @@ export default function FixturesPage() {
       </div>
     );
   }, [lineupsLoading, lineupsError, lineupsData, homeInjuriesLoading, homeInjuriesError, homeInjuriesData, awayInjuriesLoading, awayInjuriesError, awayInjuriesData, formatInjuryTiming]);
+
+  const renderOddsSection = useCallback((fixture: any) => {
+    return <FixtureOdds fixtureId={fixture.id} />;
+  }, []);
+
   const renderExpandedContent = useCallback((fixture: any) => {
     const extendedData = [
       {
@@ -616,14 +619,6 @@ export default function FixturesPage() {
         away: '',
         info: fixture.status_long || '-',
         show: true
-      },
-      {
-        id: 'updated',
-        label: 'UPDATED',
-        home: '',
-        away: '',
-        info: fixture.updated_at ? new Date(fixture.updated_at).toLocaleString() : '-',
-        show: true
       }
     ].filter(item => item.show);
 
@@ -650,21 +645,28 @@ export default function FixturesPage() {
           ))}
         </div>
 
+        
+        {/* Odds Section */}
+        <div>
+          <div className="px-1 py-0">
+            {renderOddsSection(fixture)}
+          </div>
+        </div>
+
         {/* Lineups Section */}
         <div>
-          <div className="px-1 py-1">
+          <div className="px-0 py-0">
             {renderLineupsSection(fixture)}
           </div>
         </div>
       </div>
     );
-  }, [renderLineupsSection]);
+  }, [renderLineupsSection, renderOddsSection]);
 
   return (
-    <div className="space-y-1">
-      {/* Header */}
-
-      <DataTable
+    <div className="fixed inset-0 top-[57px] left-0 right-0 bottom-0 bg-black overflow-auto">
+      <div className="w-full px-4">
+        <DataTable
         title="FIXTURES"
         columns={fixturesColumns}
         getItemId={(fixture) => fixture.id}
@@ -691,16 +693,17 @@ export default function FixturesPage() {
         apiEndpoint="/api/fixtures"
         currentPage={currentPage}
         onPageChange={handlePageChange}
-      />
-
-      {/* Edit Modal */}
-      {editingFixture && (
-        <FixtureEditModal
-          fixture={editingFixture}
-          onClose={handleCloseEditModal}
-          onUpdate={handleFixtureUpdated}
         />
-      )}
+
+        {/* Edit Modal */}
+        {editingFixture && (
+          <FixtureEditModal
+            fixture={editingFixture}
+            onClose={handleCloseEditModal}
+            onUpdate={handleFixtureUpdated}
+          />
+        )}
+      </div>
     </div>
   )
 }

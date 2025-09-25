@@ -128,13 +128,22 @@ export default function DataTable<T>({
       }
       
       // Add filters
-      Object.entries(currentFilters).forEach((filterEntry, index) => {
+      let filterIndex = 0;
+      Object.entries(currentFilters).forEach((filterEntry) => {
         const [columnKey, filterValues] = filterEntry;
         if (filterValues.size > 0) {
           const value = Array.from(filterValues)[0];
-          searchParams.append(`filters[${index}][column]`, columnKey);
-          searchParams.append(`filters[${index}][value]`, value);
-          searchParams.append(`filters[${index}][operator]`, 'eq');
+          
+          // Handle date specially as a direct query parameter
+          if (columnKey === 'date') {
+            searchParams.append('date', value);
+          } else {
+            // Standard filter format for other columns
+            searchParams.append(`filters[${filterIndex}][column]`, columnKey);
+            searchParams.append(`filters[${filterIndex}][value]`, value);
+            searchParams.append(`filters[${filterIndex}][operator]`, 'eq');
+            filterIndex++;
+          }
         }
       });
       
@@ -282,6 +291,11 @@ export default function DataTable<T>({
   // Fetch filter values from API when needed
   const fetchFilterValues = async (column: Column<T>): Promise<string[]> => {
     const fieldKey = column.sortKey || column.key;
+
+    // Skip API fetching for date column since it uses custom predefined options
+    if (column.key === 'date') {
+      return ['yesterday', 'today', 'tomorrow', 'last_7_days', 'next_7_days'];
+    }
 
     if (!filterValueApi) {
       // Fallback to computing from current data
@@ -558,18 +572,56 @@ export default function DataTable<T>({
                         </button>
                       )}
                     </div>
-                    <input
-                      type="text"
-                      placeholder="Search..."
-                      value={filterSearchTerms[column.key] || ''}
-                      onChange={(e) => handleFilterSearchChange(column.key, e.target.value)}
-                      className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ pointerEvents: 'auto' }}
-                    />
+                    {/* Hide search input for date column since it has predefined options */}
+                    {column.key !== 'date' && (
+                      <input
+                        type="text"
+                        placeholder="Search..."
+                        value={filterSearchTerms[column.key] || ''}
+                        onChange={(e) => handleFilterSearchChange(column.key, e.target.value)}
+                        className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ pointerEvents: 'auto' }}
+                      />
+                    )}
                   </div>
                   <div className="max-h-48 overflow-y-auto">
                     {(() => {
+                      // Custom date filter options for date column
+                      if (column.key === 'date') {
+                        const dateOptions = [
+                          { value: 'yesterday', label: 'Yesterday' },
+                          { value: 'today', label: 'Today' },
+                          { value: 'tomorrow', label: 'Tomorrow' },
+                          { value: 'last_7_days', label: 'Last 7 days' },
+                          { value: 'next_7_days', label: 'Next 7 days' }
+                        ];
+
+                        return dateOptions.map((option) => {
+                          const isSelected = currentFilters[column.key]?.has(option.value) ?? false;
+                          return (
+                            <label
+                              key={option.value}
+                              className="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 cursor-pointer"
+                              style={{ pointerEvents: 'auto' }}
+                            >
+                              <input
+                                type="radio"
+                                name={`filter-${column.key}`}
+                                checked={isSelected}
+                                onChange={() => toggleFilterValue(column.key, option.value)}
+                                className="rounded-full border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-600"
+                                style={{ pointerEvents: 'auto' }}
+                              />
+                              <span className="text-xs font-mono text-gray-300 truncate">
+                                {option.label}
+                              </span>
+                            </label>
+                          );
+                        });
+                      }
+
+                      // Default behavior for other columns
                       const fieldKey = column.sortKey || column.key;
                       const values = apiFilterValues[fieldKey] || [];
                       const isLoading = loadingFilterValues.has(fieldKey);
@@ -651,7 +703,7 @@ export default function DataTable<T>({
 
             const RowContent = (
               <div
-                className={`grid ${expandable && selectable ? 'grid-cols-15' : expandable || selectable ? 'grid-cols-14' : 'grid-cols-13'} gap-1 py-1 border-b border-gray-600 text-xs font-mono ${rowClassName} ${expandable ? 'cursor-pointer hover:bg-gray-800' : ''}`}
+                className={`grid ${expandable && selectable ? 'grid-cols-15' : expandable || selectable ? 'grid-cols-14' : 'grid-cols-13'} gap-1 py-1 border-b border-gray-600 text-xs font-mono ${rowClassName} ${expandable ? 'cursor-pointer hover:bg-gray-800' : ''} ${expandable && isExpanded ? 'bg-gray-900' : ''}`}
                 onClick={expandable ? () => toggleRowExpansion(itemId, item) : undefined}
                 style={{ pointerEvents: expandable ? 'auto' : 'none' }}
               >
