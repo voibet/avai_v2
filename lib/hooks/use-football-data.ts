@@ -83,7 +83,50 @@ export function useFixtureOdds(fixtureId: string | null) {
       decimals: number;
       created_at: string;
       updated_at: string;
+      // Fair odds data (for PINNACLE_FAIR_ODDS bookmaker)
+      fair_odds_x12?: any;
+      fair_odds_ah?: any;
+      fair_odds_ou?: any;
+      latest_lines?: any;
+      // Payout data (bookmaker margin percentages)
+      payout_x12?: number;
+      payout_ah?: number[];  // Array of payout values, one per handicap line
+      payout_ou?: number[];  // Array of payout values, one per total line
     }>;
   }>(url);
 }
+
+// Hook for fetching fixture stats
+export function useFixtureStats(fixtureId: string | null) {
+  const url = fixtureId ? `/api/fixtures/${fixtureId}/stats` : null;
+  return useApi<{
+    stats: {
+      updated_at: string;
+      hours_since_last_match_home: number | null;
+      hours_since_last_match_away: number | null;
+      avg_goals_league: number | null;
+      elo_home: number | null;
+      elo_away: number | null;
+      league_elo: number | null;
+      home_advantage: number | null;
+      adjusted_rolling_xg_home: number | null;
+      adjusted_rolling_xga_home: number | null;
+      adjusted_rolling_xg_away: number | null;
+      adjusted_rolling_xga_away: number | null;
+      adjusted_rolling_market_xg_home: number | null;
+      adjusted_rolling_market_xga_home: number | null;
+      adjusted_rolling_market_xg_away: number | null;
+      adjusted_rolling_market_xga_away: number | null;
+      home_market_xg: number | null;
+      away_market_xg: number | null;
+      home_predicted_xg: number | null;
+      away_predicted_xg: number | null;
+      total_predicted_xg: number | null;
+      home_predicted_market_xg: number | null;
+      away_predicted_market_xg: number | null;
+      total_predicted_market_xg: number | null;
+    } | null;
+  }>(url);
+}
+
 

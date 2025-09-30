@@ -151,7 +151,35 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
 
   // Transform data to group by market type
   const transformedData = oddsData.odds.reduce((acc, bookmaker) => {
-    // Get the latest data from each array
+    // Handle fair odds bookmaker specially
+    if (bookmaker.bookie === 'PINNACLE_FAIR_ODDS') {
+      if (!acc[bookmaker.bookie]) {
+        acc[bookmaker.bookie] = {
+          bookie: bookmaker.bookie,
+          odds: {
+            x12: bookmaker.fair_odds_x12?.fair_x12 || null,
+            ah_h: bookmaker.fair_odds_ah?.fair_ah_h || null,
+            ah_a: bookmaker.fair_odds_ah?.fair_ah_a || null,
+            ou_o: bookmaker.fair_odds_ou?.fair_ou_o || null,
+            ou_u: bookmaker.fair_odds_ou?.fair_ou_u || null,
+            lines: bookmaker.latest_lines ? {
+              ah: bookmaker.latest_lines.ah,
+              ou: bookmaker.latest_lines.ou
+            } : null
+          },
+          decimals: bookmaker.decimals,
+          isFairOdds: true,
+          payout: {
+            x12: null,
+            ah: null,
+            ou: null
+          }
+        };
+      }
+      return acc;
+    }
+
+    // Get the latest data from each array for regular bookmakers
     const latestX12 = bookmaker.odds_x12?.[bookmaker.odds_x12.length - 1];
     const latestAH = bookmaker.odds_ah?.[bookmaker.odds_ah.length - 1];
     const latestOU = bookmaker.odds_ou?.[bookmaker.odds_ou.length - 1];
@@ -171,12 +199,18 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
             ou: latestLines.ou
           } : null
         },
-        decimals: bookmaker.decimals
+        decimals: bookmaker.decimals,
+        isFairOdds: false,
+        payout: {
+          x12: bookmaker.payout_x12 || null,
+          ah: bookmaker.payout_ah || null,  // An array of payout values per line
+          ou: bookmaker.payout_ou || null   // An array of payout values per line
+        }
       };
     }
 
     return acc;
-  }, {} as Record<string, { bookie: string; odds: any; decimals: number }>);
+  }, {} as Record<string, { bookie: string; odds: any; decimals: number; isFairOdds?: boolean; payout?: { x12: number | null; ah: number[] | null; ou: number[] | null } }>);
 
   const bookmakers = Object.values(transformedData);
 
@@ -198,7 +232,7 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                 <th className="px-2 py-1 text-left text-gray-300 border border-gray-600"></th>
                 {bookmakers.map(bm => (
                   <th key={bm.bookie} className="px-2 py-1 text-center text-gray-300 border border-gray-600 min-w-[60px]">
-                    {bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie}
                   </th>
                 ))}
               </tr>
@@ -228,6 +262,28 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                   })}
                 </tr>
               ))}
+              {/* Add payout row for X12 market */}
+              {marketName === '1X2' && (
+                <tr>
+                  <td className="px-2 py-1 text-white border border-gray-600 font-medium text-xs">
+                    PAYOUT
+                  </td>
+                  {bookmakers.map(bm => {
+                    const payoutValue = bm.payout?.x12;
+                    return (
+                      <td key={`${bm.bookie}-payout`} className="px-2 py-1 text-center border border-gray-600">
+                        {payoutValue ? (
+                          <span className="text-white text-xs font-mono">
+                            {(payoutValue * 100).toFixed(2)}%
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -249,15 +305,26 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
       if (linesData?.[linesKey]) {
         linesData[linesKey].forEach((line: number) => allLines.add(line));
       }
+      // Also check fair odds lines
+      if (bm.bookie === 'PINNACLE_FAIR_ODDS' && bm.latest_lines?.[linesKey]) {
+        bm.latest_lines[linesKey].forEach((line: number) => allLines.add(line));
+      }
     });
     const sortedLines = Array.from(allLines).sort((a, b) => a - b);
 
     // Filter out lines that have no odds from any bookmaker
     const linesWithOdds = sortedLines.filter(line =>
       bookmakers.some(bm => {
-        const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
-        return lineIndex !== undefined && lineIndex >= 0 &&
-               (bm.odds[side1.oddsKey]?.[lineIndex] || bm.odds[side2.oddsKey]?.[lineIndex]);
+        if (bm.isFairOdds) {
+          // For fair odds, check if the odds array exists and has data at this line index
+          const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
+          return lineIndex !== undefined && lineIndex >= 0 &&
+                 (bm.odds[side1.oddsKey]?.[lineIndex] || bm.odds[side2.oddsKey]?.[lineIndex]);
+        } else {
+          const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
+          return lineIndex !== undefined && lineIndex >= 0 &&
+                 (bm.odds[side1.oddsKey]?.[lineIndex] || bm.odds[side2.oddsKey]?.[lineIndex]);
+        }
       })
     );
 
@@ -268,9 +335,16 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
     // Helper to get odds for a specific line and side
     const getOdds = (bm: any, line: number, oddsKey: string) => {
       const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
-      return lineIndex !== undefined && lineIndex >= 0 && bm.odds[oddsKey]?.[lineIndex]
-        ? (bm.odds[oddsKey][lineIndex] / getDivisor(bm.decimals)).toString()
-        : null;
+      if (lineIndex !== undefined && lineIndex >= 0 && bm.odds[oddsKey]?.[lineIndex]) {
+        if (bm.isFairOdds) {
+          // Fair odds are already in decimal format, just return as string
+          return bm.odds[oddsKey][lineIndex]?.toString() || null;
+        } else {
+          // Regular odds are in basis points, convert to decimal
+          return (bm.odds[oddsKey][lineIndex] / getDivisor(bm.decimals)).toString();
+        }
+      }
+      return null;
     };
 
     return (
@@ -283,15 +357,18 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                 <th className="px-2 py-1 text-left text-bg-black border border-gray-600">{side1.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side1.label}-${bm.bookie}`} className="px-2 py-1 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie}
                   </th>
                 ))}
                 <th className="px-2 py-1 text-left text-bg-black border border-gray-600">{side2.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side2.label}-${bm.bookie}`} className="px-2 py-1 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie}
                   </th>
                 ))}
+                <th className="px-2 py-1 text-center text-white border border-gray-600 min-w-[60px]">
+                  PAYOUT
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -337,6 +414,33 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                       </td>
                     );
                   })}
+                  {/* Payout column on the far right */}
+                  <td className="px-2 py-1 text-center border border-gray-600">
+                    <span className="text-white text-xs font-mono">
+                      {(() => {
+                        // Find the line index (should be the same across all bookmakers for this line)
+                        const sampleBookmaker = bookmakers.find(bm => bm.odds.lines?.[linesKey]?.includes(line));
+                        if (!sampleBookmaker) return '-';
+
+                        const lineIndex = sampleBookmaker.odds.lines?.[linesKey]?.indexOf(line);
+                        if (lineIndex === undefined || lineIndex < 0) return '-';
+
+                        // Get payout values from all bookmakers for this line
+                        const payoutValues = bookmakers
+                          .map(bm => {
+                            const payoutArray = linesKey === 'ah' ? bm.payout?.ah : bm.payout?.ou;
+                            return payoutArray?.[lineIndex] || null;
+                          })
+                          .filter((p): p is number => p !== null);
+
+                        if (payoutValues.length === 0) return '-';
+
+                        // Calculate average payout across all bookmakers for this line
+                        const avgPayout = payoutValues.reduce((sum, p) => sum + p, 0) / payoutValues.length;
+                        return (avgPayout * 100).toFixed(1) + '%';
+                      })()}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -353,15 +457,39 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
       {renderSimpleTable('1X2', [
         {
           label: 'Home',
-          getValue: (odds: any, bm?: any) => odds.x12?.[0] ? (odds.x12[0] / getDivisor(bm?.decimals || 2)).toString() : null
+          getValue: (odds: any, bm?: any) => {
+            if (bm?.isFairOdds) {
+              // Fair odds are already in decimal format
+              return odds.x12?.[0]?.toString() || null;
+            } else {
+              // Regular odds are in basis points
+              return odds.x12?.[0] ? (odds.x12[0] / getDivisor(bm?.decimals || 2)).toString() : null;
+            }
+          }
         },
         {
           label: 'Draw',
-          getValue: (odds: any, bm?: any) => odds.x12?.[1] ? (odds.x12[1] / getDivisor(bm?.decimals || 2)).toString() : null
+          getValue: (odds: any, bm?: any) => {
+            if (bm?.isFairOdds) {
+              // Fair odds are already in decimal format
+              return odds.x12?.[1]?.toString() || null;
+            } else {
+              // Regular odds are in basis points
+              return odds.x12?.[1] ? (odds.x12[1] / getDivisor(bm?.decimals || 2)).toString() : null;
+            }
+          }
         },
         {
           label: 'Away',
-          getValue: (odds: any, bm?: any) => odds.x12?.[2] ? (odds.x12[2] / getDivisor(bm?.decimals || 2)).toString() : null
+          getValue: (odds: any, bm?: any) => {
+            if (bm?.isFairOdds) {
+              // Fair odds are already in decimal format
+              return odds.x12?.[2]?.toString() || null;
+            } else {
+              // Regular odds are in basis points
+              return odds.x12?.[2] ? (odds.x12[2] / getDivisor(bm?.decimals || 2)).toString() : null;
+            }
+          }
         }
       ])}
 

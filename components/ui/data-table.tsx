@@ -37,13 +37,14 @@ export interface DataTableProps<T> {
   onFilterChange?: (columnKey: string, value: string | null) => void; // Callback to update URL
   onClearAllFilters?: () => void; // Callback to clear all filters in URL
   filterValueApi?: (field: string) => string | Promise<string[]>;
-  // Sorting support 
+  // Sorting support
   currentSort?: { key: string; direction: 'asc' | 'desc' } | null; // Current sort state from URL
   onSortChange?: (sortKey: string, direction: 'asc' | 'desc') => void; // Callback to update URL
   // Actions
   actions?: React.ReactNode;
   // Expandable rows support
   expandable?: boolean;
+  singleExpansion?: boolean; // If true, only one row can be expanded at a time
   renderExpandedContent?: (item: T, index?: number) => React.ReactNode;
   getExpandedRowClassName?: (item: T) => string;
   onRowExpand?: (itemId: string | number, isExpanded: boolean, item?: T) => void;
@@ -71,6 +72,7 @@ export default function DataTable<T>({
   onClearSelection,
   actions,
   expandable = false,
+  singleExpansion = false,
   renderExpandedContent,
   getExpandedRowClassName,
   onRowExpand,
@@ -230,6 +232,10 @@ export default function DataTable<T>({
     if (wasExpanded) {
       newExpanded.delete(itemId);
     } else {
+      // If single expansion mode, clear all other expanded rows
+      if (singleExpansion) {
+        newExpanded.clear();
+      }
       newExpanded.add(itemId);
     }
     setExpandedRows(newExpanded);
@@ -469,7 +475,7 @@ export default function DataTable<T>({
           <span className="text-gray-400 text-xs font-mono">
             {isUsingClientData ? displayData.length : totalCount} total
             {currentSort ? ' (sorted)' : ''}
-            {Object.keys(currentFilters).length > 0 ? ` (${Object.keys(currentFilters).length} filtered)` : ''}
+            {Object.keys(currentFilters).length > 0 ? ` (${Object.keys(currentFilters).length} filters)` : ''}
           </span>
           {Object.keys(currentFilters).length > 0 && (
             <button

@@ -1,0 +1,446 @@
+[
+  {
+    "league_id": 318,
+    "name": "1. Division",
+    "country": "Cyprus",
+    "elo": 1500
+  },
+  {
+    "league_id": 120,
+    "name": "1. Division",
+    "country": "Denmark",
+    "elo": 1300
+  },
+  {
+    "league_id": 104,
+    "name": "1. Division",
+    "country": "Norway",
+    "elo": 1275
+  },
+  {
+    "league_id": 373,
+    "name": "1. SNL",
+    "country": "Slovenia",
+    "elo": 1425
+  },
+  {
+    "league_id": 79,
+    "name": "2. Bundesliga",
+    "country": "Germany",
+    "elo": 1475
+  },
+  {
+    "league_id": 80,
+    "name": "3. Liga",
+    "country": "Germany",
+    "elo": 1250
+  },
+  {
+    "league_id": 362,
+    "name": "A Lyga",
+    "country": "Lithuania",
+    "elo": 1200
+  },
+  {
+    "league_id": 188,
+    "name": "A-League",
+    "country": "Australia",
+    "elo": 1450
+  },
+  {
+    "league_id": 113,
+    "name": "Allsvenskan",
+    "country": "Sweden",
+    "elo": 1500
+  },
+  {
+    "league_id": 78,
+    "name": "Bundesliga",
+    "country": "Germany",
+    "elo": 1800
+  },
+  {
+    "league_id": 218,
+    "name": "Bundesliga",
+    "country": "Austria",
+    "elo": 1550
+  },
+  {
+    "league_id": 13,
+    "name": "CONMEBOL Libertadores",
+    "country": "World",
+    "elo": 1700
+  },
+  {
+    "league_id": 11,
+    "name": "CONMEBOL Sudamericana",
+    "country": "World",
+    "elo": 1575
+  },
+  {
+    "league_id": 208,
+    "name": "Challenge League",
+    "country": "Switzerland",
+    "elo": 1325
+  },
+  {
+    "league_id": 40,
+    "name": "Championship",
+    "country": "England",
+    "elo": 1575
+  },
+  {
+    "league_id": 180,
+    "name": "Championship",
+    "country": "Scotland",
+    "elo": 1500
+  },
+  {
+    "league_id": 345,
+    "name": "Czech Liga",
+    "country": "Czech-Republic",
+    "elo": 1500
+  },
+  {
+    "league_id": 89,
+    "name": "Eerste Divisie",
+    "country": "Netherlands",
+    "elo": 1350
+  },
+  {
+    "league_id": 106,
+    "name": "Ekstraklasa",
+    "country": "Poland",
+    "elo": 1475
+  },
+  {
+    "league_id": 103,
+    "name": "Eliteserien",
+    "country": "Norway",
+    "elo": 1475
+  },
+  {
+    "league_id": 88,
+    "name": "Eredivisie",
+    "country": "Netherlands",
+    "elo": 1525
+  },
+  {
+    "league_id": 15,
+    "name": "FIFA Club World Cup",
+    "country": "World",
+    "elo": 1800
+  },
+  {
+    "league_id": 358,
+    "name": "First Division",
+    "country": "Ireland",
+    "elo": 1175
+  },
+  {
+    "league_id": 172,
+    "name": "First League",
+    "country": "Bulgaria",
+    "elo": 1400
+  },
+  {
+    "league_id": 210,
+    "name": "HNL",
+    "country": "Croatia",
+    "elo": 1500
+  },
+  {
+    "league_id": 323,
+    "name": "Indian Super League",
+    "country": "India",
+    "elo": 1375
+  },
+  {
+    "league_id": 98,
+    "name": "J1 League",
+    "country": "Japan",
+    "elo": 1550
+  },
+  {
+    "league_id": 99,
+    "name": "J2 League",
+    "country": "Japan",
+    "elo": 1300
+  },
+  {
+    "league_id": 144,
+    "name": "Jupiler Pro League",
+    "country": "Belgium",
+    "elo": 1525
+  },
+  {
+    "league_id": 292,
+    "name": "K League 1",
+    "country": "South-Korea",
+    "elo": 1500
+  },
+  {
+    "league_id": 293,
+    "name": "K League 2",
+    "country": "South-Korea",
+    "elo": 1300
+  },
+  {
+    "league_id": 140,
+    "name": "La Liga",
+    "country": "Spain",
+    "elo": 1800
+  },
+  {
+    "league_id": 41,
+    "name": "League One",
+    "country": "England",
+    "elo": 1400
+  },
+  {
+    "league_id": 42,
+    "name": "League Two",
+    "country": "England",
+    "elo": 1250
+  },
+  {
+    "league_id": 283,
+    "name": "Liga I",
+    "country": "Romania",
+    "elo": 1400
+  },
+  {
+    "league_id": 262,
+    "name": "Liga MX",
+    "country": "Mexico",
+    "elo": 1525
+  },
+  {
+    "league_id": 242,
+    "name": "Liga Pro",
+    "country": "Ecuador",
+    "elo": 1510
+  },
+  {
+    "league_id": 128,
+    "name": "Liga Profesional Argentina",
+    "country": "Argentina",
+    "elo": 1600
+  },
+  {
+    "league_id": 61,
+    "name": "Ligue 1",
+    "country": "France",
+    "elo": 1775
+  },
+  {
+    "league_id": 62,
+    "name": "Ligue 2",
+    "country": "France",
+    "elo": 1450
+  },
+  {
+    "league_id": 253,
+    "name": "Major League Soccer",
+    "country": "USA",
+    "elo": 1550
+  },
+  {
+    "league_id": 329,
+    "name": "Meistriliiga",
+    "country": "Estonia",
+    "elo": 1275
+  },
+  {
+    "league_id": 271,
+    "name": "NB I",
+    "country": "Hungary",
+    "elo": 1400
+  },
+  {
+    "league_id": 43,
+    "name": "National League",
+    "country": "England",
+    "elo": 1100
+  },
+  {
+    "league_id": 357,
+    "name": "Premier Division",
+    "country": "Ireland",
+    "elo": 1425
+  },
+  {
+    "league_id": 39,
+    "name": "Premier League",
+    "country": "England",
+    "elo": 1825
+  },
+  {
+    "league_id": 408,
+    "name": "Premiership",
+    "country": "Northern-Ireland",
+    "elo": 1275
+  },
+  {
+    "league_id": 179,
+    "name": "Premiership",
+    "country": "Scotland",
+    "elo": 1500
+  },
+  {
+    "league_id": 94,
+    "name": "Primeira Liga",
+    "country": "Portugal",
+    "elo": 1525
+  },
+  {
+    "league_id": 239,
+    "name": "Primera A",
+    "country": "Colombia",
+    "elo": 1475
+  },
+  {
+    "league_id": 281,
+    "name": "Primera División",
+    "country": "Peru",
+    "elo": 1450
+  },
+  {
+    "league_id": 344,
+    "name": "Primera División",
+    "country": "Bolivia",
+    "elo": 1425
+  },
+  {
+    "league_id": 265,
+    "name": "Primera División",
+    "country": "Chile",
+    "elo": 1475
+  },
+  {
+    "league_id": 307,
+    "name": "Pro League",
+    "country": "Saudi-Arabia",
+    "elo": 1450
+  },
+  {
+    "league_id": 141,
+    "name": "Segunda División",
+    "country": "Spain",
+    "elo": 1480
+  },
+  {
+    "league_id": 135,
+    "name": "Serie A",
+    "country": "Italy",
+    "elo": 1800
+  },
+  {
+    "league_id": 71,
+    "name": "Serie A",
+    "country": "Brazil",
+    "elo": 1525
+  },
+  {
+    "league_id": 72,
+    "name": "Serie B",
+    "country": "Brazil",
+    "elo": 1350
+  },
+  {
+    "league_id": 136,
+    "name": "Serie B",
+    "country": "Italy",
+    "elo": 1475
+  },
+  {
+    "league_id": 169,
+    "name": "Super League",
+    "country": "China",
+    "elo": 1450
+  },
+  {
+    "league_id": 207,
+    "name": "Super League",
+    "country": "Switzerland",
+    "elo": 1500
+  },
+  {
+    "league_id": 197,
+    "name": "Super League 1",
+    "country": "Greece",
+    "elo": 1475
+  },
+  {
+    "league_id": 286,
+    "name": "Super Liga",
+    "country": "Serbia",
+    "elo": 1425
+  },
+  {
+    "league_id": 332,
+    "name": "Super Liga",
+    "country": "Slovakia",
+    "elo": 1425
+  },
+  {
+    "league_id": 114,
+    "name": "Superettan",
+    "country": "Sweden",
+    "elo": 1275
+  },
+  {
+    "league_id": 119,
+    "name": "Superliga",
+    "country": "Denmark",
+    "elo": 1500
+  },
+  {
+    "league_id": 203,
+    "name": "Süper Lig",
+    "country": "Turkey",
+    "elo": 1600
+  },
+  {
+    "league_id": 2,
+    "name": "UEFA Champions League",
+    "country": "World",
+    "elo": 1900
+  },
+  {
+    "league_id": 848,
+    "name": "UEFA Europa Conference League",
+    "country": "World",
+    "elo": 1700
+  },
+  {
+    "league_id": 3,
+    "name": "UEFA Europa League",
+    "country": "World",
+    "elo": 1800
+  },
+  {
+    "league_id": 244,
+    "name": "Veikkausliiga",
+    "country": "Finland",
+    "elo": 1350
+  },
+  {
+    "league_id": 365,
+    "name": "Virsliga",
+    "country": "Latvia",
+    "elo": 1200
+  },
+  {
+    "league_id": 1087,
+    "name": "Ykkösliiga",
+    "country": "Finland",
+    "elo": 1100
+  },
+  {
+    "league_id": 164,
+    "name": "Úrvalsdeild",
+    "country": "Iceland",
+    "elo": 1275
+  }
+]

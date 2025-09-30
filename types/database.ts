@@ -46,5 +46,40 @@ export interface Fixture {
   updated_at: string;
 }
 
+export interface FixtureStats {
+  fixture_id: number;
+  created_at: string;
+  updated_at: string;
+  hours_since_last_match_home?: number;
+  hours_since_last_match_away?: number;
+  avg_goals_league?: number;
+  elo_home?: number;
+  elo_away?: number;
+  league_elo?: number;
+  home_advantage?: number;
+  adjusted_rolling_xg_home?: number;
+  adjusted_rolling_xga_home?: number;
+  adjusted_rolling_xg_away?: number;
+  adjusted_rolling_xga_away?: number;
+  adjusted_rolling_market_xg_home?: number;
+  adjusted_rolling_market_xga_home?: number;
+  adjusted_rolling_market_xg_away?: number;
+  adjusted_rolling_market_xga_away?: number;
+}
+
+export interface Team {
+  id: number;
+  name: string;
+  country?: string;
+  venue?: string;
+  created_at: string;
+  updated_at: string;
+  // ELO rating data
+  league_id?: number;
+  league_name?: string;
+  league_country?: string;
+  elo_rating: number;
+  last_updated: string;
+}
 
 

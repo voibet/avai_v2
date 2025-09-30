@@ -38,17 +38,17 @@ const SEARCH_COLUMNS = ['home_team_name', 'away_team_name', 'league_name', 'venu
 async function getFixtures(request: Request) {
   const url = new URL(request.url);
   const params = parseTableParams(url.searchParams);
-  
+
   // Add search columns
   params.searchColumns = SEARCH_COLUMNS;
-  
+
   // Handle custom date filter
   const dateFilter = url.searchParams.get('date');
   if (dateFilter) {
     const now = new Date();
     let startDate: Date | undefined;
     let endDate: Date | undefined;
-    
+
     if (dateFilter === 'yesterday') {
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
       endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -65,7 +65,7 @@ async function getFixtures(request: Request) {
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
     }
-    
+
     if (startDate && endDate) {
       // Add date range filter to params
       params.filters.push({

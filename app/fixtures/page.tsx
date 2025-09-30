@@ -2,7 +2,7 @@
 
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useState, useCallback, useMemo } from 'react'
-import { useFixtureLineups, useTeamInjuries } from '../../lib/hooks/use-football-data'
+import { useFixtureLineups, useTeamInjuries, useFixtureStats } from '../../lib/hooks/use-football-data'
 import DataTable, { Column } from '../../components/ui/data-table'
 import FixtureEditModal from '../../components/admin/FixtureEditModal'
 import { FixtureOdds } from '../../components/FixtureOdds'
@@ -55,6 +55,9 @@ export default function FixturesPage() {
   const { data: homeInjuriesData, loading: homeInjuriesLoading, error: homeInjuriesError } = useTeamInjuries(expandedFixtureId, homeTeamId)
   const { data: awayInjuriesData, loading: awayInjuriesLoading, error: awayInjuriesError } = useTeamInjuries(expandedFixtureId, awayTeamId)
 
+  // Fetch stats for the fixture
+  const { data: statsData, loading: statsLoading, error: statsError } = useFixtureStats(expandedFixtureId)
+
   const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
     const day = date.getDate().toString().padStart(2, '0');
@@ -84,6 +87,17 @@ export default function FixturesPage() {
       return `WAS ${days} DAYS BEFORE`;
     }
   }, [])
+
+  const getInjuryStatusColor = useCallback((injury: any) => {
+    const status = formatInjuryTiming(injury);
+    if (status === 'UNCERTAIN') {
+      return 'text-orange-400';
+    }
+    if (status.startsWith('WAS')) {
+      return 'text-gray-400';
+    }
+    return injury.isThisMatch ? 'text-red-400' : 'text-orange-400';
+  }, [formatInjuryTiming])
 
   const handleEditFixture = useCallback((fixture: any) => {
     setEditingFixture(fixture)
@@ -123,7 +137,7 @@ export default function FixturesPage() {
       sortKey: 'league_name',
       render: (fixture) => (
         <div className="truncate text-gray-500 text-xs">
-          {fixture.league_name}
+          {fixture.league_name} ({fixture.league_country})
         </div>
       )
     },
@@ -419,45 +433,6 @@ export default function FixturesPage() {
                 </div>
               </div>
             )}
-
-            {/* Injuries */}
-            <div className="mt-1">
-              <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
-              {homeInjuriesLoading ? (
-                <div className="text-center py-1">
-                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
-                  <span className="ml-2 text-gray-400 text-xs font-mono">Loading injuries...</span>
-                </div>
-              ) : homeInjuriesError ? (
-                <div className="text-center py-1">
-                  <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
-                </div>
-              ) : homeInjuriesData && homeInjuriesData.length > 0 ? (
-                <div className="space-y-0.5">
-                  {/* Header */}
-                  <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                    <div className="col-span-4 text-gray-400">PLAYER</div>
-                    <div className="col-span-3 text-gray-400 text-center">STATUS</div>
-                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                  </div>
-                  {homeInjuriesData.map((injury) => (
-                    <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                      <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
-                      <div className={`col-span-3 text-center font-bold ${injury.isThisMatch ? 'text-red-400' : 'text-orange-400'}`}>
-                        {formatInjuryTiming(injury)}
-                      </div>
-                      <div className={`col-span-3 text-center font-bold ${injury.isThisMatch ? 'text-red-400' : 'text-orange-400'}`}>
-                        {injury.reason}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-1">
-                  <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Vertical Divider */}
@@ -505,54 +480,284 @@ export default function FixturesPage() {
                 </div>
               </div>
             )}
-
-            {/* Injuries */}
-            <div className="mt-1">
-              <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
-              {awayInjuriesLoading ? (
-                <div className="text-center py-1">
-                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
-                  <span className="ml-2 text-gray-400 text-xs font-mono">Loading injuries...</span>
-                </div>
-              ) : awayInjuriesError ? (
-                <div className="text-center py-1">
-                  <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
-                </div>
-              ) : awayInjuriesData && awayInjuriesData.length > 0 ? (
-                <div className="space-y-0.5">
-                  {/* Header */}
-                  <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                    <div className="col-span-4 text-gray-400">PLAYER</div>
-                    <div className="col-span-3 text-gray-400 text-center">STATUS</div>
-                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                  </div>
-                  {awayInjuriesData.map((injury) => (
-                    <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                      <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
-                      <div className={`col-span-3 text-center font-bold ${injury.isThisMatch ? 'text-red-400' : 'text-orange-400'}`}>
-                        {formatInjuryTiming(injury)}
-                      </div>
-                      <div className={`col-span-3 text-center font-bold ${injury.isThisMatch ? 'text-red-400' : 'text-orange-400'}`}>
-                        {injury.reason}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-1">
-                  <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </div>
     );
-  }, [lineupsLoading, lineupsError, lineupsData, homeInjuriesLoading, homeInjuriesError, homeInjuriesData, awayInjuriesLoading, awayInjuriesError, awayInjuriesData, formatInjuryTiming]);
+  }, [lineupsLoading, lineupsError, lineupsData]);
+
+  const renderInjuriesSection = useCallback((fixture: any) => {
+    return (
+      <div className="px-2 py-2">
+        {/* Team Headers */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex-1 text-center">
+            <h3 className="text-base font-bold text-gray-200 font-mono">
+              {fixture.home_team_name}
+            </h3>
+          </div>
+          <div className="flex-1 text-center">
+            <h3 className="text-base font-bold text-gray-200 font-mono">
+              {fixture.away_team_name}
+            </h3>
+          </div>
+        </div>
+
+        {/* Side by Side Tables */}
+        <div className="flex gap-4">
+          {/* Home Team Injuries */}
+          <div className="flex-1">
+            <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
+            {homeInjuriesLoading ? (
+              <div className="text-center py-1">
+                <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
+                <span className="ml-2 text-gray-400 text-xs font-mono">Loading injuries...</span>
+              </div>
+            ) : homeInjuriesError ? (
+              <div className="text-center py-1">
+                <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
+              </div>
+            ) : homeInjuriesData && homeInjuriesData.length > 0 ? (
+              <div className="space-y-0.5">
+                {/* Header */}
+                <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                  <div className="col-span-4 text-gray-400">PLAYER</div>
+                  <div className="col-span-3 text-gray-400 text-center">STATUS</div>
+                  <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                </div>
+                {homeInjuriesData.filter((injury) => {
+                  const status = formatInjuryTiming(injury);
+                  return !(status.startsWith('WAS') && injury.reason === 'Red Card');
+                }).map((injury) => (
+                  <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                    <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
+                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                      {formatInjuryTiming(injury)}
+                    </div>
+                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                      {injury.reason}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-1">
+                <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
+              </div>
+            )}
+          </div>
+
+          {/* Vertical Divider */}
+          <div className="w-px bg-gray-600"></div>
+
+          {/* Away Team Injuries */}
+          <div className="flex-1">
+            <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
+            {awayInjuriesLoading ? (
+              <div className="text-center py-1">
+                <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
+                <span className="ml-2 text-gray-400 text-xs font-mono">Loading injuries...</span>
+              </div>
+            ) : awayInjuriesError ? (
+              <div className="text-center py-1">
+                <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
+              </div>
+            ) : awayInjuriesData && awayInjuriesData.length > 0 ? (
+              <div className="space-y-0.5">
+                {/* Header */}
+                <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                  <div className="col-span-4 text-gray-400">PLAYER</div>
+                  <div className="col-span-3 text-gray-400 text-center">STATUS</div>
+                  <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                </div>
+                {awayInjuriesData.filter((injury) => {
+                  const status = formatInjuryTiming(injury);
+                  return !(status.startsWith('WAS') && injury.reason === 'Red Card');
+                }).map((injury) => (
+                  <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                    <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
+                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                      {formatInjuryTiming(injury)}
+                    </div>
+                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                      {injury.reason}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-1">
+                <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }, [homeInjuriesLoading, homeInjuriesError, homeInjuriesData, awayInjuriesLoading, awayInjuriesError, awayInjuriesData, formatInjuryTiming]);
 
   const renderOddsSection = useCallback((fixture: any) => {
     return <FixtureOdds fixtureId={fixture.id} />;
   }, []);
+
+  const renderStatsSection = useCallback((fixture: any) => {
+    if (statsLoading) {
+      return (
+        <div className="px-2 py-4">
+          <div className="text-center py-4">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-green-400"></div>
+            <span className="ml-2 text-gray-400 text-sm font-mono">Loading stats...</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (statsError) {
+      return (
+        <div className="px-2 py-4">
+          <div className="text-center py-4">
+            <span className="text-red-400 text-sm font-mono">Failed to load stats: {statsError}</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (!statsData || !statsData.stats) {
+      return (
+        <div className="px-2 py-4">
+          <div className="text-center py-4">
+            <span className="text-gray-500 text-sm font-mono">No stats available</span>
+          </div>
+        </div>
+      );
+    }
+
+    const stats = statsData.stats;
+
+    return (
+      <div className="px-2 py-2">
+        {/* Stats Table */}
+        <div className="px-1 py-1">
+          {/* Header */}
+          <div className="grid grid-cols-13 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+            <div className="col-span-4 text-gray-400">STATISTICS</div>
+            <div className="col-span-3 text-gray-400 text-center">HOME</div>
+            <div className="col-span-3 text-gray-400 text-center">AWAY</div>
+            <div className="col-span-3 text-gray-400">INFO</div>
+          </div>
+
+          {/* Data Rows */}
+          {[
+            {
+              id: 'hours_since_last_match',
+              label: 'HOURS SINCE LAST MATCH',
+              home: stats.hours_since_last_match_home?.toString() || '-',
+              away: stats.hours_since_last_match_away?.toString() || '-',
+              info: '',
+              show: true
+            },
+            {
+              id: 'elo_rating',
+              label: 'ELO RATING TEAMS/LEAGUE',
+              home: stats.elo_home?.toString() || '-',
+              away: stats.elo_away?.toString() || '-',
+              info: stats.league_elo?.toString() || '-',
+              show: true
+            },
+            {
+              id: 'avg_goals_league',
+              label: 'AVG GOALS LEAGUE',
+              home: '',
+              away: '',
+              info: stats.avg_goals_league?.toString() || '-',
+              show: true
+            },
+            {
+              id: 'home_advantage',
+              label: 'HOME ADVANTAGE',
+              home: '',
+              away: '',
+              info: stats.home_advantage?.toString() || '-',
+              show: true
+            },
+            {
+              id: 'adjusted_rolling_xg',
+              label: 'ADJUSTED ROLLING XG',
+              home: stats.adjusted_rolling_xg_home?.toString() || '-',
+              away: stats.adjusted_rolling_xg_away?.toString() || '-',
+              info: '',
+              show: true
+            },
+            {
+              id: 'adjusted_rolling_xga',
+              label: 'ADJUSTED ROLLING XGA',
+              home: stats.adjusted_rolling_xga_home?.toString() || '-',
+              away: stats.adjusted_rolling_xga_away?.toString() || '-',
+              info: '',
+              show: true
+            },
+            {
+              id: 'adjusted_rolling_market_xg',
+              label: 'ADJUSTED ROLLING MARKET XG',
+              home: stats.adjusted_rolling_market_xg_home?.toString() || '-',
+              away: stats.adjusted_rolling_market_xg_away?.toString() || '-',
+              info: '',
+              show: true
+            },
+            {
+              id: 'adjusted_rolling_market_xga',
+              label: 'ADJUSTED ROLLING MARKET XGA',
+              home: stats.adjusted_rolling_market_xga_home?.toString() || '-',
+              away: stats.adjusted_rolling_market_xga_away?.toString() || '-',
+              info: '',
+              show: true
+            },
+            {
+              id: 'market_xg',
+              label: 'MARKET XG',
+              home: stats.home_market_xg?.toString() || '-',
+              away: stats.away_market_xg?.toString() || '-',
+              info: stats.home_market_xg && stats.away_market_xg
+                ? (parseFloat(stats.home_market_xg.toString()) + parseFloat(stats.away_market_xg.toString())).toFixed(2)
+                : '-',
+              show: true
+            },
+            {
+              id: 'predicted_xg',
+              label: 'PREDICTED XG',
+              home: stats.home_predicted_xg?.toString() || '-',
+              away: stats.away_predicted_xg?.toString() || '-',
+              info: stats.total_predicted_xg?.toString() || '-',
+              show: true
+            },
+            {
+              id: 'predicted_market_xg',
+              label: 'PREDICTED MARKET XG',
+              home: stats.home_predicted_market_xg?.toString() || '-',
+              away: stats.away_predicted_market_xg?.toString() || '-',
+              info: stats.total_predicted_market_xg?.toString() || '-',
+              show: true
+            },
+            {
+              id: 'updated_at',
+              label: 'LAST UPDATED',
+              home: '',
+              away: '',
+              info: stats.updated_at ? new Date(stats.updated_at).toLocaleString() : '-',
+              show: true
+            }
+          ].map((item) => (
+            <div key={item.id} className="grid grid-cols-13 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900">
+              <div className="col-span-4 text-gray-300 font-bold">{item.label}</div>
+              <div className="col-span-3 text-gray-100 text-center">{item.home ?? '-'}</div>
+              <div className="col-span-3 text-gray-100 text-center">{item.away ?? '-'}</div>
+              <div className="col-span-3 text-gray-100">{item.info ?? '-'}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }, [statsLoading, statsError, statsData]);
 
   const renderExpandedContent = useCallback((fixture: any) => {
     const extendedData = [
@@ -624,44 +829,64 @@ export default function FixturesPage() {
 
     return (
       <div className="space-y-4">
-        {/* Fixture Info Table */}
-        <div className="px-1 py-1">
-          {/* Header */}
-          <div className="grid grid-cols-13 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-            <div className="col-span-4 text-gray-400">DETAIL</div>
-            <div className="col-span-3 text-gray-400 text-center">HOME</div>
-            <div className="col-span-3 text-gray-400 text-center">AWAY</div>
-            <div className="col-span-3 text-gray-400">INFO</div>
-          </div>
-
-          {/* Data Rows */}
-          {extendedData.map((item) => (
-            <div key={item.id} className="grid grid-cols-13 gap-1 py-1 border-b border-gray-600 text-xs font-mono">
-              <div className="col-span-4 text-gray-300 font-bold">{item.label}</div>
-              <div className="col-span-3 text-gray-100 text-center">{item.home ?? '-'}</div>
-              <div className="col-span-3 text-gray-100 text-center">{item.away ?? '-'}</div>
-              <div className="col-span-3 text-gray-100">{item.info ?? '-'}</div>
+        {/* INFO Section */}
+        <div>
+          <h2 className="text-sm font-bold text-gray-200 font-mono mb-2">INFO</h2>
+          <div className="px-1 py-1">
+            {/* Header */}
+            <div className="grid grid-cols-13 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+              <div className="col-span-4 text-gray-400">DETAIL</div>
+              <div className="col-span-3 text-gray-400 text-center">HOME</div>
+              <div className="col-span-3 text-gray-400 text-center">AWAY</div>
+              <div className="col-span-3 text-gray-400">INFO</div>
             </div>
-          ))}
+
+            {/* Data Rows */}
+            {extendedData.map((item) => (
+              <div key={item.id} className="grid grid-cols-13 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900">
+                <div className="col-span-4 text-gray-300 font-bold">{item.label}</div>
+                <div className="col-span-3 text-gray-100 text-center">{item.home ?? '-'}</div>
+                <div className="col-span-3 text-gray-100 text-center">{item.away ?? '-'}</div>
+                <div className="col-span-3 text-gray-100">{item.info ?? '-'}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        
-        {/* Odds Section */}
+        {/* ODDS Section */}
         <div>
+          <h2 className="text-sm font-bold text-gray-200 font-mono mb-2">ODDS</h2>
           <div className="px-1 py-0">
             {renderOddsSection(fixture)}
           </div>
         </div>
 
-        {/* Lineups Section */}
+        {/* LINEUP Section */}
         <div>
+          <h2 className="text-sm font-bold text-gray-200 font-mono mb-2">LINEUP</h2>
           <div className="px-0 py-0">
             {renderLineupsSection(fixture)}
           </div>
         </div>
+
+        {/* INJURIES Section */}
+        <div>
+          <h2 className="text-sm font-bold text-gray-200 font-mono mb-2">INJURIES</h2>
+          <div className="px-0 py-0">
+            {renderInjuriesSection(fixture)}
+          </div>
+        </div>
+
+        {/* STATS Section */}
+        <div>
+          <h2 className="text-sm font-bold text-gray-200 font-mono mb-2">STATS</h2>
+          <div className="px-0 py-0">
+            {renderStatsSection(fixture)}
+          </div>
+        </div>
       </div>
     );
-  }, [renderLineupsSection, renderOddsSection]);
+  }, [renderLineupsSection, renderInjuriesSection, renderOddsSection, renderStatsSection]);
 
   return (
     <div className="fixed inset-0 top-[57px] left-0 right-0 bottom-0 bg-black overflow-auto">
@@ -669,7 +894,7 @@ export default function FixturesPage() {
         <DataTable
         title="FIXTURES"
         columns={fixturesColumns}
-        getItemId={(fixture) => fixture.id}
+        getItemId={(fixture) => fixture.id || `${fixture.home_team_name}-${fixture.away_team_name}-${fixture.date}`}
         emptyMessage="No fixtures found with current filters"
         filterable={true}
         currentFilters={currentFilters}
@@ -679,6 +904,7 @@ export default function FixturesPage() {
         onClearAllFilters={handleClearAllFilters}
         filterValueApi={getFilterValueApiUrl}
         expandable={true}
+        singleExpansion={true}
         renderExpandedContent={renderExpandedContent}
         getExpandedRowClassName={() => 'bg-gray-850'}
         onRowExpand={useCallback((fixtureId: string | number, isExpanded: boolean, item?: any) => {
@@ -701,6 +927,11 @@ export default function FixturesPage() {
             fixture={editingFixture}
             onClose={handleCloseEditModal}
             onUpdate={handleFixtureUpdated}
+            onDelete={() => {
+              // Close modal and refresh data when fixture is deleted
+              setEditingFixture(null)
+              handleFixtureUpdated()
+            }}
           />
         )}
       </div>

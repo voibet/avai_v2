@@ -7,6 +7,16 @@ npm install
 
 2. Create a `.env.local` file in the root directory with your database credentials and API keys:
 
+   Required environment variables:
+   ```
+   DB_USER=your_db_user
+   DB_PASSWORD=your_db_password
+   DB_HOST=your_db_host
+   DB_PORT=port
+   DB_NAME=your_db_name
+   DB_SSL=false
+   ```
+
 3. Run the development server:
 ```bash
 npm run dev

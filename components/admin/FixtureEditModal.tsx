@@ -6,13 +6,15 @@ interface FixtureEditModalProps {
   fixture: any
   onClose: () => void
   onUpdate: () => void
+  onDelete?: () => void
 }
 
-export default function FixtureEditModal({ fixture, onClose, onUpdate }: FixtureEditModalProps) {
+export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete }: FixtureEditModalProps) {
   const [formData, setFormData] = useState<any>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   useEffect(() => {
     // Initialize form data with fixture data
@@ -99,6 +101,36 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate }: Fixture
     }
   }
 
+  const handleDelete = async () => {
+    setLoading(true)
+    setError(null)
+    setSuccess(false)
+
+    try {
+      const response = await fetch(`/api/fixtures/${fixture.id}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to delete fixture')
+      }
+
+      setSuccess(true)
+      setTimeout(() => {
+        if (onDelete) onDelete()
+        onUpdate()
+        onClose()
+      }, 1500)
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred')
+    } finally {
+      setLoading(false)
+      setShowDeleteConfirm(false)
+    }
+  }
+
   const inputClasses = "w-full px-3 py-2 bg-gray-700 border border-gray-600 text-white text-sm font-mono rounded focus:outline-none focus:border-blue-400"
   const labelClasses = "block text-sm font-mono text-gray-300 mb-1"
 
@@ -107,9 +139,14 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate }: Fixture
       <div className="bg-gray-800 border border-gray-600 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-white font-mono">
-              EDIT FIXTURE: {fixture.home_team_name} vs {fixture.away_team_name}
-            </h2>
+            <div>
+              <h2 className="text-xl font-bold text-white font-mono">
+                EDIT FIXTURE: {fixture.home_team_name} vs {fixture.away_team_name}
+              </h2>
+              <p className="text-sm text-gray-400 font-mono mt-1">
+                Fixture ID: {fixture.id}
+              </p>
+            </div>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-white text-xl"
@@ -465,26 +502,74 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate }: Fixture
             </div>
 
             {/* Action Buttons */}
-            <div className="flex justify-end gap-4 pt-6 border-t border-gray-600">
+            <div className="flex justify-between pt-6 border-t border-gray-600">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={() => setShowDeleteConfirm(true)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-mono rounded transition-colors"
+                disabled={loading}
+              >
+                DELETE FIXTURE
+              </button>
+              <div className="flex gap-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white text-sm font-mono rounded transition-colors"
+                  disabled={loading}
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-mono rounded transition-colors disabled:opacity-50"
+                  disabled={loading}
+                >
+                  {loading ? 'UPDATING...' : 'UPDATE FIXTURE'}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-60">
+          <div className="bg-gray-800 border-2 border-red-600 rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-bold text-red-400 font-mono mb-4">
+              CONFIRM DELETION
+            </h3>
+            <p className="text-gray-300 text-sm font-mono mb-4">
+              Are you sure you want to delete this fixture?
+            </p>
+            <p className="text-yellow-400 text-xs font-mono mb-6">
+              This will permanently delete:
+              <br />• The fixture: {fixture.home_team_name} vs {fixture.away_team_name}
+              <br />• All associated odds data
+              <br />• All associated stats data
+              <br />
+              <br />This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-4">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
                 className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white text-sm font-mono rounded transition-colors"
                 disabled={loading}
               >
                 CANCEL
               </button>
               <button
-                type="submit"
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-mono rounded transition-colors disabled:opacity-50"
+                onClick={handleDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-mono rounded transition-colors disabled:opacity-50"
                 disabled={loading}
               >
-                {loading ? 'UPDATING...' : 'UPDATE FIXTURE'}
+                {loading ? 'DELETING...' : 'DELETE FIXTURE'}
               </button>
             </div>
-          </form>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

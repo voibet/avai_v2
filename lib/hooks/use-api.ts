@@ -26,6 +26,7 @@ export function useApi<T>(
 
     setLoading(true);
     setError(null);
+    setData(null);
 
     try {
       const response = await fetch(url, {

@@ -84,5 +84,35 @@ async function updateFixture(request: Request, { params }: { params: { id: strin
   }
 }
 
+async function deleteFixture(_request: Request, { params }: { params: { id: string } }) {
+  const fixtureId = parseInt(params.id);
+
+  if (isNaN(fixtureId)) {
+    return NextResponse.json({ error: 'Invalid fixture ID' }, { status: 400 });
+  }
+
+  try {
+    // Delete the fixture - cascading deletes will handle odds and stats tables
+    const result = await executeQuery(
+      'DELETE FROM football_fixtures WHERE id = $1 RETURNING id',
+      [fixtureId]
+    );
+
+    if (result.rows.length === 0) {
+      return NextResponse.json({ error: 'Fixture not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ 
+      success: true, 
+      message: 'Fixture and all related data deleted successfully',
+      fixtureId: result.rows[0].id
+    });
+  } catch (error) {
+    console.error('Error deleting fixture:', error);
+    return NextResponse.json({ error: 'Failed to delete fixture' }, { status: 500 });
+  }
+}
+
 export const GET = withErrorHandler(getFixture);
 export const PUT = withErrorHandler(updateFixture);
+export const DELETE = withErrorHandler(deleteFixture);

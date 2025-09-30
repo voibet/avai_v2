@@ -865,7 +865,7 @@ export default function AdminPage() {
             subtitle={`${filteredLeagues.length} leagues`}
             data={filteredLeagues as League[]}
             columns={fetchFixturesColumns}
-            getItemId={(league) => league.id}
+            getItemId={(league) => league.id || `${league.name}-${league.country}`}
             emptyMessage={searchQuery ? 'No leagues match your search.' : 'No leagues found.'}
             expandable={true}
             renderExpandedContent={(league) => renderExpandedSeasons(league, false)}
@@ -901,7 +901,7 @@ export default function AdminPage() {
             subtitle={`${filteredLeagues.length} leagues`}
             data={filteredLeagues as AvailableLeague[]}
             columns={addLeaguesColumns}
-            getItemId={(league) => league.id}
+            getItemId={(league) => league.id || `${league.name}-${league.country}`}
             emptyMessage={searchQuery ? 'No leagues match your search.' : 'No leagues found.'}
             expandable={true}
             renderExpandedContent={(league) => renderExpandedSeasons(league, true)}

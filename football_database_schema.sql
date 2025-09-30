@@ -1,18 +1,29 @@
 -- ============================================
 -- FOOTBALL DATABASE SCHEMA
 -- ============================================
--- 
+--
+-- This database stores comprehensive football (soccer) data for analysis and prediction.
+-- It combines match results, expected goals (xG), betting odds, and calculated statistics
+-- to support machine learning models and betting analysis.
+--
+-- KEY CONCEPTS:
+-- - xG (Expected Goals): Mathematical prediction of scoring probability per shot
+-- - Fair Odds: Odds without bookmaker margin, calculated from market probabilities
+-- - Market XG: Expected goals derived from betting market odds (not shot-based)
+-- - ELO Ratings: Team strength ratings based on historical performance
+--
 -- This file contains the complete schema for all football-related tables
 -- Generated: September 2025
 -- Database: PostgreSQL
 --
 -- Tables included:
--- - football_fixtures (main fixture data with xG)
--- - football_leagues (league information)
+-- - football_fixtures (main fixture data with xG and actual results)
+-- - football_leagues (league information and season data)
 -- - football_teams (team information)
--- - football_odds (bookmaker and predicted odds with history)
--- - football_predictions (ML goals predictions and adjustments)
--- - football_stats (team statistics)
+-- - team_elo (team ELO ratings calculated from match results)
+-- - football_odds (bookmaker odds with complete historical snapshots)
+-- - football_predictions (ML goals predictions and manual adjustments)
+-- - football_stats (calculated team statistics: ELO, rolling xG, etc.)
 --
 
 -- ============================================
@@ -72,7 +83,7 @@ CREATE TABLE football_leagues (
     veikkaus_league_id      INTEGER
 );
 
--- Team Information  
+-- Team Information
 CREATE TABLE football_teams (
     id                      BIGINT PRIMARY KEY,
     name                    VARCHAR(255) NOT NULL,
@@ -80,6 +91,19 @@ CREATE TABLE football_teams (
     venue                   VARCHAR(255),
     created_at              TIMESTAMP DEFAULT NOW(),
     updated_at              TIMESTAMP DEFAULT NOW()
+);
+
+-- Team ELO Ratings (calculated using xG or actual goals)
+CREATE TABLE team_elo (
+    team_id                 BIGINT PRIMARY KEY,
+    league_id               BIGINT,
+    elo_rating              INTEGER NOT NULL DEFAULT 1500,
+    last_updated            TIMESTAMP DEFAULT NOW(),
+    created_at              TIMESTAMP DEFAULT NOW(),
+
+    -- Foreign Keys
+    FOREIGN KEY (team_id) REFERENCES football_teams(id),
+    FOREIGN KEY (league_id) REFERENCES football_leagues(id)
 );
 
 -- Main Fixtures Table (with xG data)
@@ -134,19 +158,19 @@ CREATE TABLE IF NOT EXISTS football_odds (
 
   -- Price Format: All odds are stored in basis points (e.g., 165 = 1.65 decimal odds)
   -- JSONB array of odds snapshots with complete historical data
-  odds_x12     JSONB        NULLABLE,
+  odds_x12     JSONB        NULL,
   -- [ { "t": 1758213041, "x12": [165,395,480] }, { "t": 1758213819, "x12": [169,390,460] }, ... ]
-  odds_ah      JSONB        NULLABLE,
+  odds_ah      JSONB        NULL,
   -- [ { "t": 1758213041, "ah_h": [185, 145, 120], "ah_a": [185, 290, 530] }, ... ]
-  odds_ou      JSONB        NULLABLE,
+  odds_ou      JSONB        NULL,
   -- [ { "t": 1758213041, "ou_o": [180, 190, 200], "ou_u": [200, 190, 180] }, ... ]
-  lines        JSONB        NULLABLE,
+  lines        JSONB        NULL,
   -- [ { "t": 1758213041, "ah": [-0.25, 0, 0.25], "ou": [2.0, 2.25, 2.5] }, ... ]
-  ids          JSONB        NULLABLE,
+  ids          JSONB        NULL,
   -- [ { "t": 1758213041, "line_id": 346756, "line_ids": { "x12": "554785", "ah": ["523624", "316974", "964878"], "ou": ["316447", "464879", "649743"] } }, ... ]
-  max_stakes   JSONB        NULLABLE,
+  max_stakes   JSONB        NULL,
   -- [ { "t": 1758213041, "max_stake_x12": [500, 500, 500], "max_stake_ah": { "h": [300, 350, 400], "a": [300, 350, 400] }, "max_stake_ou": { "o": [250, 260, 270], "u": [250, 260, 270] } }, ... ]
-  latest_t     JSONB        NULLABLE,  
+  latest_t     JSONB        NULL,  
   -- { "x12_ts": 1758213041, "ah_ts": 1758213041, "ou_ts": 1758213041, "ids_ts": 1758213041, "stakes_ts": 1758213041, "lines_ts": 1758213041 },
 
   decimals     INTEGER      NOT NULL DEFAULT 2,
@@ -200,29 +224,38 @@ CREATE TABLE football_stats (
     fixture_id              BIGINT PRIMARY KEY,
     created_at              TIMESTAMP DEFAULT NOW(),
     updated_at              TIMESTAMP DEFAULT NOW(),
-    
+
+    -- Hours since last match for each team
+    hours_since_last_match_home          INTEGER,
+    hours_since_last_match_away          INTEGER,
+
+    -- League average goals (past 160 fixtures)
+    avg_goals_league                     DECIMAL(4,2),
+
+    -- Team ELO ratings (calculated using xG or actual goals)
+    elo_home                            INTEGER,
+    elo_away                            INTEGER,
+    league_elo                          INTEGER,
+
+    -- Home advantage (average home_xg - away_xg for past 160 matches, capped 0.1-0.6)
+    home_advantage                       DECIMAL(3,2),
+
+    -- Weighted adjusted rolling xG and xGA (across past 32 matches)
+    adjusted_rolling_xg_home                DECIMAL(4,2),
+    adjusted_rolling_xga_home                DECIMAL(4,2),
+    adjusted_rolling_xg_away                DECIMAL(4,2),
+    adjusted_rolling_xga_away                DECIMAL(4,2),
+
+    -- Weighted adjusted rolling market xG and xGA (across past 32 matches)
+    adjusted_rolling_market_xg_home         DECIMAL(4,2),
+    adjusted_rolling_market_xga_home         DECIMAL(4,2),
+    adjusted_rolling_market_xg_away         DECIMAL(4,2),
+    adjusted_rolling_market_xga_away         DECIMAL(4,2),
+
     -- Constraints
     FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
-    
+
     -- Note: This table is designed to be extended with additional statistical columns
-    -- Examples of future columns:
-    -- Days_Since_Last_Match_Home           INTEGER,
-    -- Days_Since_Last_Match_Away           INTEGER,
-    -- Season_Match_Number_Home             INTEGER,
-    -- Season_Match_Number_Away             INTEGER,
-    -- Table_Mobility_Home                  INTEGER,
-    -- Table_Mobility_Away                  INTEGER,
-    -- Team_Elo_Rating_Home                 INTEGER,
-    -- Team_Elo_Rating_Away                 INTEGER,
-    -- League_Elo_Rating                    INTEGER,
-    -- Rolling_Market_xG_Home               INTEGER,
-    -- Rolling_Market_xGa_Home              INTEGER,
-    -- Rolling_Market_xG_Away               INTEGER,  
-    -- Rolling_Market_xGa_Away              INTEGER,
-    -- Adjusted_Rolling_xG_Home             INTEGER,
-    -- Adjusted_Rolling_xGa_Home            INTEGER,
-    -- Adjusted_Rolling_xG_Away             INTEGER,
-    -- Adjusted_Rolling_xGa_Away            INTEGER,
 );
 
 -- ============================================
@@ -236,6 +269,11 @@ CREATE INDEX IF NOT EXISTS idx_football_fixtures_league_id ON football_fixtures 
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_timestamp ON football_fixtures (timestamp);
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_season ON football_fixtures (season);
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_status ON football_fixtures (status_short);
+
+-- Performance indexes for calculations
+CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date ON football_fixtures (home_team_id, date) WHERE status_short = 'FT';
+CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date_away ON football_fixtures (away_team_id, date) WHERE status_short = 'FT';
+CREATE INDEX IF NOT EXISTS idx_football_fixtures_league_date_status ON football_fixtures (league_id, date DESC, status_short) WHERE status_short = 'FT';
 
 -- Primary composite index for your main query pattern
 CREATE INDEX CONCURRENTLY idx_football_odds_fixture_bookie ON football_odds (fixture_id, bookie);
@@ -252,10 +290,249 @@ CREATE INDEX IF NOT EXISTS idx_football_predictions_created_at ON football_predi
 -- football_stats indexes
 CREATE INDEX IF NOT EXISTS idx_football_stats_created_at ON football_stats (created_at);
 
+-- team_elo indexes
+CREATE INDEX IF NOT EXISTS idx_team_elo_league_id ON team_elo (league_id);
+CREATE INDEX IF NOT EXISTS idx_team_elo_elo_rating ON team_elo (elo_rating DESC);
+
+-- Composite index for market xG calculations (frequently queried columns together)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_stats_fixture_elo ON football_stats (fixture_id, elo_home, elo_away, league_elo, home_advantage);
+
+-- Index for ELO-based queries
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_stats_elos ON football_stats (elo_home, elo_away, league_elo) WHERE elo_home IS NOT NULL AND elo_away IS NOT NULL AND league_elo IS NOT NULL;
+
+-- Index for rolling calculations (team + date filtering)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_team_date_league ON football_fixtures (home_team_id, date DESC, league_id) WHERE status_short = 'FT';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_away_team_date_league ON football_fixtures (away_team_id, date DESC, league_id) WHERE status_short = 'FT';
+
 -- Indexes for JSONB fields
 CREATE INDEX IF NOT EXISTS idx_football_odds_odds_jsonb ON football_odds USING GIN (odds);
 CREATE INDEX IF NOT EXISTS idx_football_leagues_seasons_jsonb ON football_leagues USING GIN (seasons);
 
+
+-- ============================================
+-- VIEWS FOR CALCULATED DATA
+-- ============================================
+
+-- View to calculate payout percentages (bookmaker margin) from latest odds data
+-- Payout shows total implied probability (should be > 1.0 due to margin)
+-- For 2-way markets: payout = 1 / ((1/odds1) + (1/odds2))
+-- For 3-way markets: payout = 1 / ((1/odds1) + (1/odds2) + (1/odds3))
+DROP VIEW IF EXISTS payout_view;
+CREATE VIEW payout_view AS
+SELECT
+    fo.fixture_id,
+    fo.bookie,
+    fo.decimals,
+    -- X12 payout calculation (3-way)
+    CASE
+        WHEN fo.odds_x12 IS NOT NULL THEN
+            ROUND(
+                (
+                    1.0 / (
+                        (1.0 / ((fo.odds_x12->-1->'x12'->>0)::numeric / POWER(10, fo.decimals))) +
+                        (1.0 / ((fo.odds_x12->-1->'x12'->>1)::numeric / POWER(10, fo.decimals))) +
+                        (1.0 / ((fo.odds_x12->-1->'x12'->>2)::numeric / POWER(10, fo.decimals)))
+                    )
+                )::numeric,
+                4
+            )
+        ELSE NULL
+    END as payout_x12,
+    -- AH payout calculation per line (2-way per handicap line)
+    CASE
+        WHEN fo.odds_ah IS NOT NULL THEN
+            (
+                SELECT jsonb_agg(
+                    ROUND(
+                        (
+                            1.0 / (
+                                (1.0 / (ah_h.elem::numeric / POWER(10, fo.decimals))) +
+                                (1.0 / (ah_a.elem::numeric / POWER(10, fo.decimals)))
+                            )
+                        )::numeric,
+                        4
+                    )
+                )
+                FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY ah_h(elem, idx)
+                JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY ah_a(elem, idx)
+                ON ah_h.idx = ah_a.idx
+            )
+        ELSE NULL
+    END as payout_ah,
+    -- OU payout calculation per line (2-way per total line)
+    CASE
+        WHEN fo.odds_ou IS NOT NULL THEN
+            (
+                SELECT jsonb_agg(
+                    ROUND(
+                        (
+                            1.0 / (
+                                (1.0 / (ou_o.elem::numeric / POWER(10, fo.decimals))) +
+                                (1.0 / (ou_u.elem::numeric / POWER(10, fo.decimals)))
+                            )
+                        )::numeric,
+                        4
+                    )
+                )
+                FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY ou_o(elem, idx)
+                JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY ou_u(elem, idx)
+                ON ou_o.idx = ou_u.idx
+            )
+        ELSE NULL
+    END as payout_ou,
+    -- Latest odds data for reference
+    fo.odds_x12->-1 as latest_x12,
+    fo.odds_ah->-1 as latest_ah,
+    fo.odds_ou->-1 as latest_ou
+FROM football_odds fo
+WHERE fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL;
+
+-- View to calculate fair odds (no vig/no margin) from latest odds data
+-- Fair odds remove the bookmaker's margin by normalizing implied probabilities
+-- For 2-way markets: fair_odds = 1 / (implied_prob / total_implied_prob)
+DROP VIEW IF EXISTS fair_odds_view;
+CREATE VIEW fair_odds_view AS
+SELECT
+    fo.fixture_id,
+    fo.bookie,
+    fo.decimals,
+    -- Latest X12 odds data with fair odds calculation
+    CASE
+        WHEN fo.odds_x12 IS NOT NULL THEN
+            jsonb_build_object(
+                'original_x12', (fo.odds_x12->-1->>'x12')::jsonb,
+                'fair_x12', (
+                    SELECT jsonb_agg(
+                        ROUND(
+                            (
+                                1.0 / (
+                                    (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
+                                    (
+                                        SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                        FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
+                                    )
+                                )
+                            )::numeric,
+                            fo.decimals
+                        )::text
+                        ORDER BY x12_idx
+                    )
+                    FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
+                    WHERE x12_idx <= 3
+                )
+            )
+        ELSE NULL
+    END as fair_odds_x12,
+    -- Latest AH odds data with fair odds calculation
+    CASE
+        WHEN fo.odds_ah IS NOT NULL THEN
+            jsonb_build_object(
+                'original_ah_h', (fo.odds_ah->-1->>'ah_h')::jsonb,
+                'original_ah_a', (fo.odds_ah->-1->>'ah_a')::jsonb,
+                'fair_ah_h', (
+                    SELECT jsonb_agg(
+                        CASE
+                            WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                ROUND(
+                                    1.0 / (
+                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) /
+                                        (
+                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                        )
+                                    ),
+                                    fo.decimals
+                                )::text
+                            ELSE NULL
+                        END
+                    )
+                    FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
+                    JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
+                    ON h_idx = a_idx
+                ),
+                'fair_ah_a', (
+                    SELECT jsonb_agg(
+                        CASE
+                            WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                ROUND(
+                                    1.0 / (
+                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals))) /
+                                        (
+                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                        )
+                                    ),
+                                    fo.decimals
+                                )::text
+                            ELSE NULL
+                        END
+                    )
+                    FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
+                    JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
+                    ON h_idx = a_idx
+                )
+            )
+        ELSE NULL
+    END as fair_odds_ah,
+    -- Latest OU odds data with fair odds calculation
+    CASE
+        WHEN fo.odds_ou IS NOT NULL THEN
+            jsonb_build_object(
+                'original_ou_o', (fo.odds_ou->-1->>'ou_o')::jsonb,
+                'original_ou_u', (fo.odds_ou->-1->>'ou_u')::jsonb,
+                'fair_ou_o', (
+                    SELECT jsonb_agg(
+                        CASE
+                            WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                ROUND(
+                                    (
+                                        1.0 / (
+                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) /
+                                            (
+                                                (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                            )
+                                        )
+                                    )::numeric,
+                                    fo.decimals
+                                )::text
+                            ELSE NULL
+                        END
+                    )
+                    FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
+                    JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
+                    ON o_idx = u_idx
+                ),
+                'fair_ou_u', (
+                    SELECT jsonb_agg(
+                        CASE
+                            WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                ROUND(
+                                    (
+                                        1.0 / (
+                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals))) /
+                                            (
+                                                (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                            )
+                                        )
+                                    )::numeric,
+                                    fo.decimals
+                                )::text
+                            ELSE NULL
+                        END
+                    )
+                    FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
+                    JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
+                    ON o_idx = u_idx
+                )
+            )
+        ELSE NULL
+    END as fair_odds_ou,
+    -- Include lines for reference
+    fo.lines->-1 as latest_lines
+FROM football_odds fo
+WHERE fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL;
 
 -- ============================================
 -- TRIGGERS FOR AUTOMATIC TIMESTAMPS
