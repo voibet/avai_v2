@@ -107,11 +107,35 @@ async function getFixtureInjuries(request: Request, { params }: { params: { id: 
       };
     });
 
-    // Filter out:
-    // 1. Future injuries (daysSinceInjury < 0)
-    // 2. Injuries older than 7 days (daysSinceInjury > 7)
+    // Filter out future injuries only (daysSinceInjury < 0)
+    // Note: The 8-day filter is applied on the UI side
     injuries = injuries.filter((injury: any) => {
-      return injury.daysSinceInjury >= 0 && injury.daysSinceInjury <= 8;
+      return injury.daysSinceInjury >= 0;
+    });
+
+    // Calculate matchesMissed and original injury date for each player
+    const playerStatsMap = new Map<number, { originalInjuryDate: string; matchesMissed: number }>();
+    
+    // Group by player to calculate stats
+    const playerInjuryList = new Map<number, any[]>();
+    injuries.forEach((injury: any) => {
+      const playerId = injury.player.id;
+      if (!playerInjuryList.has(playerId)) {
+        playerInjuryList.set(playerId, []);
+      }
+      playerInjuryList.get(playerId)!.push(injury);
+    });
+
+    // Calculate stats for each player
+    playerInjuryList.forEach((playerInjuries, playerId) => {
+      // Sort by timestamp to find earliest
+      playerInjuries.sort((a, b) => a.fixture.timestamp - b.fixture.timestamp);
+      const originalInjuryDate = playerInjuries[0].injuryDate;
+      
+      // Count matches missed (exclude current fixture)
+      const matchesMissed = playerInjuries.filter(inj => inj.fixture.id !== fixtureId).length;
+      
+      playerStatsMap.set(playerId, { originalInjuryDate, matchesMissed });
     });
 
     // Remove duplicates: keep only the most recent injury per player
@@ -124,6 +148,12 @@ async function getFixtureInjuries(request: Request, { params }: { params: { id: 
       if (!existingInjury ||
           injury.fixture.timestamp > existingInjury.fixture.timestamp ||
           (injury.isThisMatch && !existingInjury.isThisMatch)) {
+        // Add calculated stats
+        const stats = playerStatsMap.get(playerId);
+        if (stats) {
+          injury.injuryDate = stats.originalInjuryDate;
+          injury.matchesMissed = stats.matchesMissed;
+        }
         playerInjuriesMap.set(playerId, injury);
       }
     });

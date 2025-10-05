@@ -1,6 +1,3 @@
-import React from 'react';
-
-
 interface ResultsPanelProps {
   success: boolean;
   message: string;

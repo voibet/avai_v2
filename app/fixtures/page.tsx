@@ -219,6 +219,33 @@ export default function FixturesPage() {
       )
     },
     {
+      key: 'market_xg',
+      header: 'MARKET XG',
+      span: 1,
+      sortable: false, // Computed column - disable server-side sorting
+      filterable: false, // Computed column - disable filtering
+      sortType: 'custom',
+      customSort: (a, b, direction) => {
+        const aMarketXG = (parseFloat(a.market_xg_home?.toString() || '0') + parseFloat(a.market_xg_away?.toString() || '0')) || 0;
+        const bMarketXG = (parseFloat(b.market_xg_home?.toString() || '0') + parseFloat(b.market_xg_away?.toString() || '0')) || 0;
+
+        const comparison = aMarketXG - bMarketXG;
+        return direction === 'desc' ? -comparison : comparison;
+      },
+      render: (fixture) => (
+        <div className="flex items-center">
+          {fixture.market_xg_home !== null && fixture.market_xg_home !== undefined &&
+            fixture.market_xg_away !== null && fixture.market_xg_away !== undefined ? (
+            <span className="text-gray-300 font-bold">
+              {parseFloat(fixture.market_xg_home.toString()).toFixed(2)}-{parseFloat(fixture.market_xg_away.toString()).toFixed(2)}
+            </span>
+          ) : (
+            <span className="text-gray-500">-</span>
+          )}
+        </div>
+      )
+    },
+    {
       key: 'status_short', // Use database column name for server-side
       header: 'STATUS',
       span: 1,
@@ -520,22 +547,38 @@ export default function FixturesPage() {
             ) : homeInjuriesData && homeInjuriesData.length > 0 ? (
               <div className="space-y-0.5">
                 {/* Header */}
-                <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-4 text-gray-400">PLAYER</div>
-                  <div className="col-span-3 text-gray-400 text-center">STATUS</div>
+                <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                  <div className="col-span-3 text-gray-400">PLAYER</div>
                   <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                  <div className="col-span-2 text-gray-400 text-center">STATUS</div>
+                  <div className="col-span-2 text-gray-400 text-center">SINCE</div>
+                  <div className="col-span-2 text-gray-400 text-center">MISSED</div>
                 </div>
                 {homeInjuriesData.filter((injury) => {
+                  // Filter out injuries older than 8 days
+                  if (injury.daysSinceInjury > 8) return false;
                   const status = formatInjuryTiming(injury);
                   return !(status.startsWith('WAS') && injury.reason === 'Red Card');
                 }).map((injury) => (
-                  <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                  <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                    <div className="col-span-3 text-white font-bold truncate">{injury.player.name}</div>
+                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
+                      {injury.reason}
+                    </div>
+                    <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
                       {formatInjuryTiming(injury)}
                     </div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
-                      {injury.reason}
+                    <div className="col-span-2 text-center text-gray-400">
+                      {injury.injuryDate ? (() => {
+                        const date = new Date(injury.injuryDate);
+                        const day = date.getDate().toString().padStart(2, '0');
+                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                        const year = date.getFullYear();
+                        return `${day}.${month}.${year}`;
+                      })() : '-'}
+                    </div>
+                    <div className="col-span-2 text-center text-white font-bold">
+                      {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
                     </div>
                   </div>
                 ))}
@@ -565,22 +608,38 @@ export default function FixturesPage() {
             ) : awayInjuriesData && awayInjuriesData.length > 0 ? (
               <div className="space-y-0.5">
                 {/* Header */}
-                <div className="grid grid-cols-10 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-4 text-gray-400">PLAYER</div>
-                  <div className="col-span-3 text-gray-400 text-center">STATUS</div>
+                <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                  <div className="col-span-3 text-gray-400">PLAYER</div>
                   <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                  <div className="col-span-2 text-gray-400 text-center">STATUS</div>
+                  <div className="col-span-2 text-gray-400 text-center">SINCE</div>
+                  <div className="col-span-2 text-gray-400 text-center">MISSED</div>
                 </div>
                 {awayInjuriesData.filter((injury) => {
+                  // Filter out injuries older than 8 days
+                  if (injury.daysSinceInjury > 8) return false;
                   const status = formatInjuryTiming(injury);
                   return !(status.startsWith('WAS') && injury.reason === 'Red Card');
                 }).map((injury) => (
-                  <div key={injury.player.id} className="grid grid-cols-10 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div className="col-span-4 text-white font-bold truncate">{injury.player.name}</div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                  <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                    <div className="col-span-3 text-white font-bold truncate">{injury.player.name}</div>
+                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
+                      {injury.reason}
+                    </div>
+                    <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
                       {formatInjuryTiming(injury)}
                     </div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)}`}>
-                      {injury.reason}
+                    <div className="col-span-2 text-center text-gray-400">
+                      {injury.injuryDate ? (() => {
+                        const date = new Date(injury.injuryDate);
+                        const day = date.getDate().toString().padStart(2, '0');
+                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                        const year = date.getFullYear();
+                        return `${day}.${month}.${year}`;
+                      })() : '-'}
+                    </div>
+                    <div className="col-span-2 text-center text-white font-bold">
+                      {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
                     </div>
                   </div>
                 ))}
@@ -713,29 +772,13 @@ export default function FixturesPage() {
               show: true
             },
             {
-              id: 'market_xg',
-              label: 'MARKET XG',
-              home: stats.home_market_xg?.toString() || '-',
-              away: stats.away_market_xg?.toString() || '-',
-              info: stats.home_market_xg && stats.away_market_xg
-                ? (parseFloat(stats.home_market_xg.toString()) + parseFloat(stats.away_market_xg.toString())).toFixed(2)
-                : '-',
-              show: true
-            },
-            {
               id: 'predicted_xg',
               label: 'PREDICTED XG',
-              home: stats.home_predicted_xg?.toString() || '-',
-              away: stats.away_predicted_xg?.toString() || '-',
-              info: stats.total_predicted_xg?.toString() || '-',
-              show: true
-            },
-            {
-              id: 'predicted_market_xg',
-              label: 'PREDICTED MARKET XG',
-              home: stats.home_predicted_market_xg?.toString() || '-',
-              away: stats.away_predicted_market_xg?.toString() || '-',
-              info: stats.total_predicted_market_xg?.toString() || '-',
+              home: stats.ai_home_pred ? parseFloat(stats.ai_home_pred.toString()).toFixed(2) : '-',
+              away: stats.ai_away_pred ? parseFloat(stats.ai_away_pred.toString()).toFixed(2) : '-',
+              info: stats.ai_home_pred && stats.ai_away_pred
+                ? (parseFloat(stats.ai_home_pred.toString()) + parseFloat(stats.ai_away_pred.toString())).toFixed(2)
+                : '-',
               show: true
             },
             {

@@ -193,6 +193,29 @@ export class FixtureFetcher {
     }
   }
 
+  async getCurrentSeasonForLeague(leagueId: number): Promise<number | null> {
+    const result = await executeQuery<League>('SELECT seasons FROM football_leagues WHERE id = $1', [leagueId]);
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    const league = result.rows[0];
+    if (!league.seasons) return null;
+
+    const seasons: Record<string, SeasonData> = typeof league.seasons === 'string'
+      ? JSON.parse(league.seasons)
+      : league.seasons;
+
+    for (const [seasonYear, seasonData] of Object.entries(seasons)) {
+      if (seasonData.current) {
+        return parseInt(seasonYear);
+      }
+    }
+
+    return null;
+  }
+
   private async getCurrentLeaguesAndSeasons(): Promise<Array<{id: number, name: string, season: number}>> {
     // Get all leagues
     const result = await executeQuery<League>('SELECT id, name, seasons FROM football_leagues');

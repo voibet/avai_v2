@@ -9,8 +9,9 @@
 -- KEY CONCEPTS:
 -- - xG (Expected Goals): Mathematical prediction of scoring probability per shot
 -- - Fair Odds: Odds without bookmaker margin, calculated from market probabilities
--- - Market XG: Expected goals derived from betting market odds (not shot-based)
+-- - Market XG: Expected goals derived from betting market odds using Dixon-Coles Poisson optimization
 -- - ELO Ratings: Team strength ratings based on historical performance
+-- - MLP: Multi-Layer Perceptron neural network that predicts goals using team statistics
 --
 -- This file contains the complete schema for all football-related tables
 -- Generated: September 2025
@@ -20,9 +21,8 @@
 -- - football_fixtures (main fixture data with xG and actual results)
 -- - football_leagues (league information and season data)
 -- - football_teams (team information)
--- - team_elo (team ELO ratings calculated from match results)
 -- - football_odds (bookmaker odds with complete historical snapshots)
--- - football_predictions (ML goals predictions and manual adjustments)
+-- - football_predictions (MLP neural network predictions and manual adjustments)
 -- - football_stats (calculated team statistics: ELO, rolling xG, etc.)
 --
 
@@ -93,19 +93,6 @@ CREATE TABLE football_teams (
     updated_at              TIMESTAMP DEFAULT NOW()
 );
 
--- Team ELO Ratings (calculated using xG or actual goals)
-CREATE TABLE team_elo (
-    team_id                 BIGINT PRIMARY KEY,
-    league_id               BIGINT,
-    elo_rating              INTEGER NOT NULL DEFAULT 1500,
-    last_updated            TIMESTAMP DEFAULT NOW(),
-    created_at              TIMESTAMP DEFAULT NOW(),
-
-    -- Foreign Keys
-    FOREIGN KEY (team_id) REFERENCES football_teams(id),
-    FOREIGN KEY (league_id) REFERENCES football_leagues(id)
-);
-
 -- Main Fixtures Table (with xG data)
 CREATE TABLE football_fixtures (
     id                      BIGINT PRIMARY KEY,
@@ -123,6 +110,8 @@ CREATE TABLE football_fixtures (
     away_country            VARCHAR(100),
     xg_home                 DECIMAL(4,2),
     xg_away                 DECIMAL(4,2),
+    market_xg_home          DECIMAL(4,2),
+    market_xg_away          DECIMAL(4,2),
     goals_home              INTEGER,
     goals_away              INTEGER,
     score_halftime_home     INTEGER,
@@ -203,7 +192,64 @@ BEFORE UPDATE ON football_odds
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
--- ML Predictions and Manual Adjustments
+-- ============================================
+-- MACHINE LEARNING PREDICTIONS (MLP)
+-- ============================================
+--
+-- MLP (Multi-Layer Perceptron) Neural Network for Goal Prediction
+--
+-- HOW IT WORKS:
+-- 1. The MLP is a neural network trained on historical fixture data (season >= 2022)
+-- 2. It learns patterns from team statistics to predict goals_home and goals_away
+-- 3. The model uses TensorFlow.js and is cached in memory for fast predictions
+--
+-- INPUT FEATURES (10 features):
+-- - home_advantage: League-specific home field advantage (goals difference)
+-- - adjusted_rolling_xg_home: Home team's adjusted expected goals (rolling average)
+-- - adjusted_rolling_xga_home: Home team's adjusted expected goals against
+-- - adjusted_rolling_xg_away: Away team's adjusted expected goals
+-- - adjusted_rolling_xga_away: Away team's adjusted expected goals against
+-- - adjusted_rolling_market_xg_home: Home team's market xG (from odds)
+-- - adjusted_rolling_market_xga_home: Home team's market xGA
+-- - adjusted_rolling_market_xg_away: Away team's market xG
+-- - adjusted_rolling_market_xga_away: Away team's market xGA
+-- - avg_goals_league: League average goals per match
+--
+-- OUTPUT:
+-- - home_pred: Predicted goals for home team (DECIMAL)
+-- - away_pred: Predicted goals for away team (DECIMAL)
+--
+-- ADMIN API ENDPOINTS:
+-- - POST /api/admin/mlp/train: Train new model on historical data, saves to cache
+-- - POST /api/admin/mlp/predict: Generate predictions for all upcoming fixtures (auto-trains if needed)
+-- - GET /api/admin/mlp/predict/[id]: Predict single fixture by ID
+-- - POST /api/admin/mlp/test: Test model performance on historical data (calculates MAE, RMSE), does not predict
+--
+-- ADMIN FIXTURES API ENDPOINTS:
+-- - POST /api/admin/fixtures/fetch: Start fixture fetching
+--   * Body: { type: 'all' } - fetch all current seasons
+--   * Body: { type: 'league', leagueId: 123 } - fetch specific league's current season
+--
+-- ADMIN XG API ENDPOINTS:
+-- - POST /api/admin/fetch-xg-data: Start XG data fetching (triggers automatic calculation chain)
+--   * Body: { type: 'all' } - fetch XG for all leagues with XG sources
+--   * Body: { type: 'league', leagueId: 123 } - fetch XG for specific league
+--   * Automatically triggers: /market-xg (for updated fixtures) → /stats → /predict → /prediction-odds (for future fixtures of updated teams)
+-- - POST /api/admin/update-xg-source: Configure XG data sources for leagues
+--   * Body: { leagueId, season, rounds, xgSource }
+--
+-- ADMIN CALCULATIONS API ENDPOINTS:
+-- - POST /api/admin/market-xg: Calculate market XG for all finished fixtures
+-- - POST /api/admin/market-xg/[...ids]: Calculate market XG for specific fixture IDs
+--   * URL: /api/admin/market-xg/123,456,789 - comma-separated fixture IDs
+-- - POST /api/admin/prediction-odds: Calculate betting odds from all MLP predictions
+-- - POST /api/admin/prediction-odds/[...ids]: Calculate betting odds for specific fixture IDs
+--   * URL: /api/admin/prediction-odds/123,456,789 - comma-separated fixture IDs
+-- - POST /api/admin/stats: Run statistics calculations
+--   * Body: { "functions": ["all"], "fixtureIds": [123, 456], "createViews": false }
+--
+-- MLP Predictions and Manual Adjustments
+
 CREATE TABLE football_predictions (
     fixture_id              BIGINT PRIMARY KEY,
     home_pred               DECIMAL(5,4),
@@ -274,6 +320,7 @@ CREATE INDEX IF NOT EXISTS idx_football_fixtures_status ON football_fixtures (st
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date ON football_fixtures (home_team_id, date) WHERE status_short = 'FT';
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date_away ON football_fixtures (away_team_id, date) WHERE status_short = 'FT';
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_league_date_status ON football_fixtures (league_id, date DESC, status_short) WHERE status_short = 'FT';
+CREATE INDEX IF NOT EXISTS idx_football_fixtures_market_xg ON football_fixtures (market_xg_home, market_xg_away) WHERE market_xg_home IS NOT NULL;
 
 -- Primary composite index for your main query pattern
 CREATE INDEX CONCURRENTLY idx_football_odds_fixture_bookie ON football_odds (fixture_id, bookie);
@@ -289,10 +336,6 @@ CREATE INDEX IF NOT EXISTS idx_football_predictions_created_at ON football_predi
 
 -- football_stats indexes
 CREATE INDEX IF NOT EXISTS idx_football_stats_created_at ON football_stats (created_at);
-
--- team_elo indexes
-CREATE INDEX IF NOT EXISTS idx_team_elo_league_id ON team_elo (league_id);
-CREATE INDEX IF NOT EXISTS idx_team_elo_elo_rating ON team_elo (elo_rating DESC);
 
 -- Composite index for market xG calculations (frequently queried columns together)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_stats_fixture_elo ON football_stats (fixture_id, elo_home, elo_away, league_elo, home_advantage);
@@ -533,6 +576,29 @@ SELECT
     fo.lines->-1 as latest_lines
 FROM football_odds fo
 WHERE fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL;
+
+-- ============================================
+-- LEAGUE ELO RATINGS
+-- ============================================
+
+-- Initial league ELO ratings for all leagues
+-- This table stores the base ELO ratings for leagues that are used
+-- as starting points for team ELO calculations
+CREATE TABLE football_initial_league_elos (
+    league_id BIGINT PRIMARY KEY REFERENCES football_leagues(id),
+    elo INTEGER NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Index for performance
+CREATE INDEX idx_football_initial_league_elos_elo ON football_initial_league_elos(elo);
+
+-- Add trigger for updated_at
+CREATE TRIGGER update_football_initial_league_elos_updated_at
+    BEFORE UPDATE ON football_initial_league_elos
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
 -- TRIGGERS FOR AUTOMATIC TIMESTAMPS

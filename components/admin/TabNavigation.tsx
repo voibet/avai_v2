@@ -1,6 +1,3 @@
-import React from 'react';
-
-
 type AdminTab = 'fetch-fixtures' | 'add-leagues';
 
 interface Tab {

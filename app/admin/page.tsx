@@ -127,13 +127,69 @@ export default function AdminPage() {
   };
 
 
-  const fetchXGForLeague = async (leagueId: number, leagueName: string) => {
+  const executeAction = async () => {
     setIsLoading(true);
     setResult(null);
     setProgress(null);
 
     try {
-      const response = await fetch('/api/admin/fetch-xg-data', {
+      const endpoint = '/api/admin/add-leagues';
+      // For add-leagues, we need both selected leagues and their seasons
+      const selectedLeagueIds = Array.from(selectedLeagues);
+      const seasonsToSend: Record<string, string[]> = {};
+
+      // For selected leagues, if no specific seasons are selected, select all seasons
+      selectedLeagueIds.forEach(leagueId => {
+        const leagueIdStr = leagueId.toString();
+        if (selectedSeasons[leagueIdStr] && selectedSeasons[leagueIdStr].size > 0) {
+          // Use specifically selected seasons
+          seasonsToSend[leagueIdStr] = Array.from(selectedSeasons[leagueIdStr]);
+        } else {
+          // Select all seasons for this league
+          const league = availableLeagues.find(l => l.id === leagueId);
+          if (league) {
+            seasonsToSend[leagueIdStr] = league.seasons;
+          }
+        }
+      });
+
+      const body = { selectedLeagues: selectedLeagueIds, selectedSeasons: seasonsToSend };
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Handle JSON response for add-leagues
+      const data = await response.json();
+      setResult({
+        success: data.success !== false,
+        message: data.message || 'Action completed successfully'
+      });
+
+    } catch (error) {
+      setResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'An error occurred'
+      });
+      setProgress(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const runChainForLeague = async (leagueId: number, leagueName: string) => {
+    setIsLoading(true);
+    setResult(null);
+    setProgress(null);
+
+    try {
+      const response = await fetch('/api/admin/chain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'league', leagueId }),
@@ -179,7 +235,7 @@ export default function AdminPage() {
               } else if (data.type === 'complete') {
                 setResult({
                   success: data.success !== false,
-                  message: data.message || 'XG fetch completed successfully'
+                  message: data.message || 'Chain completed successfully'
                 });
                 setProgress(null);
               } else if (data.type === 'error') {
@@ -194,210 +250,6 @@ export default function AdminPage() {
             }
           }
         }
-      }
-
-    } catch (error) {
-      setResult({
-        success: false,
-        message: error instanceof Error ? error.message : 'An error occurred'
-      });
-      setProgress(null);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const fetchXGForAllLeagues = async () => {
-    setIsLoading(true);
-    setResult(null);
-    setProgress(null);
-
-    try {
-      const response = await fetch('/api/admin/fetch-xg-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'all' }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      // Handle Server-Sent Events stream
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('Failed to get response reader');
-      }
-
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
-
-              if (data.type === 'progress') {
-                setProgress({
-                  league: data.message,
-                  current: data.current,
-                  total: data.total,
-                  message: data.message
-                });
-              } else if (data.type === 'complete') {
-                setResult({
-                  success: data.success !== false,
-                  message: data.message || 'XG fetch completed successfully'
-                });
-                setProgress(null);
-              } else if (data.type === 'error') {
-                setResult({
-                  success: false,
-                  message: data.message
-                });
-                setProgress(null);
-              }
-            } catch (parseError) {
-              console.error('Failed to parse SSE data:', line, parseError);
-            }
-          }
-        }
-      }
-
-    } catch (error) {
-      setResult({
-        success: false,
-        message: error instanceof Error ? error.message : 'An error occurred'
-      });
-      setProgress(null);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const executeAction = async () => {
-    setIsLoading(true);
-    setResult(null);
-    setProgress(null);
-
-    try {
-      let endpoint = '';
-      let body = {};
-
-      if (activeTab === 'fetch-fixtures') {
-        endpoint = '/api/admin/fetch-fixtures';
-        // Convert selectedSeasons from Sets to arrays for the API
-        const seasonsToSend: Record<string, string[]> = {};
-        Object.entries(selectedSeasons).forEach(([leagueId, seasons]) => {
-          seasonsToSend[leagueId] = Array.from(seasons);
-        });
-        body = { selectedSeasons: seasonsToSend };
-      } else {
-        endpoint = '/api/admin/add-leagues';
-        // For add-leagues, we need both selected leagues and their seasons
-        const selectedLeagueIds = Array.from(selectedLeagues);
-        const seasonsToSend: Record<string, string[]> = {};
-
-        // For selected leagues, if no specific seasons are selected, select all seasons
-        selectedLeagueIds.forEach(leagueId => {
-          const leagueIdStr = leagueId.toString();
-          if (selectedSeasons[leagueIdStr] && selectedSeasons[leagueIdStr].size > 0) {
-            // Use specifically selected seasons
-            seasonsToSend[leagueIdStr] = Array.from(selectedSeasons[leagueIdStr]);
-          } else {
-            // Select all seasons for this league
-            const league = availableLeagues.find(l => l.id === leagueId);
-            if (league) {
-              seasonsToSend[leagueIdStr] = league.seasons;
-            }
-          }
-        });
-
-        body = { selectedLeagues: selectedLeagueIds, selectedSeasons: seasonsToSend };
-      }
-
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      if (activeTab === 'fetch-fixtures') {
-        // Handle Server-Sent Events stream for fetch-fixtures
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-
-        if (!reader) {
-          throw new Error('Failed to get response reader');
-        }
-
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-
-          if (done) {
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
-
-                if (data.type === 'progress') {
-                  setProgress({
-                    league: data.league,
-                    current: data.current,
-                    total: data.total,
-                    message: data.message
-                  });
-                } else if (data.type === 'complete') {
-                  setResult({
-                    success: data.success !== false,
-                    message: data.message || 'Action completed successfully'
-                  });
-                  setProgress(null);
-                } else if (data.type === 'error') {
-                  setResult({
-                    success: false,
-                    message: data.message
-                  });
-                  setProgress(null);
-                }
-              } catch (parseError) {
-                console.error('Failed to parse SSE data:', line, parseError);
-              }
-            }
-          }
-        }
-      } else {
-        // Handle JSON response for add-leagues
-        const data = await response.json();
-        setResult({
-          success: data.success !== false,
-          message: data.message || 'Action completed successfully'
-        });
       }
 
     } catch (error) {
@@ -561,6 +413,124 @@ export default function AdminPage() {
     setDeleteModal({ isOpen: false, league: null });
   };
 
+  // MLP handlers
+  const handleTrainModel = async () => {
+    console.log('[Admin] Train button clicked');
+    setIsLoading(true);
+    setResult(null);
+    setProgress(null);
+
+    try {
+      console.log('[Admin] Sending request to /api/admin/mlp/train');
+      const response = await fetch('/api/admin/mlp/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      console.log('[Admin] Response status:', response.status);
+      const data = await response.json();
+      console.log('[Admin] Response data:', data);
+
+      if (data.success !== false) {
+        setResult({
+          success: true,
+          message: data.message || 'Model trained successfully'
+        });
+      } else {
+        setResult({
+          success: false,
+          message: data.message || 'Failed to train model'
+        });
+      }
+    } catch (error) {
+      console.error('[Admin] Train error:', error);
+      setResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to train model'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGeneratePredictions = async () => {
+    console.log('[Admin] Predict button clicked');
+    setIsLoading(true);
+    setResult(null);
+    setProgress(null);
+
+    try {
+      console.log('[Admin] Sending request to /api/admin/mlp/predict');
+      const response = await fetch('/api/admin/mlp/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      console.log('[Admin] Response status:', response.status);
+      const data = await response.json();
+      console.log('[Admin] Response data:', data);
+
+      if (data.success !== false) {
+        setResult({
+          success: true,
+          message: data.message || 'Predictions generated successfully'
+        });
+      } else {
+        setResult({
+          success: false,
+          message: data.message || 'Failed to generate predictions'
+        });
+      }
+    } catch (error) {
+      console.error('[Admin] Predict error:', error);
+      setResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to generate predictions'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTestModel = async () => {
+    console.log('[Admin] Test button clicked');
+    setIsLoading(true);
+    setResult(null);
+    setProgress(null);
+
+    try {
+      console.log('[Admin] Sending request to /api/admin/mlp/test');
+      const response = await fetch('/api/admin/mlp/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      console.log('[Admin] Response status:', response.status);
+      const data = await response.json();
+      console.log('[Admin] Response data:', data);
+
+      if (data.success !== false) {
+        setResult({
+          success: true,
+          message: data.message || 'Model tested successfully'
+        });
+      } else {
+        setResult({
+          success: false,
+          message: data.message || 'Failed to test model'
+        });
+      }
+    } catch (error) {
+      console.error('[Admin] Test error:', error);
+      setResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to test model'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleXGSourceSubmit = async () => {
     if (!xgSourceModal.league || !xgSourceModal.selectedSeason) return;
 
@@ -711,23 +681,24 @@ export default function AdminPage() {
       render: (league) => (
         <div className="flex items-center space-x-1">
           <button
-            onClick={() => fetchXGForLeague(league.id, league.name)}
+            onClick={() => runChainForLeague(league.id, league.name)}
             disabled={isLoading}
-            className="bg-green-800 hover:bg-green-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-2 py-1 text-xs font-mono transition-colors"
+            className="bg-green-800 hover:bg-green-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-1.5 py-0.5 text-xs font-mono"
+            title="Run full chain: fixtures → xG → calculations"
           >
-            Fetch xG
+            CHN
           </button>
           <button
             onClick={() => openXGSourceModal(league)}
-            className="bg-blue-800 hover:bg-blue-900 text-white px-2 py-1 text-xs font-mono transition-colors"
+            className="bg-blue-800 hover:bg-blue-900 text-white px-1.5 py-0.5 text-xs font-mono"
           >
-            Manage xG
+            MG
           </button>
           <button
             onClick={() => handleDeleteLeague(league)}
-            className="bg-red-800 hover:bg-red-900 text-white px-2 py-1 text-xs font-mono transition-colors"
+            className="bg-red-800 hover:bg-red-900 text-white px-1.5 py-0.5 text-xs font-mono"
           >
-            Delete
+            DEL
           </button>
         </div>
       )
@@ -877,21 +848,34 @@ export default function AdminPage() {
               setSelectedLeagues(new Set(Array.from(selectedIds).map(id => Number(id))));
             }}
             actions={
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={executeAction}
-                  disabled={isLoading || selectedCount === 0}
-                  className="bg-red-800 hover:bg-red-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-3 py-1.5 font-mono text-xs transition-colors"
-                >
-                  {isLoading ? 'Processing...' : 'Execute Fetch'}
-                </button>
-                <button
-                  onClick={fetchXGForAllLeagues}
-                  disabled={isLoading}
-                  className="bg-green-800 hover:bg-green-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-3 py-1.5 font-mono text-xs transition-colors"
-                >
-                  {isLoading ? 'Processing...' : 'Fetch All XG'}
-                </button>
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400 text-xs font-mono">MLP:</span>
+                  <button
+                    onClick={handleTrainModel}
+                    disabled={isLoading}
+                    className="bg-blue-800 hover:bg-blue-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
+                    title="Train MLP model"
+                  >
+                    Train
+                  </button>
+                  <button
+                    onClick={handleGeneratePredictions}
+                    disabled={isLoading}
+                    className="bg-purple-800 hover:bg-purple-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
+                    title="Generate predictions using saved MLP model"
+                  >
+                    Predict
+                  </button>
+                  <button
+                    onClick={handleTestModel}
+                    disabled={isLoading}
+                    className="bg-yellow-800 hover:bg-yellow-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
+                    title="Test model performance"
+                  >
+                    Test
+                  </button>
+                </div>
               </div>
             }
           />

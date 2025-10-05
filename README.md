@@ -41,18 +41,6 @@ The application supports fetching Expected Goals (XG) data from three different 
 - Requires RapidAPI subscription for Flashlive endpoints  
 - Fetches data from Flashlive's tournaments results and event statistics APIs
 
-### Usage
-
-1. **Configure XG Sources**: In the admin panel, use "Manage xG" to set up XG data sources for each league
-2. **Fetch XG for League**: Click "Fetch xG" next to any league to fetch missing XG data for that league
-3. **Fetch All XG**: Click "Fetch All XG" to fetch missing XG data for all configured leagues
-
-The system automatically matches fixtures between different APIs using:
-- Match scores
-- Start time (±1 hour window)  
-- Smart team name matching: exact matches with stored team mappings first, then fuzzy matching
-- Matches are automatically scoped to the correct league/season from the xg_source configuration
-
 ### Requirements
 
 - All three XG source APIs require RapidAPI subscriptions

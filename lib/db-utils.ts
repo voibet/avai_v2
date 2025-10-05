@@ -75,3 +75,51 @@ export function withErrorHandler<T extends any[]>(
     }
   };
 }
+
+/**
+ * Save or update predictions in the football_predictions table
+ * Does NOT overwrite adjustment fields on update
+ */
+export interface PredictionData {
+  id: number;
+  predicted_home: number;
+  predicted_away: number;
+}
+
+export async function savePredictions(predictions: PredictionData[]): Promise<number> {
+  if (predictions.length === 0) return 0;
+
+  const client = await pool.connect();
+  try {
+    // Build bulk upsert query - MUCH faster than individual inserts
+    const values: any[] = [];
+    const valueStrings: string[] = [];
+    
+    predictions.forEach((pred, idx) => {
+      const offset = idx * 3;
+      valueStrings.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, NOW(), NOW())`);
+      values.push(pred.id, pred.predicted_home, pred.predicted_away);
+    });
+
+    const query = `
+      INSERT INTO football_predictions (
+        fixture_id, 
+        home_pred, 
+        away_pred, 
+        created_at, 
+        updated_at
+      )
+      VALUES ${valueStrings.join(', ')}
+      ON CONFLICT (fixture_id) 
+      DO UPDATE SET
+        home_pred = EXCLUDED.home_pred,
+        away_pred = EXCLUDED.away_pred,
+        updated_at = NOW()
+    `;
+
+    await client.query(query, values);
+    return predictions.length;
+  } finally {
+    client.release();
+  }
+}

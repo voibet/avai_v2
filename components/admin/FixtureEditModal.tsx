@@ -18,36 +18,37 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
 
   useEffect(() => {
     // Initialize form data with fixture data
+    // Use null check instead of falsy check to preserve 0 values
     setFormData({
-      referee: fixture.referee || '',
-      timestamp: fixture.timestamp || '',
+      referee: fixture.referee ?? '',
+      timestamp: fixture.timestamp ?? '',
       date: fixture.date ? new Date(fixture.date).toISOString().slice(0, 16) : '',
-      venue_name: fixture.venue_name || '',
-      status_long: fixture.status_long || '',
-      status_short: fixture.status_short || '',
-      home_team_id: fixture.home_team_id || '',
-      home_team_name: fixture.home_team_name || '',
-      home_country: fixture.home_country || '',
-      away_team_id: fixture.away_team_id || '',
-      away_team_name: fixture.away_team_name || '',
-      away_country: fixture.away_country || '',
-      xg_home: fixture.xg_home || '',
-      xg_away: fixture.xg_away || '',
-      goals_home: fixture.goals_home || '',
-      goals_away: fixture.goals_away || '',
-      score_halftime_home: fixture.score_halftime_home || '',
-      score_halftime_away: fixture.score_halftime_away || '',
-      score_fulltime_home: fixture.score_fulltime_home || '',
-      score_fulltime_away: fixture.score_fulltime_away || '',
-      score_extratime_home: fixture.score_extratime_home || '',
-      score_extratime_away: fixture.score_extratime_away || '',
-      score_penalty_home: fixture.score_penalty_home || '',
-      score_penalty_away: fixture.score_penalty_away || '',
-      league_id: fixture.league_id || '',
-      league_name: fixture.league_name || '',
-      league_country: fixture.league_country || '',
-      season: fixture.season || '',
-      round: fixture.round || ''
+      venue_name: fixture.venue_name ?? '',
+      status_long: fixture.status_long ?? '',
+      status_short: fixture.status_short ?? '',
+      home_team_id: fixture.home_team_id ?? '',
+      home_team_name: fixture.home_team_name ?? '',
+      home_country: fixture.home_country ?? '',
+      away_team_id: fixture.away_team_id ?? '',
+      away_team_name: fixture.away_team_name ?? '',
+      away_country: fixture.away_country ?? '',
+      xg_home: fixture.xg_home ?? '',
+      xg_away: fixture.xg_away ?? '',
+      goals_home: fixture.goals_home ?? '',
+      goals_away: fixture.goals_away ?? '',
+      score_halftime_home: fixture.score_halftime_home ?? '',
+      score_halftime_away: fixture.score_halftime_away ?? '',
+      score_fulltime_home: fixture.score_fulltime_home ?? '',
+      score_fulltime_away: fixture.score_fulltime_away ?? '',
+      score_extratime_home: fixture.score_extratime_home ?? '',
+      score_extratime_away: fixture.score_extratime_away ?? '',
+      score_penalty_home: fixture.score_penalty_home ?? '',
+      score_penalty_away: fixture.score_penalty_away ?? '',
+      league_id: fixture.league_id ?? '',
+      league_name: fixture.league_name ?? '',
+      league_country: fixture.league_country ?? '',
+      season: fixture.season ?? '',
+      round: fixture.round ?? ''
     })
   }, [fixture])
 
@@ -65,10 +66,13 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
     setSuccess(false)
 
     try {
-      // Convert empty strings to null for nullable fields
+      // Convert empty strings to null for nullable fields, and convert numeric strings to numbers
       const submitData = Object.entries(formData).reduce((acc, [key, value]) => {
         if (value === '') {
           acc[key] = null
+        } else if (typeof value === 'string' && !isNaN(Number(value)) && value.trim() !== '') {
+          // Convert numeric strings to numbers, but keep '0' as 0, not null
+          acc[key] = Number(value)
         } else {
           acc[key] = value
         }

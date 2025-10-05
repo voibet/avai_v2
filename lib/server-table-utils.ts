@@ -314,32 +314,3 @@ function parseFilterValue(value: string): any {
   // Return as string
   return value;
 }
-
-/**
- * Create a reusable table API handler
- */
-export function createTableApiHandler<T>(
-  baseQuery: string,
-  validColumns: Record<string, string> = {},
-  defaultSort?: TableSort,
-  searchColumns?: string[]
-) {
-  return async (request: Request) => {
-    const url = new URL(request.url);
-    const params = parseTableParams(url.searchParams);
-    
-    // Add search columns if provided
-    if (searchColumns) {
-      params.searchColumns = searchColumns;
-    }
-    
-    const result = await executeTableQuery<T>(
-      baseQuery,
-      params,
-      validColumns,
-      defaultSort
-    );
-    
-    return result;
-  };
-}

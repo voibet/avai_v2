@@ -62,6 +62,7 @@ export function useTeamInjuries(fixtureId: string | null, teamId: string | null)
     isThisMatch: boolean;
     daysSinceInjury: number;
     injuryDate: string;
+    matchesMissed: number;
   }>>(url);
 }
 
@@ -119,12 +120,8 @@ export function useFixtureStats(fixtureId: string | null) {
       adjusted_rolling_market_xga_away: number | null;
       home_market_xg: number | null;
       away_market_xg: number | null;
-      home_predicted_xg: number | null;
-      away_predicted_xg: number | null;
-      total_predicted_xg: number | null;
-      home_predicted_market_xg: number | null;
-      away_predicted_market_xg: number | null;
-      total_predicted_market_xg: number | null;
+      ai_home_pred: number | null;
+      ai_away_pred: number | null;
     } | null;
   }>(url);
 }

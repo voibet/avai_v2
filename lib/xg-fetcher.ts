@@ -128,7 +128,7 @@ export class XGFetcher {
   async fetchXGDataForLeague(
     leagueId: number,
     onProgress?: (message: string, current: number, total: number) => void
-  ): Promise<{ success: boolean; message: string; updatedCount?: number }> {
+  ): Promise<{ success: boolean; message: string; updatedCount?: number; updatedFixtureIds?: number[] }> {
     try {
       console.log(`Starting XG fetch for league ${leagueId}...`);
       
@@ -143,7 +143,8 @@ export class XGFetcher {
         return {
           success: true,
           message: 'No fixtures found that need XG data',
-          updatedCount: 0
+          updatedCount: 0,
+          updatedFixtureIds: []
         };
       }
 
@@ -159,11 +160,12 @@ export class XGFetcher {
       }
 
       let totalUpdated = 0;
+      const allUpdatedIds: number[] = [];
       const batchSize = 10; // Process fixtures in batches to avoid overwhelming APIs
 
       for (let i = 0; i < fixtures.length; i += batchSize) {
         const batch = fixtures.slice(i, i + batchSize);
-        
+
         if (onProgress) {
           onProgress(
             `Processing fixtures ${i + 1}-${Math.min(i + batchSize, fixtures.length)}`,
@@ -173,8 +175,9 @@ export class XGFetcher {
         }
 
         try {
-          const batchUpdated = await this.processBatch(batch, leagueConfig);
-          totalUpdated += batchUpdated;
+          const batchResult = await this.processBatch(batch, leagueConfig);
+          totalUpdated += batchResult.count;
+          allUpdatedIds.push(...batchResult.updatedIds);
 
           // Rate limiting - small delay between batches
           if (i + batchSize < fixtures.length) {
@@ -189,7 +192,8 @@ export class XGFetcher {
       return {
         success: true,
         message: `Updated XG data for ${totalUpdated} fixtures`,
-        updatedCount: totalUpdated
+        updatedCount: totalUpdated,
+        updatedFixtureIds: allUpdatedIds
       };
     } catch (error) {
       console.error('XG fetch process failed:', error);
@@ -202,7 +206,7 @@ export class XGFetcher {
 
   async fetchXGDataForAllLeagues(
     onProgress?: (league: string, current: number, total: number) => void
-  ): Promise<{ success: boolean; message: string; updatedCount?: number }> {
+  ): Promise<{ success: boolean; message: string; updatedCount?: number; updatedFixtureIds?: number[] }> {
     try {
       console.log('Starting XG fetch for all leagues...');
 
@@ -213,15 +217,17 @@ export class XGFetcher {
         return {
           success: true,
           message: 'No leagues found with XG source configuration',
-          updatedCount: 0
+          updatedCount: 0,
+          updatedFixtureIds: []
         };
       }
 
       let totalUpdated = 0;
+      const allUpdatedFixtureIds: number[] = [];
 
       for (let i = 0; i < leagues.length; i++) {
         const league = leagues[i];
-        
+
         if (onProgress) {
           onProgress(league.name, i + 1, leagues.length);
         }
@@ -229,6 +235,9 @@ export class XGFetcher {
         try {
           const result = await this.fetchXGDataForLeague(league.id);
           totalUpdated += result.updatedCount || 0;
+          if (result.updatedFixtureIds) {
+            allUpdatedFixtureIds.push(...result.updatedFixtureIds);
+          }
         } catch (error) {
           console.error(`Error processing league ${league.name}:`, error);
           // Continue with next league
@@ -243,7 +252,8 @@ export class XGFetcher {
       return {
         success: true,
         message: `Updated XG data for ${totalUpdated} fixtures across ${leagues.length} leagues`,
-        updatedCount: totalUpdated
+        updatedCount: totalUpdated,
+        updatedFixtureIds: allUpdatedFixtureIds
       };
     } catch (error) {
       console.error('Global XG fetch process failed:', error);
@@ -308,8 +318,9 @@ export class XGFetcher {
     return result.rows;
   }
 
-  private async processBatch(fixtures: Fixture[], leagueConfig: any): Promise<number> {
+  private async processBatch(fixtures: Fixture[], leagueConfig: any): Promise<{ count: number; updatedIds: number[] }> {
     let updatedCount = 0;
+    const updatedIds: number[] = [];
 
     // Group fixtures by XG source to optimize caching
     const fixturesBySource = new Map<string, Fixture[]>();
@@ -341,9 +352,10 @@ export class XGFetcher {
           
           const xgData = await this.fetchXGForFixture(fixture, leagueConfig, sourceFixtures);
           if (xgData) {
-            console.log(`✅ Found XG data for fixture ${fixture.id}: Home ${xgData.home}, Away ${xgData.away}`);
+            console.log(`Found XG data for fixture ${fixture.id}: Home ${xgData.home}, Away ${xgData.away}`);
             await this.updateFixtureXG(fixture.id, xgData);
             updatedCount++;
+            updatedIds.push(fixture.id);
           }
         } catch (error) {
           console.error(`❌ Error processing fixture ${fixture.id}:`, error);
@@ -355,7 +367,7 @@ export class XGFetcher {
       }
     }
 
-    return updatedCount;
+    return { count: updatedCount, updatedIds };
   }
 
   private async fetchXGForFixture(fixture: Fixture, leagueConfig: any, allFixturesForSource?: Fixture[]): Promise<XGData | null> {
@@ -457,7 +469,6 @@ export class XGFetcher {
       let allMatches = this.sofascoreCache.get(cacheKey);
       
       if (!allMatches) {
-        console.log(`📊 Fetching Sofascore tournament data for ${tournamentId}-${seasonId}...`);
         allMatches = [];
         
         // Fetch multiple pages (up to 10) to get comprehensive match data
@@ -466,7 +477,6 @@ export class XGFetcher {
         const targetFixtureCount = allFixturesForSource?.length || 999; // If not specified, keep old behavior
         
         for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
-          console.log(`📊 Calling Sofascore tournaments API page ${pageIndex + 1}...`);
           const matchesResponse = await axios.get('https://sofascore.p.rapidapi.com/tournaments/get-last-matches', {
             headers: {
               'x-rapidapi-key': this.rapidApiKey,
@@ -488,14 +498,12 @@ export class XGFetcher {
           
           // Stop if no matches found
           if (matches.length === 0) {
-            console.log(`📊 No more matches found at page ${pageIndex + 1}, stopping pagination`);
             break;
           }
           
           // Filter out duplicate matches
           const newMatches = matches.filter(match => !seenMatchIds.has(match.id));
           if (newMatches.length === 0) {
-            console.log(`📊 All matches on page ${pageIndex + 1} are duplicates, stopping pagination`);
             break;
           }
           
@@ -505,13 +513,11 @@ export class XGFetcher {
           
           // Stop early if we have significantly more matches than fixtures we need
           if (allMatches.length >= targetFixtureCount * 3) {
-            console.log(`📊 Found ${allMatches.length} matches, more than enough for ${targetFixtureCount} fixtures, stopping pagination`);
             break;
           }
           
           // Stop if we got fewer matches than the previous page (indicates end of data)
           if (pageIndex > 0 && matches.length < lastPageSize) {
-            console.log(`📊 Page ${pageIndex + 1} has fewer matches than previous page, stopping pagination`);
             break;
           }
           
@@ -520,7 +526,6 @@ export class XGFetcher {
         
         // Cache the results
         this.sofascoreCache.set(cacheKey, allMatches);
-        console.log(`📦 Cached ${allMatches.length} Sofascore matches for ${cacheKey}`);
       }
 
       // Get team mappings for more accurate matching
@@ -534,7 +539,6 @@ export class XGFetcher {
       }
 
       // Get statistics for the matched event
-      console.log(`📊 Calling Sofascore statistics API for match ${matchingEvent.id}...`);
       const statsResponse = await axios.get('https://sofascore.p.rapidapi.com/matches/get-statistics', {
         headers: {
           'x-rapidapi-key': this.rapidApiKey,
@@ -553,7 +557,7 @@ export class XGFetcher {
       
       // Check if statistics exists and is iterable
       if (!statsData.statistics || !Array.isArray(statsData.statistics)) {
-        console.log(`❌ No statistics available for match ${matchingEvent.id}`);
+        console.log(`❌ No xG statistics available for match ${matchingEvent.id}`);
         return null;
       }
       
@@ -588,7 +592,6 @@ export class XGFetcher {
       let allEvents = this.flashliveCache.get(cacheKey);
       
       if (!allEvents) {
-        console.log(`📊 Fetching Flashlive tournament data for ${tournamentStageId}...`);
         allEvents = [];
         
         // Fetch multiple pages (up to 10) to get comprehensive match data
@@ -597,7 +600,6 @@ export class XGFetcher {
         const targetFixtureCount = allFixturesForSource?.length || 999; // If not specified, keep old behavior
         
         for (let page = 1; page <= 10; page++) {
-          console.log(`📊 Calling Flashlive tournaments API page ${page}...`);
           const matchesResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/tournaments/results', {
             headers: {
               'x-rapidapi-key': this.rapidApiKey,
@@ -626,14 +628,12 @@ export class XGFetcher {
           
           // Stop if no events found
           if (pageEvents.length === 0) {
-            console.log(`📊 No more events found at page ${page}, stopping pagination`);
             break;
           }
           
           // Filter out duplicate events
           const newEvents = pageEvents.filter(event => !seenEventIds.has(event.EVENT_ID));
           if (newEvents.length === 0) {
-            console.log(`📊 All events on page ${page} are duplicates, stopping pagination`);
             break;
           }
           
@@ -643,13 +643,11 @@ export class XGFetcher {
           
           // Stop early if we have significantly more events than fixtures we need
           if (allEvents.length >= targetFixtureCount * 3) {
-            console.log(`📊 Found ${allEvents.length} events, more than enough for ${targetFixtureCount} fixtures, stopping pagination`);
             break;
           }
           
           // Stop if we got fewer events than the previous page (indicates end of data)
           if (page > 1 && pageEvents.length < lastPageSize) {
-            console.log(`📊 Page ${page} has fewer events than previous page, stopping pagination`);
             break;
           }
           
@@ -658,7 +656,6 @@ export class XGFetcher {
         
         // Cache the results
         this.flashliveCache.set(cacheKey, allEvents);
-        console.log(`📦 Cached ${allEvents.length} Flashlive events for ${cacheKey}`);
       }
 
       // Get team mappings for more accurate matching

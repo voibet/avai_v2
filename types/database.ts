@@ -28,6 +28,8 @@ export interface Fixture {
   away_country?: string;
   xg_home?: number;
   xg_away?: number;
+  market_xg_home?: number;
+  market_xg_away?: number;
   goals_home?: number;
   goals_away?: number;
   score_halftime_home?: number;
@@ -74,12 +76,6 @@ export interface Team {
   venue?: string;
   created_at: string;
   updated_at: string;
-  // ELO rating data
-  league_id?: number;
-  league_name?: string;
-  league_country?: string;
-  elo_rating: number;
-  last_updated: string;
 }
 
 
