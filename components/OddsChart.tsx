@@ -64,6 +64,7 @@ export function OddsChart({
   };
 
   if (filteredHistory.length < 2) {
+    const singleEntry = filteredHistory[0];
     return (
       <>
         {/* Invisible overlay to catch clicks outside */}
@@ -80,9 +81,17 @@ export function OddsChart({
           <div className="text-xs text-gray-400 font-mono">
             {title}
           </div>
-          <div className="text-sm text-gray-500 font-mono mt-1">
-            No history available
+          <div className="text-xs text-gray-300 font-mono mt-1">
+            Opening odds
           </div>
+          <div className="text-xs text-white font-mono font-bold mt-1">
+            {singleEntry ? formatOdds(singleEntry.value) : 'N/A'}
+          </div>
+          {singleEntry && (
+            <div className="text-xs text-gray-400 font-mono mt-1">
+              {new Date(singleEntry.t * 1000).toLocaleString()}
+            </div>
+          )}
         </div>
       </>
     );
@@ -118,56 +127,65 @@ export function OddsChart({
     `${i === 0 ? 'M' : 'L'} ${point.x} ${point.y}`
   ).join(' ');
 
-  // Generate time axis labels (max 6)
-  const maxLabels = 6;
-  const labelInterval = Math.max(1, Math.floor(filteredHistory.length / maxLabels));
+  // Generate time axis labels (exactly 6 or fewer)
+  const maxLabels = 8;
   const timeLabels = [];
 
-  for (let i = 0; i < filteredHistory.length; i += labelInterval) {
-    const entry = filteredHistory[i];
-    const now = Date.now() / 1000;
-    const diff = now - entry.t;
+  if (filteredHistory.length <= maxLabels) {
+    // If we have 6 or fewer points, show all of them
+    for (let i = 0; i < filteredHistory.length; i++) {
+      const entry = filteredHistory[i];
+      const now = Date.now() / 1000;
+      const diff = now - entry.t;
 
-    let timeStr = '';
-    if (diff < 60) {
-      timeStr = `${Math.floor(diff)}s`;
-    } else if (diff < 3600) {
-      timeStr = `${Math.floor(diff / 60)}m`;
-    } else if (diff < 86400) {
-      timeStr = `${Math.floor(diff / 3600)}h`;
-    } else {
-      timeStr = `${Math.floor(diff / 86400)}d`;
+      let timeStr = '';
+      if (diff < 60) {
+        timeStr = `${Math.floor(diff)}s`;
+      } else if (diff < 3600) {
+        timeStr = `${Math.floor(diff / 60)}m`;
+      } else if (diff < 86400) {
+        timeStr = `${Math.floor(diff / 3600)}h`;
+      } else {
+        timeStr = `${Math.floor(diff / 86400)}d`;
+      }
+
+      timeLabels.push({
+        x: padding + (i / (filteredHistory.length - 1)) * actualWidth,
+        label: timeStr,
+        timestamp: entry.t
+      });
+    }
+  } else {
+    // If we have more than 6 points, show exactly 6 evenly spaced labels
+    // including the first and last points
+    const indices = [];
+    for (let i = 0; i < maxLabels; i++) {
+      const index = Math.floor(i * (filteredHistory.length - 1) / (maxLabels - 1));
+      indices.push(index);
     }
 
-    timeLabels.push({
-      x: padding + (i / (filteredHistory.length - 1)) * actualWidth,
-      label: timeStr,
-      timestamp: entry.t
-    });
-  }
+    for (const i of indices) {
+      const entry = filteredHistory[i];
+      const now = Date.now() / 1000;
+      const diff = now - entry.t;
 
-  // Always include the most recent if not already included
-  if (timeLabels.length > 0 && timeLabels[timeLabels.length - 1].timestamp !== filteredHistory[filteredHistory.length - 1].t) {
-    const lastEntry = filteredHistory[filteredHistory.length - 1];
-    const now = Date.now() / 1000;
-    const diff = now - lastEntry.t;
+      let timeStr = '';
+      if (diff < 60) {
+        timeStr = `${Math.floor(diff)}s`;
+      } else if (diff < 3600) {
+        timeStr = `${Math.floor(diff / 60)}m`;
+      } else if (diff < 86400) {
+        timeStr = `${Math.floor(diff / 3600)}h`;
+      } else {
+        timeStr = `${Math.floor(diff / 86400)}d`;
+      }
 
-    let timeStr = '';
-    if (diff < 60) {
-      timeStr = `${Math.floor(diff)}s`;
-    } else if (diff < 3600) {
-      timeStr = `${Math.floor(diff / 60)}m`;
-    } else if (diff < 86400) {
-      timeStr = `${Math.floor(diff / 3600)}h`;
-    } else {
-      timeStr = `${Math.floor(diff / 86400)}d`;
+      timeLabels.push({
+        x: padding + (i / (filteredHistory.length - 1)) * actualWidth,
+        label: timeStr,
+        timestamp: entry.t
+      });
     }
-
-    timeLabels.push({
-      x: padding + actualWidth,
-      label: timeStr,
-      timestamp: lastEntry.t
-    });
   }
 
   return (
@@ -193,7 +211,7 @@ export function OddsChart({
           {title}
         </div>
         <div className="text-xs text-gray-400 truncate">
-          {bookie}
+          {bookie === 'predictions' ? 'Prediction' : bookie}
         </div>
       </div>
 

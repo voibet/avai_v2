@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import pool from '../../../../../lib/db';
-import { makePredictions } from '../../../../../lib/ml-trainer';
-import { getCachedModel, hasCachedModel } from '../../../../../lib/ml-cache';
-import { savePredictions } from '../../../../../lib/db-utils';
+import pool from '../../../../../lib/database/db';
+import { makePredictions } from '../../../../../lib/ml/ml-trainer';
+import { getCachedModel, hasCachedModel } from '../../../../../lib/ml/ml-cache';
+import { savePredictions } from '../../../../../lib/database/db-utils';
 
 
 export const dynamic = 'force-dynamic';

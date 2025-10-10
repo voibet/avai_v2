@@ -286,17 +286,22 @@ export default function AdminPage() {
 
       // Get existing XG source data
       const existingXGSource = league.xg_source && league.xg_source[currentSeason];
-      let existingUrl = '';
-      let existingRounds = new Set<string>();
-
+      
+      // Add any configured rounds that aren't in the fixtures list (like custom rounds: "ALL", etc.)
       if (existingXGSource && existingXGSource.rounds) {
-        // Get the URL from the first round (all rounds should have the same URL)
-        const firstRound = Object.keys(existingXGSource.rounds)[0];
-        if (firstRound) {
-          existingUrl = existingXGSource.rounds[firstRound].url || '';
-        }
-        // Pre-select rounds that already have XG sources
-        existingRounds = new Set(Object.keys(existingXGSource.rounds));
+        const configuredRounds = Object.keys(existingXGSource.rounds);
+        configuredRounds.forEach(round => {
+          if (!roundNames.includes(round)) {
+            roundNames.push(round);
+          }
+        });
+        // Sort the rounds for better UX
+        roundNames.sort((a: string, b: string) => {
+          // Custom rounds (like "ALL") go to the top
+          if (a === 'ALL') return -1;
+          if (b === 'ALL') return 1;
+          return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        });
       }
 
       setXGSourceModal({
@@ -304,17 +309,28 @@ export default function AdminPage() {
         league,
         selectedSeason: currentSeason,
         availableRounds: roundNames,
-        selectedRounds: existingRounds,
+        selectedRounds: new Set<string>(),
         customRoundName: '',
-        xgSourceUrl: existingUrl
+        xgSourceUrl: ''
       });
     } catch (error) {
       console.error('Failed to fetch rounds:', error);
+      
+      // Even if fetching rounds fails, show any existing configured rounds
+      const existingXGSource = league.xg_source && league.xg_source[currentSeason];
+      const configuredRounds = existingXGSource && existingXGSource.rounds 
+        ? Object.keys(existingXGSource.rounds).sort((a: string, b: string) => {
+            if (a === 'ALL') return -1;
+            if (b === 'ALL') return 1;
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+          })
+        : [];
+      
       setXGSourceModal({
         isOpen: true,
         league,
         selectedSeason: currentSeason,
-        availableRounds: [],
+        availableRounds: configuredRounds,
         selectedRounds: new Set(),
         customRoundName: '',
         xgSourceUrl: ''
@@ -544,12 +560,11 @@ export default function AdminPage() {
       roundsToUpdate.push(xgSourceModal.customRoundName.trim());
     }
 
-    // Allow submitting with no rounds selected to clear the configuration
-    // Only require validation if a URL is provided but no rounds are selected
-    if (roundsToUpdate.length === 0 && xgSourceModal.xgSourceUrl.trim()) {
+    // Require both URL and rounds to be provided
+    if (roundsToUpdate.length === 0 || !xgSourceModal.xgSourceUrl.trim()) {
       setResult({
         success: false,
-        message: 'Please select at least one round or enter a custom round name when providing a URL'
+        message: 'Please select at least one round and enter an xG source URL'
       });
       return;
     }
@@ -562,7 +577,7 @@ export default function AdminPage() {
           leagueId: xgSourceModal.league.id,
           season: xgSourceModal.selectedSeason,
           rounds: roundsToUpdate,
-          xgSource: roundsToUpdate.length > 0 ? xgSourceModal.xgSourceUrl : '' // Clear URL if no rounds selected
+          xgSource: xgSourceModal.xgSourceUrl
         })
       });
 
@@ -586,6 +601,62 @@ export default function AdminPage() {
       setResult({
         success: false,
         message: 'Failed to update xg_source'
+      });
+    }
+  };
+
+  const handleRemoveRounds = async () => {
+    if (!xgSourceModal.league || !xgSourceModal.selectedSeason) return;
+
+    const roundsToRemove: string[] = [];
+
+    // Add selected existing rounds
+    roundsToRemove.push(...Array.from(xgSourceModal.selectedRounds));
+
+    // Add custom round if provided
+    if (xgSourceModal.customRoundName.trim()) {
+      roundsToRemove.push(xgSourceModal.customRoundName.trim());
+    }
+
+    if (roundsToRemove.length === 0) {
+      setResult({
+        success: false,
+        message: 'Please select at least one round to remove'
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/admin/update-xg-source', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leagueId: xgSourceModal.league.id,
+          season: xgSourceModal.selectedSeason,
+          rounds: roundsToRemove
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setResult({
+          success: true,
+          message: data.message
+        });
+        // Reload leagues to refresh xg_source data
+        loadExistingLeagues();
+        closeXGSourceModal();
+      } else {
+        setResult({
+          success: false,
+          message: data.message || 'Failed to remove rounds'
+        });
+      }
+    } catch (error) {
+      setResult({
+        success: false,
+        message: 'Failed to remove rounds'
       });
     }
   };
@@ -940,6 +1011,7 @@ export default function AdminPage() {
           onCustomRoundChange={(value) => setXGSourceModal(prev => ({ ...prev, customRoundName: value }))}
           onXGSourceUrlChange={(value) => setXGSourceModal(prev => ({ ...prev, xgSourceUrl: value }))}
           onSubmit={handleXGSourceSubmit}
+          onRemoveRounds={handleRemoveRounds}
           onClearConfiguration={clearXGSourceConfiguration}
         />
 

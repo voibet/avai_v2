@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { executeQuery, withErrorHandler } from '../../../../lib/db-utils';
+import { executeQuery, withErrorHandler } from '../../../../lib/database/db-utils';
 
 async function getFixture(_request: Request, { params }: { params: { id: string } }) {
   const fixtureId = parseInt(params.id);
@@ -30,12 +30,64 @@ async function updateFixture(request: Request, { params }: { params: { id: strin
   try {
     const body = await request.json();
 
+    // First get the current fixture to know which teams to update for mappings
+    const fixtureResult = await executeQuery(
+      'SELECT home_team_id, away_team_id FROM football_fixtures WHERE id = $1',
+      [fixtureId]
+    );
+
+    if (fixtureResult.rows.length === 0) {
+      return NextResponse.json({ error: 'Fixture not found' }, { status: 404 });
+    }
+
+    const { home_team_id, away_team_id } = fixtureResult.rows[0];
+
+    // Handle team mappings separately
+    if (body.home_team_mappings !== undefined || body.away_team_mappings !== undefined) {
+
+      // Update home team mappings if provided
+      if (body.home_team_mappings !== undefined && home_team_id) {
+        let homeMappings;
+        try {
+          homeMappings = JSON.parse(body.home_team_mappings);
+          if (!Array.isArray(homeMappings)) {
+            homeMappings = [];
+          }
+        } catch (e) {
+          homeMappings = [];
+        }
+
+        await executeQuery(
+          'UPDATE football_teams SET mappings = $1 WHERE id = $2',
+          [JSON.stringify(homeMappings), home_team_id]
+        );
+      }
+
+      // Update away team mappings if provided
+      if (body.away_team_mappings !== undefined && away_team_id) {
+        let awayMappings;
+        try {
+          awayMappings = JSON.parse(body.away_team_mappings);
+          if (!Array.isArray(awayMappings)) {
+            awayMappings = [];
+          }
+        } catch (e) {
+          awayMappings = [];
+        }
+
+        await executeQuery(
+          'UPDATE football_teams SET mappings = $1 WHERE id = $2',
+          [JSON.stringify(awayMappings), away_team_id]
+        );
+      }
+    }
+
     // Build dynamic UPDATE query based on provided fields
     const updateFields = [];
     const queryParams = [];
     let paramIndex = 1;
 
-    // Define allowed fields for updating
+    // Define allowed fields for updating (exclude team mappings as they're handled separately)
     const allowedFields = [
       'referee', 'timestamp', 'date', 'venue_name', 'status_long', 'status_short',
       'home_team_id', 'home_team_name', 'home_country',
@@ -59,7 +111,7 @@ async function updateFixture(request: Request, { params }: { params: { id: strin
     }
 
     if (updateFields.length === 0) {
-      return NextResponse.json({ error: 'No valid fields provided for update' }, { status: 400 });
+      return NextResponse.json({ fixture: fixtureResult?.rows[0] || null });
     }
 
     // Execute update

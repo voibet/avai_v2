@@ -1,4 +1,4 @@
-import { executeQuery } from './db-utils';
+import { executeQuery } from '../database/db-utils';
 
 
 export type SortDirection = 'asc' | 'desc';

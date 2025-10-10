@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import pool from '../../../../../lib/db';
-import { startTestWorker } from '../../../../../lib/ml-worker';
+import pool from '../../../../../lib/database/db';
+import { startTestWorker } from '../../../../../lib/ml/ml-worker';
 
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,9 @@ export async function POST(request: Request) {
       // Empty body is fine, use defaults
     }
     
-    const { 
+    const {
+      batchSize = 1024,
+      epochs = 150,
       features = [
         'home_advantage',
         'adjusted_rolling_xg_home', 'adjusted_rolling_xga_home',
@@ -29,6 +31,7 @@ export async function POST(request: Request) {
     } = body;
 
     console.log('[Test] Starting test training...');
+    console.log(`[Test] Hyperparameters: batchSize=${batchSize}, epochs=${epochs}`);
     console.log(`[Test] Features (${features.length}):`, features);
 
     // Build feature selection SQL
@@ -73,7 +76,7 @@ export async function POST(request: Request) {
     console.log(`[Test] Test set: ${testData.length} fixtures`);
 
     // Start test training in background process
-    startTestWorker(trainingData, testData, features);
+    startTestWorker(trainingData, testData, features, batchSize, epochs);
 
     // Return immediately
     return NextResponse.json({

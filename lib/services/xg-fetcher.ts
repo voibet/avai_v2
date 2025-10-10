@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { executeQuery } from './db-utils';
-import { Fixture } from '../types/database';
+import { executeQuery } from '../database/db-utils';
+import { Fixture } from '../../types/database';
 
 interface XGData {
   home: number;
@@ -130,13 +130,20 @@ export class XGFetcher {
     onProgress?: (message: string, current: number, total: number) => void
   ): Promise<{ success: boolean; message: string; updatedCount?: number; updatedFixtureIds?: number[] }> {
     try {
-      console.log(`Starting XG fetch for league ${leagueId}...`);
-      
+   
       // Clear caches to ensure fresh data for new league
       this.clearCaches();
 
       // Get finished fixtures without XG data for this league
-      const fixtures = await this.getFixturesNeedingXG(leagueId);
+      const allFixtures = await this.getFixturesNeedingXG(leagueId);
+      
+      // Deduplicate fixtures by ID
+      const seenIds = new Set<number>();
+      const fixtures = allFixtures.filter(f => {
+        if (seenIds.has(f.id)) return false;
+        seenIds.add(f.id);
+        return true;
+      });
       
       if (fixtures.length === 0) {
         console.log(`Found ${fixtures.length} fixtures needing XG data`);
@@ -181,7 +188,7 @@ export class XGFetcher {
 
           // Rate limiting - small delay between batches
           if (i + batchSize < fixtures.length) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 250));
           }
         } catch (error) {
           console.error(`Error processing batch ${i + 1}-${Math.min(i + batchSize, fixtures.length)}:`, error);
@@ -326,6 +333,7 @@ export class XGFetcher {
     const fixturesBySource = new Map<string, Fixture[]>();
     
     for (const fixture of fixtures) {
+
       const seasonStr = fixture.season.toString();
       const xgSourceConfig = leagueConfig.xgSource[seasonStr];
       
@@ -348,8 +356,6 @@ export class XGFetcher {
     for (const [_sourceUrl, sourceFixtures] of Array.from(fixturesBySource.entries())) {
       for (const fixture of sourceFixtures) {
         try {
-          console.log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name} (Season: ${fixture.season}, Round: ${fixture.round})`);
-          
           const xgData = await this.fetchXGForFixture(fixture, leagueConfig, sourceFixtures);
           if (xgData) {
             console.log(`Found XG data for fixture ${fixture.id}: Home ${xgData.home}, Away ${xgData.away}`);
@@ -358,12 +364,12 @@ export class XGFetcher {
             updatedIds.push(fixture.id);
           }
         } catch (error) {
-          console.error(`❌ Error processing fixture ${fixture.id}:`, error);
+          console.error(`Error processing fixture ${fixture.id}:`, error);
           // Continue with next fixture
         }
 
-        // Rate limiting: 5 requests per second (200ms between requests)
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Rate limiting: 4 requests per second (250ms between requests)
+        await new Promise(resolve => setTimeout(resolve, 250));
       }
     }
 
@@ -376,6 +382,7 @@ export class XGFetcher {
       const xgSourceConfig = leagueConfig.xgSource[seasonStr];
 
       if (!xgSourceConfig || !xgSourceConfig.rounds) {
+        console.log(`No xG source configuration for fixture ${fixture.id} (Season: ${seasonStr})`);
         return null;
       }
 
@@ -386,22 +393,33 @@ export class XGFetcher {
       const roundConfig = xgSourceConfig.rounds[baseRoundName] || xgSourceConfig.rounds['ALL'];
       
       if (!roundConfig) {
+        console.log(`No xG source for fixture ${fixture.id} (Round: ${baseRoundName})`);
         return null;
       }
 
       const xgSourceUrl = roundConfig.url;
 
+      // Determine source type for logging
+      let sourceType = 'Unknown';
+      if (xgSourceUrl === 'NATIVE') {
+        sourceType = 'NATIVE (API-Football)';
+      } else if (xgSourceUrl.includes('-')) {
+        sourceType = `Sofascore (${xgSourceUrl})`;
+      } else {
+        sourceType = `Flashlive (${xgSourceUrl})`;
+      }
+
+      console.log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name} - xG Source: ${sourceType}`);
+
       if (xgSourceUrl === 'NATIVE') {
         return await this.fetchNativeXG(fixture);
       } else if (xgSourceUrl.includes('-')) {
-        // Sofascore format: tournamentId-seasonId
         return await this.fetchSofascoreXG(fixture, xgSourceUrl, allFixturesForSource);
       } else {
-        // Flashlive format: tournament_stage_id
         return await this.fetchFlashliveXG(fixture, xgSourceUrl, allFixturesForSource);
       }
     } catch (error) {
-      console.error(`Error fetching XG for fixture ${fixture.id}:`, error);
+      console.error(`Error fetching XG for fixture ${fixture.id}:`);
       return null;
     }
   }
@@ -416,7 +434,7 @@ export class XGFetcher {
         params: {
           fixture: fixture.id
         },
-        timeout: 30000 // 30 second timeout
+        timeout: 15000 // 15 second timeout
       });
 
       const statistics = response.data.response || [];
@@ -449,11 +467,16 @@ export class XGFetcher {
       }
       
       // Rate limiting: 5 requests per second (200ms between requests)
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 250));
       
-      return homeXG > 0 || awayXG > 0 ? { home: homeXG, away: awayXG } : null;
+      if (homeXG > 0 || awayXG > 0) {
+        return { home: homeXG, away: awayXG };
+      } else {
+        console.log(`No xG statistics available for match ${fixture.id}`);
+        return null;
+      }
     } catch (error) {
-      console.error('Error fetching native XG:', error);
+      console.error('Error fetching native XG:');
       return null;
     }
   }
@@ -471,12 +494,13 @@ export class XGFetcher {
       if (!allMatches) {
         allMatches = [];
         
-        // Fetch multiple pages (up to 10) to get comprehensive match data
+        // Fetch multiple pages (up to 5) to get comprehensive match data
         let lastPageSize = 0;
         const seenMatchIds = new Set<number>();
-        const targetFixtureCount = allFixturesForSource?.length || 999; // If not specified, keep old behavior
+        const targetFixtureCount = allFixturesForSource?.length || 400;
+        const maxPages = 5; // Reduced from 10 to prevent long hangs
         
-        for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
+        for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
           const matchesResponse = await axios.get('https://sofascore.p.rapidapi.com/tournaments/get-last-matches', {
             headers: {
               'x-rapidapi-key': this.rapidApiKey,
@@ -487,14 +511,14 @@ export class XGFetcher {
               seasonId: seasonId,
               pageIndex: pageIndex
             },
-            timeout: 30000 // 30 second timeout
+            timeout: 15000 // 15 second timeout
           });
 
           const matchData: SofascoreMatch = matchesResponse.data;
           const matches = matchData.events || [];
           
           // Rate limiting: 5 requests per second (200ms between requests)
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 250));
           
           // Stop if no matches found
           if (matches.length === 0) {
@@ -526,6 +550,8 @@ export class XGFetcher {
         
         // Cache the results
         this.sofascoreCache.set(cacheKey, allMatches);
+      } else {
+        console.log(`Using cached Sofascore data (${allMatches.length} matches)`);
       }
 
       // Get team mappings for more accurate matching
@@ -547,17 +573,17 @@ export class XGFetcher {
         params: {
           matchId: matchingEvent.id
         },
-        timeout: 30000 // 30 second timeout
+        timeout: 15000 // 15 second timeout
       });
 
       const statsData: SofascoreStatistics = statsResponse.data;
       
       // Rate limiting: 5 requests per second (200ms between requests)
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 250));
       
       // Check if statistics exists and is iterable
       if (!statsData.statistics || !Array.isArray(statsData.statistics)) {
-        console.log(`❌ No xG statistics available for match ${matchingEvent.id}`);
+        console.log(`No xG statistics available for match ${matchingEvent.id}`);
         return null;
       }
       
@@ -579,7 +605,7 @@ export class XGFetcher {
 
       return null;
     } catch (error) {
-      console.error('Error fetching Sofascore XG:', error);
+      console.error('Error fetching Sofascore XG:');
       return null;
     }
   }
@@ -587,37 +613,39 @@ export class XGFetcher {
   private async fetchFlashliveXG(fixture: Fixture, tournamentStageId: string, allFixturesForSource?: Fixture[]): Promise<XGData | null> {
     try {
       const cacheKey = tournamentStageId;
-      
+
       // Check cache first
       let allEvents = this.flashliveCache.get(cacheKey);
-      
+
       if (!allEvents) {
         allEvents = [];
-        
-        // Fetch multiple pages (up to 10) to get comprehensive match data
+
+        // Fetch multiple pages (up to 5) to get comprehensive match data
         let lastPageSize = 0;
         const seenEventIds = new Set<string>();
-        const targetFixtureCount = allFixturesForSource?.length || 999; // If not specified, keep old behavior
-        
-        for (let page = 1; page <= 10; page++) {
-          const matchesResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/tournaments/results', {
-            headers: {
-              'x-rapidapi-key': this.rapidApiKey,
-              'x-rapidapi-host': 'flashlive-sports.p.rapidapi.com'
-            },
-            params: {
-              page: page,
-              locale: 'en_INT',
-              tournament_stage_id: tournamentStageId
-            },
-            timeout: 30000 // 30 second timeout
-          });
+        const targetFixtureCount = allFixturesForSource?.length || 400;
+        const maxPages = 5; // Reduced from 10 to prevent long hangs
 
-          const matchData: FlashliveMatch = matchesResponse.data;
+        for (let page = 1; page <= maxPages; page++) {
+          try {
+            const matchesResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/tournaments/results', {
+              headers: {
+                'x-rapidapi-key': this.rapidApiKey,
+                'x-rapidapi-host': 'flashlive-sports.p.rapidapi.com'
+              },
+              params: {
+                page: page,
+                locale: 'en_INT',
+                tournament_stage_id: tournamentStageId
+              },
+              timeout: 15000 // 15 second timeout
+            });
+
+            const matchData: FlashliveMatch = matchesResponse.data;
           const tournaments = matchData.DATA || [];
           
           // Rate limiting: 5 requests per second (200ms between requests)
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise(resolve => setTimeout(resolve, 250));
           
           let pageEvents: any[] = [];
           for (const tournament of tournaments) {
@@ -652,10 +680,24 @@ export class XGFetcher {
           }
           
           lastPageSize = pageEvents.length;
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+            // Check if it's a 404 error - if so, the tournament stage ID is invalid, no point trying more pages
+            if (axios.isAxiosError(error) && error.response?.status === 404) {
+              break; // Stop trying more pages for this invalid tournament stage
+            }
+
+            // Reset lastPageSize and continue to next page
+            lastPageSize = 0;
+            continue;
+          }
         }
         
         // Cache the results
         this.flashliveCache.set(cacheKey, allEvents);
+      } else {
+        console.log(`Using cached Flashlive data (${allEvents.length} events)`);
       }
 
       // Get team mappings for more accurate matching
@@ -667,6 +709,8 @@ export class XGFetcher {
         return null;
       }
 
+      console.log(`Found matching Flashlive event: ${matchingEvent.EVENT_ID}`);
+
       // Get statistics for the matched event
       const statsResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/events/statistics', {
         headers: {
@@ -677,13 +721,13 @@ export class XGFetcher {
           event_id: matchingEvent.EVENT_ID,
           locale: 'en_INT'
         },
-        timeout: 30000 // 30 second timeout
+        timeout: 15000 // 15 second timeout
       });
 
       const statsData: FlashliveStatistics = statsResponse.data;
       
       // Rate limiting: 5 requests per second (200ms between requests)
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 250));
       
       // Check if DATA exists and is iterable
       if (!statsData.DATA || !Array.isArray(statsData.DATA)) {
@@ -714,7 +758,13 @@ export class XGFetcher {
 
       return null;
     } catch (error) {
-      console.error('Error fetching Flashlive XG:', error);
+      console.error(`Error fetching Flashlive XG for fixture ${fixture.id} (tournament stage: ${tournamentStageId}):`);
+
+      // Check if it's a 404 error indicating invalid tournament stage ID
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        console.error(`Flashlive tournament stage ID '${tournamentStageId}' appears to be invalid (404 - Object not found). Please verify the tournament stage ID is correct for this league/season.`);
+      }
+
       return null;
     }
   }
@@ -741,11 +791,11 @@ export class XGFetcher {
       
       const homeMatch = this.matchTeamName(
         teamMappings.get(homeTeamId) || [fixture.home_team_name],
-        [match.homeTeam.name, match.homeTeam.shortName]
+        [match.homeTeam.name, match.homeTeam.shortName].filter(name => name != null)
       );
       const awayMatch = this.matchTeamName(
         teamMappings.get(awayTeamId) || [fixture.away_team_name],
-        [match.awayTeam.name, match.awayTeam.shortName]
+        [match.awayTeam.name, match.awayTeam.shortName].filter(name => name != null)
       );
 
       if (homeMatch && awayMatch) {
@@ -780,11 +830,11 @@ export class XGFetcher {
       
       const homeMatch = this.matchTeamName(
         teamMappings.get(homeTeamId) || [fixture.home_team_name],
-        [event.HOME_NAME, event.SHORTNAME_HOME]
+        [event.HOME_NAME, event.SHORTNAME_HOME].filter(name => name != null)
       );
       const awayMatch = this.matchTeamName(
         teamMappings.get(awayTeamId) || [fixture.away_team_name],
-        [event.AWAY_NAME, event.SHORTNAME_AWAY]
+        [event.AWAY_NAME, event.SHORTNAME_AWAY].filter(name => name != null)
       );
 
       if (homeMatch && awayMatch) {
@@ -796,9 +846,18 @@ export class XGFetcher {
   }
 
   private matchTeamName(knownNames: string[], candidateNames: string[]): boolean {
+    // Filter out null/undefined values and ensure we have strings
+    const validKnownNames = knownNames.filter(name => name != null && typeof name === 'string');
+    const validCandidateNames = candidateNames.filter(name => name != null && typeof name === 'string');
+
+    // If no valid names to compare, return false
+    if (validKnownNames.length === 0 || validCandidateNames.length === 0) {
+      return false;
+    }
+
     // First try exact matches (case-insensitive) with known mappings
-    for (const knownName of knownNames) {
-      for (const candidateName of candidateNames) {
+    for (const knownName of validKnownNames) {
+      for (const candidateName of validCandidateNames) {
         if (knownName.toLowerCase().trim() === candidateName.toLowerCase().trim()) {
           return true;
         }
@@ -806,8 +865,8 @@ export class XGFetcher {
     }
     
     // If no exact match found, fall back to fuzzy matching
-    for (const knownName of knownNames) {
-      if (this.fuzzyMatchTeamName(knownName, candidateNames)) {
+    for (const knownName of validKnownNames) {
+      if (this.fuzzyMatchTeamName(knownName, validCandidateNames)) {
         return true;
       }
     }
@@ -816,14 +875,22 @@ export class XGFetcher {
   }
 
   private fuzzyMatchTeamName(originalName: string, candidateNames: string[]): boolean {
+    // Filter out null/undefined values and ensure we have strings
+    const validCandidateNames = candidateNames.filter(name => name != null && typeof name === 'string');
+
+    // If no valid candidates, return false
+    if (validCandidateNames.length === 0) {
+      return false;
+    }
+
     const normalize = (name: string) => name.toLowerCase()
       .replace(/[^a-z0-9\s]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
     const originalNormalized = normalize(originalName);
-    
-    for (const candidate of candidateNames) {
+
+    for (const candidate of validCandidateNames) {
       const candidateNormalized = normalize(candidate);
       
       // Exact match
@@ -862,24 +929,25 @@ export class XGFetcher {
 
   private async getTeamMappings(homeTeamId: number, awayTeamId: number): Promise<Map<number, string[]>> {
     const teamIds = [parseInt(homeTeamId.toString()), parseInt(awayTeamId.toString())];
-    
+
     const result = await executeQuery(`
-      SELECT id, name, mappings FROM football_teams 
+      SELECT id, name, mappings FROM football_teams
       WHERE id = ANY($1)
     `, [teamIds]);
 
     const mappings = new Map<number, string[]>();
-    
+
     for (const team of result.rows) {
-      const teamMappings = [team.name]; // Start with official name
-      
+      const teamMappings = [team.name].filter((name: any) => name != null && typeof name === 'string');
+
       if (team.mappings && Array.isArray(team.mappings)) {
-        teamMappings.push(...team.mappings);
+        const validMappings = team.mappings.filter((name: any) => name != null && typeof name === 'string');
+        teamMappings.push(...validMappings);
       }
-      
+
       mappings.set(team.id, teamMappings);
     }
-    
+
     return mappings;
   }
 

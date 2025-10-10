@@ -300,7 +300,7 @@ export default function DataTable<T>({
 
     // Skip API fetching for date column since it uses custom predefined options
     if (column.key === 'date') {
-      return ['yesterday', 'today', 'tomorrow', 'last_7_days', 'next_7_days'];
+      return ['yesterday', 'today', 'tomorrow', 'last7', 'next7', 'last14', 'next14'];
     }
 
     if (!filterValueApi) {
@@ -437,33 +437,6 @@ export default function DataTable<T>({
       <div className={`flex justify-between items-center py-2 border-b border-gray-600 ${headerClassName}`}>
         <h1 className="text-lg font-bold text-gray-200 font-mono">{title}</h1>
         <div className="flex items-center gap-4">
-          {expandable && (
-            <div className="flex items-center gap-2">
-              <span className={`text-xs font-mono ${expandedRows.size > 0 ? 'text-purple-400' : 'text-gray-500'}`}>
-                {expandedRows.size > 0 ? `${expandedRows.size} expanded` : 'Click rows to expand'}
-              </span>
-              {displayData.length > 1 && (
-                <>
-                  <button
-                    onClick={expandAllRows}
-                    disabled={expandedRows.size === displayData.length}
-                    className="text-blue-400 hover:text-blue-300 disabled:text-gray-600 disabled:cursor-not-allowed text-xs font-mono underline"
-                    style={{ pointerEvents: 'auto' }}
-                  >
-                    Expand All
-                  </button>
-                  <button
-                    onClick={collapseAllRows}
-                    disabled={expandedRows.size === 0}
-                    className="text-blue-400 hover:text-blue-300 disabled:text-gray-600 disabled:cursor-not-allowed text-xs font-mono underline"
-                    style={{ pointerEvents: 'auto' }}
-                  >
-                    Collapse All
-                  </button>
-                </>
-              )}
-            </div>
-          )}
           {selectable && selectedIds.size > 0 && (
             <span className="text-blue-400 text-xs font-mono">
               {selectedIds.size} selected
@@ -599,8 +572,10 @@ export default function DataTable<T>({
                           { value: 'yesterday', label: 'Yesterday' },
                           { value: 'today', label: 'Today' },
                           { value: 'tomorrow', label: 'Tomorrow' },
-                          { value: 'last_7_days', label: 'Last 7 days' },
-                          { value: 'next_7_days', label: 'Next 7 days' }
+                          { value: 'last7', label: 'Last 7 days' },
+                          { value: 'next7', label: 'Next 7 days' },
+                          { value: 'last14', label: 'Last 14 days' },
+                          { value: 'next14', label: 'Next 14 days' },
                         ];
 
                         return dateOptions.map((option) => {

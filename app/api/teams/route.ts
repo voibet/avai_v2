@@ -1,15 +1,6 @@
 import { NextResponse } from 'next/server';
-import { executeQuery, withErrorHandler } from '@/lib/db-utils';
-
-
-interface Team {
-  id: number;
-  name: string;
-  country: string;
-  venue: string;
-  created_at: string;
-  updated_at: string;
-}
+import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
+import { Team } from '@/types/database';
 
 async function getTeams(_request: Request) {
   try {

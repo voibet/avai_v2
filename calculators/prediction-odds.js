@@ -5,7 +5,7 @@
  * Converts home_pred and away_pred from football_predictions table to betting odds format.
  */
 
-import pool from '../lib/db.ts';
+import pool from '../lib/database/db.ts';
 
 /**
  * Dixon-Coles correlation adjustment for low-scoring games

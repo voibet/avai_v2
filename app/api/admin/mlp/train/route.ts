@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import pool from '../../../../../lib/db';
-import { isCurrentlyTraining, setTrainingFlag } from '../../../../../lib/ml-cache';
-import { startTrainingWorker } from '../../../../../lib/ml-worker';
+import pool from '../../../../../lib/database/db';
+import { isCurrentlyTraining, setTrainingFlag } from '../../../../../lib/ml/ml-cache';
+import { startTrainingWorker } from '../../../../../lib/ml/ml-worker';
 
 
 export const dynamic = 'force-dynamic';

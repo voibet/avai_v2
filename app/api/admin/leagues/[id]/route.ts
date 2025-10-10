@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { executeTransaction, withErrorHandler } from '@/lib/db-utils';
+import { executeTransaction, withErrorHandler } from '@/lib/database/db-utils';
 
 async function deleteLeague(
   _request: Request,

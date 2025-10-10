@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { executeQuery, withErrorHandler } from '../../../../../lib/db-utils';
+import { executeQuery, withErrorHandler } from '../../../../../lib/database/db-utils';
 
 
 async function getFixtureOdds(_request: Request, { params }: { params: { id: string } }) {
@@ -9,31 +9,24 @@ async function getFixtureOdds(_request: Request, { params }: { params: { id: str
     return NextResponse.json({ error: 'Invalid fixture ID' }, { status: 400 });
   }
 
-  const result = await executeQuery(
-    'SELECT * FROM football_odds WHERE fixture_id = $1 ORDER BY bookie',
-    [fixtureId]
-  );
+  // Optimized single query with LEFT JOINs for better performance
+  const result = await executeQuery(`
+    SELECT
+      fo.*,
+      fp.payout_x12,
+      fp.payout_ah,
+      fp.payout_ou
+    FROM football_odds fo
+    LEFT JOIN football_payouts fp ON fo.fixture_id = fp.fixture_id AND fo.bookie = fp.bookie
+    WHERE fo.fixture_id = $1
+    ORDER BY fo.bookie
+  `, [fixtureId]);
 
   let odds = result.rows;
 
-  // Add payout data to each bookmaker's odds
-  for (let i = 0; i < odds.length; i++) {
-    const bookmaker = odds[i];
-    const payoutResult = await executeQuery(
-      'SELECT payout_x12, payout_ah, payout_ou FROM payout_view WHERE fixture_id = $1 AND bookie = $2',
-      [fixtureId, bookmaker.bookie]
-    );
-
-    if (payoutResult.rows.length > 0) {
-      odds[i].payout_x12 = payoutResult.rows[0].payout_x12;
-      odds[i].payout_ah = payoutResult.rows[0].payout_ah;
-      odds[i].payout_ou = payoutResult.rows[0].payout_ou;
-    }
-  }
-
   // Add fair odds from Pinnacle as a special bookmaker entry
   const fairOddsResult = await executeQuery(
-    'SELECT * FROM fair_odds_view WHERE fixture_id = $1 AND LOWER(bookie) = $2',
+    'SELECT * FROM football_fair_odds WHERE fixture_id = $1 AND LOWER(bookie) = $2',
     [fixtureId, 'pinnacle']
   );
 
@@ -43,15 +36,7 @@ async function getFixtureOdds(_request: Request, { params }: { params: { id: str
     // Convert fair odds to the same format as regular odds
     const fairOddsEntry = {
       fixture_id: fixtureId,
-      bookie_id: -1, // Special ID for fair odds
       bookie: 'PINNACLE_FAIR_ODDS',
-      odds_x12: null,
-      odds_ah: null,
-      odds_ou: null,
-      lines: null,
-      ids: null,
-      max_stakes: null,
-      latest_t: { x12_ts: 0, ah_ts: 0, ou_ts: 0, ids_ts: 0, stakes_ts: 0, lines_ts: 0 },
       decimals: fairOdds.decimals,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

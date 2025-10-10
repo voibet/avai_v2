@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { executeQuery, executeTransaction } from './db-utils';
-import { League } from '../types/database';
+import { executeQuery, executeTransaction } from '../database/db-utils';
+import { League } from '../../types/database';
 
 
 interface SeasonData {
@@ -106,7 +106,6 @@ export class FixtureFetcher {
     selectedSeasons?: Record<string, string[]>
   ): Promise<{ success: boolean; message: string; updatedCount?: number }> {
     try {
-      console.log('Starting fixture fetch process...');
 
       let leaguesToProcess: Array<{id: number, name: string, season: number}> = [];
 
@@ -139,8 +138,6 @@ export class FixtureFetcher {
         leaguesToProcess = await this.getCurrentLeaguesAndSeasons();
       }
 
-      console.log(`Found ${leaguesToProcess.length} leagues to process`);
-
       if (leaguesToProcess.length === 0) {
         console.log('No leagues to process');
         return {
@@ -155,7 +152,6 @@ export class FixtureFetcher {
 
       for (let i = 0; i < leaguesToProcess.length; i++) {
         const leagueInfo = leaguesToProcess[i];
-        console.log(`Processing league: ${leagueInfo.name} (ID: ${leagueInfo.id}, Season: ${leagueInfo.season})`);
 
         // Report progress if callback provided
         if (onProgress) {
@@ -178,7 +174,6 @@ export class FixtureFetcher {
         }
       }
 
-      console.log(`Fixture fetch process completed. Total updated: ${totalUpdated}`);
       return {
         success: true,
         message: `Updated ${totalUpdated} fixtures`,
@@ -309,8 +304,8 @@ export class FixtureFetcher {
         const teams = response.data.response || [];
         allTeams.push(...teams);
 
-        // Respect API rate limits
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Rate limit
+        await new Promise(resolve => setTimeout(resolve, 250));
 
       } catch (error: any) {
         console.error(`Failed to fetch team ${teamId}:`, error.response?.data || error.message);
@@ -359,9 +354,6 @@ export class FixtureFetcher {
     if (leagueId) params.league = leagueId;
     if (season) params.season = season;
 
-    // Don't filter by status initially to get all fixtures
-    // The API will return fixtures for the current season by default
-
     try {
       const response = await axios.get(`${this.apiBaseUrl}/fixtures`, {
         headers: {
@@ -373,9 +365,8 @@ export class FixtureFetcher {
 
       const fixtures = response.data.response || [];
 
-      if (fixtures.length === 0) {
-        console.log('No fixtures returned. API response:', response.data);
-      }
+      // Rate limit
+      await new Promise(resolve => setTimeout(resolve, 250));
 
       return fixtures;
     } catch (error: any) {

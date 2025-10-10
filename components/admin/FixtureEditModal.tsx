@@ -17,12 +17,40 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   useEffect(() => {
+    // Fetch team mappings for both teams
+    const fetchTeamMappings = async () => {
+      try {
+        const response = await fetch(`/api/admin/fixtures/${fixture.id}/mappings`)
+        if (response.ok) {
+          const data = await response.json()
+          setFormData((prev: any) => ({
+            ...prev,
+            home_team_mappings: JSON.stringify(data.home_mappings || [], null, 2),
+            away_team_mappings: JSON.stringify(data.away_mappings || [], null, 2)
+          }))
+        }
+      } catch (error) {
+        console.error('Failed to fetch team mappings:', error)
+      }
+    }
+
     // Initialize form data with fixture data
     // Use null check instead of falsy check to preserve 0 values
     setFormData({
       referee: fixture.referee ?? '',
       timestamp: fixture.timestamp ?? '',
-      date: fixture.date ? new Date(fixture.date).toISOString().slice(0, 16) : '',
+      date: fixture.date ? (() => {
+        // Convert UTC date from database to local datetime-local format
+        // fixture.date is stored as UTC, datetime-local input expects local time
+        const utcDate = new Date(fixture.date);
+        // Format as local time for datetime-local input (YYYY-MM-DDTHH:MM)
+        const year = utcDate.getFullYear();
+        const month = String(utcDate.getMonth() + 1).padStart(2, '0');
+        const day = String(utcDate.getDate()).padStart(2, '0');
+        const hours = String(utcDate.getHours()).padStart(2, '0');
+        const minutes = String(utcDate.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hours}:${minutes}`;
+      })() : '',
       venue_name: fixture.venue_name ?? '',
       status_long: fixture.status_long ?? '',
       status_short: fixture.status_short ?? '',
@@ -48,8 +76,12 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
       league_name: fixture.league_name ?? '',
       league_country: fixture.league_country ?? '',
       season: fixture.season ?? '',
-      round: fixture.round ?? ''
+      round: fixture.round ?? '',
+      home_team_mappings: '[]',
+      away_team_mappings: '[]'
     })
+
+    fetchTeamMappings()
   }, [fixture])
 
   const handleInputChange = (field: string, value: any) => {
@@ -324,6 +356,15 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
                   />
                 </div>
               </div>
+              <div className="mt-4">
+                <label className={labelClasses}>Team Mappings (JSON Array)</label>
+                <textarea
+                  value={formData.home_team_mappings}
+                  onChange={(e) => handleInputChange('home_team_mappings', e.target.value)}
+                  className={`${inputClasses} font-mono text-xs h-24 resize-none`}
+                  placeholder='["Team Name", "Alternative Name"]'
+                />
+              </div>
             </div>
 
             {/* Away Team */}
@@ -357,6 +398,15 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
                     className={inputClasses}
                   />
                 </div>
+              </div>
+              <div className="mt-4">
+                <label className={labelClasses}>Team Mappings (JSON Array)</label>
+                <textarea
+                  value={formData.away_team_mappings}
+                  onChange={(e) => handleInputChange('away_team_mappings', e.target.value)}
+                  className={`${inputClasses} font-mono text-xs h-24 resize-none`}
+                  placeholder='["Team Name", "Alternative Name"]'
+                />
               </div>
             </div>
 

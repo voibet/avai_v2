@@ -1,4 +1,4 @@
-import { FixtureFetcher } from '@/lib/fixture-fetcher';
+import { FixtureFetcher } from '@/lib/services/fixture-fetcher';
 
 export async function POST(request: Request) {
   const encoder = new TextEncoder();

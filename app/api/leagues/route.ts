@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { executeQuery, withErrorHandler } from '@/lib/db-utils';
+import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
 
 
 interface League {

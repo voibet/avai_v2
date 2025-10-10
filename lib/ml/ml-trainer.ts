@@ -40,7 +40,7 @@ function buildModel(inputSize: number) {
   return model
 }
 
-export async function trainModel(trainingData: TrainingData[], features = FEATURES) {
+export async function trainModel(trainingData: TrainingData[], features = FEATURES, epochs = 150, batchSize = 1024, verbose = false) {
   await tf.setBackend('cpu')
   await tf.ready()
 
@@ -66,11 +66,22 @@ export async function trainModel(trainingData: TrainingData[], features = FEATUR
 
   const model = buildModel(features.length)
   console.log(`[Training] ${trainX.length} train | ${valX.length} validation`)
+
+  // Custom callback for manual logging when verbose mode
+  const callbacks = verbose ? {
+    onEpochEnd: (epoch: number, logs: any) => {
+      if (epoch % 10 === 0 || epoch === epochs - 1) { // Log every 10 epochs and final
+        console.log(`[Training] Epoch ${epoch + 1}/${epochs} - loss: ${logs.loss?.toFixed(4)} - val_loss: ${logs.val_loss?.toFixed(4)}`)
+      }
+    }
+  } : {}
+
   const history = await model.fit(xNorm, yTensor, {
-    epochs: 150,
-    batchSize: 1024,
+    epochs: epochs,
+    batchSize: batchSize,
     validationData: [valXNorm, valYTensor],
-    verbose: 0
+    verbose: 0, // Always use 0, use callbacks for logging
+    callbacks: callbacks
   })
   const finalLoss = history.history.loss[history.history.loss.length - 1] as number
   console.log(`[Training] Complete! Final loss: ${finalLoss.toFixed(4)}`)

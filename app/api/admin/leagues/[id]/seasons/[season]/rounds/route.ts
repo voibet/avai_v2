@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
-import { withErrorHandler } from '@/lib/db-utils';
+import { withErrorHandler } from '@/lib/database/db-utils';
 
 async function getLeagueRounds(
   _request: Request,

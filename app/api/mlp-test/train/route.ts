@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import pool from '../../../../lib/db';
-import { trainModel, makePredictions } from '../../../../lib/ml-trainer';
+import pool from '../../../../lib/database/db';
+import { trainModel, makePredictions } from '../../../../lib/ml/ml-trainer';
 
 
 export const dynamic = 'force-dynamic';

@@ -1,8 +1,8 @@
 // Shared MLP prediction logic
-import pool from './db';
+import pool from '../database/db';
 import { getCachedModel, hasCachedModel } from './ml-cache';
 import { makePredictions } from './ml-trainer';
-import { savePredictions } from './db-utils';
+import { savePredictions } from '../database/db-utils';
 
 
 export interface PredictOptions {

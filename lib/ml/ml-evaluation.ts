@@ -57,10 +57,16 @@ export async function trainAndPredict(options: TrainAndPredictOptions): Promise<
     calculateMetrics = false
   } = options;
 
+  console.log(`[Process] Starting ${calculateMetrics ? 'test' : 'training'} with ${trainingData.length} training fixtures, ${predictionData.length} prediction fixtures`);
+
   // Train model
-  const modelData = await trainModel(trainingData, features);
+  const epochs = options.epochs || 150;
+  const batchSize = options.batchSize || 1024;
+  console.log(`[Process] Training model with epochs=${epochs}, batchSize=${batchSize}, verbose=${calculateMetrics}`);
+  const modelData = await trainModel(trainingData, features, epochs, batchSize, calculateMetrics);
 
   // Make predictions
+  console.log(`[Process] Making predictions on ${predictionData.length} fixtures`);
   const predictions = await makePredictions(
     modelData.model,
     modelData.minVals,
@@ -74,6 +80,7 @@ export async function trainAndPredict(options: TrainAndPredictOptions): Promise<
 
   // Calculate evaluation metrics if requested (for test mode)
   if (calculateMetrics) {
+    console.log(`[Process] Calculating evaluation metrics for ${predictions.length} predictions`);
     const evaluations = predictions.map(pred => {
       const actual = predictionData.find(d => d.id === pred.id);
       if (!actual) return null;
@@ -107,7 +114,7 @@ export async function trainAndPredict(options: TrainAndPredictOptions): Promise<
         error_away_market_xg: actual.market_xg_away != null ? 
                              Math.abs(pred.predicted_away - actual.market_xg_away) : null,
         error_total_market_xg: (actual.market_xg_home != null && actual.market_xg_away != null) ?
-                              Math.abs(pred.predicted_home - actual.market_xg_home) + 
+                              Math.abs(pred.predicted_home - actual.market_xg_home) +
                               Math.abs(pred.predicted_away - actual.market_xg_away) : null,
         // Market xG errors vs actual score
         market_xg_error_home_actual: actual.market_xg_home != null ?
@@ -122,7 +129,7 @@ export async function trainAndPredict(options: TrainAndPredictOptions): Promise<
                                  Math.abs(actual.market_xg_home - actual.xg_home) : null,
         market_xg_error_away_xg: (actual.market_xg_away != null && actual.xg_away != null) ?
                                  Math.abs(actual.market_xg_away - actual.xg_away) : null,
-        market_xg_error_total_xg: (actual.market_xg_home != null && actual.market_xg_away != null && 
+        market_xg_error_total_xg: (actual.market_xg_home != null && actual.market_xg_away != null &&
                                    actual.xg_home != null && actual.xg_away != null) ?
                                   Math.abs(actual.market_xg_home - actual.xg_home) +
                                   Math.abs(actual.market_xg_away - actual.xg_away) : null,
@@ -130,7 +137,7 @@ export async function trainAndPredict(options: TrainAndPredictOptions): Promise<
     }).filter(e => e !== null) as EvaluationData[];
 
     const metrics = calculateEvaluationMetrics(evaluations);
-    console.log('Evaluation metrics:', metrics);
+    console.log(`[Process] Calculated metrics:`, JSON.stringify(metrics, null, 2));
 
     return {
       modelData,

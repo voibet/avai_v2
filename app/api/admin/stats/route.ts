@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '../../../../lib/db';
+import pool from '../../../../lib/database/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -609,6 +609,9 @@ export async function POST(request: Request) {
                 ) / 3.0, 2))) as away_xga
             FROM calculated_adjustments
             GROUP BY fixture_id
+            -- Only include fixtures where both teams have at least 4 past matches
+            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 4
+               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 4
         )
         UPDATE football_stats
         SET
@@ -823,7 +826,11 @@ export async function POST(request: Request) {
                              NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 0), 2))) as away_xga
             FROM calculated_adjustments
             GROUP BY fixture_id
-        )
+            -- Only include fixtures where both teams have at least 4 past matches
+            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 4
+               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 4
+
+               )
         UPDATE football_stats
         SET
             adjusted_rolling_market_xg_home = ax.home_xg,

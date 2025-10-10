@@ -5,7 +5,7 @@ import './suppress-tf-logs'  // Must be first!
 import { fileURLToPath } from 'url';
 import { trainAndPredict } from './ml-evaluation';
 import { saveModelToDisk, getCachedModel } from './ml-cache';
-import { savePredictions } from './db-utils';
+import { savePredictions } from '../database/db-utils';
 import { makePredictions } from './ml-trainer';
 
 

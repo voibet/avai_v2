@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import pool from '../../../../lib/db';
-import { hasCachedModel, getCachedModel } from '../../../../lib/ml-cache';
-import { startPredictionWorker } from '../../../../lib/ml-worker';
+import pool from '../../../../lib/database/db';
+import { hasCachedModel, getCachedModel } from '../../../../lib/ml/ml-cache';
+import { startPredictionWorker } from '../../../../lib/ml/ml-worker';
 
 
 export const dynamic = 'force-dynamic';

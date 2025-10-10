@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { withErrorHandler, executeQuery } from '../../../../../lib/db-utils';
+import { withErrorHandler, executeQuery } from '../../../../../lib/database/db-utils';
 import axios from 'axios';
 
 export const dynamic = 'force-dynamic';

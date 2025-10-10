@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import pool from '../../../../lib/db';
-import { startTestWorker } from '../../../../lib/ml-worker';
+import pool from '../../../../lib/database/db';
+import { startTestWorker } from '../../../../lib/ml/ml-worker';
 
 
 export const dynamic = 'force-dynamic';

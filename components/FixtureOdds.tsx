@@ -1,13 +1,202 @@
-import React, { useState } from 'react';
-import { useFixtureOdds } from '../lib/hooks/use-football-data';
+import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
 
 interface FixtureOddsProps {
   fixtureId: string | null;
 }
 
+interface OddsData {
+  odds: Array<{
+    fixture_id: number;
+    bookie_id: number;
+    bookie: string;
+    odds_x12: Array<{ t: number; x12: number[] }>;
+    odds_ah: Array<{ t: number; ah_h: number[]; ah_a: number[] }>;
+    odds_ou: Array<{ t: number; ou_o: number[]; ou_u: number[] }>;
+    lines: Array<{ t: number; ah: number[]; ou: number[] }>;
+    ids: Array<{ t: number; line_id: number; line_ids: { x12: string; ah: string[]; ou: string[] } }>;
+    max_stakes: Array<{ t: number; max_stake_x12: number[]; max_stake_ah: { h: number[]; a: number[] }; max_stake_ou: { o: number[]; u: number[] } }>;
+    latest_t: { x12_ts: number; ah_ts: number; ou_ts: number; ids_ts: number; stakes_ts: number; lines_ts: number };
+    decimals: number;
+    created_at: string;
+    updated_at: string;
+    fair_odds_x12?: any;
+    fair_odds_ah?: any;
+    fair_odds_ou?: any;
+    latest_lines?: any;
+    payout_x12?: number;
+    payout_ah?: number[];
+    payout_ou?: number[];
+  }>;
+}
+
+interface TopOddsData {
+  topOdds: {
+    fixture_id: number;
+    home_team_name: string;
+    away_team_name: string;
+    league_name: string;
+    fixture_date: string;
+    top_x12_odds: number[];
+    top_x12_bookies: string[];
+    top_ah_odds?: { ah_h: number[]; ah_a: number[] };
+    top_ah_lines?: number[];
+    top_ah_bookies?: { ah_h: string[]; ah_a: string[] };
+    top_ou_odds?: { ou_o: number[]; ou_u: number[] };
+    top_ou_lines?: number[];
+    top_ou_bookies?: { ou_o: string[]; ou_u: string[] };
+  };
+}
+
 export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
-  const { data: oddsData, loading: oddsLoading, error: oddsError } = useFixtureOdds(fixtureId);
+  const [oddsData, setOddsData] = useState<OddsData | null>(null);
+  const [oddsLoading, setOddsLoading] = useState(true);
+  const [oddsError, setOddsError] = useState<string | null>(null);
+  const [topOddsData, setTopOddsData] = useState<TopOddsData | null>(null);
+  const [topOddsLoading, setTopOddsLoading] = useState(true);
+
+  // Track which cells have flashed and their direction: 'up' (green) or 'down' (red)
+  // Key format: "bookie:market:outcome[:line]"
+  const [flashingCells, setFlashingCells] = useState<Record<string, 'up' | 'down'>>({});
+
+  // Use ref to track previous odds without causing re-renders
+  const previousOddsRef = React.useRef<OddsData | null>(null);
+
+  // Subscribe to SSE stream for real-time updates
+  useEffect(() => {
+    if (!fixtureId) {
+      setOddsLoading(false);
+      setOddsData(null);
+      previousOddsRef.current = null;
+      return;
+    }
+
+    let eventSource: EventSource | null = null;
+
+    try {
+      eventSource = new EventSource(`/api/fixtures/${fixtureId}/odds/stream`);
+
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.error) {
+            setOddsError(data.error);
+            setOddsLoading(false);
+          } else {
+            // Compare with previous odds to detect changes
+            if (previousOddsRef.current) {
+              const changes = detectOddsChanges(previousOddsRef.current, data);
+              if (Object.keys(changes).length > 0) {
+                setFlashingCells(changes);
+                // Clear flashing after animation completes (2s to match CSS)
+                setTimeout(() => setFlashingCells({}), 2000);
+              }
+            }
+
+            previousOddsRef.current = data;
+            setOddsData(data);
+            setOddsLoading(false);
+            setOddsError(null);
+          }
+        } catch (e) {
+          console.error('Error parsing SSE data:', e);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('SSE error:', error);
+        setOddsError('Connection error');
+        setOddsLoading(false);
+
+        // Close the connection on error
+        if (eventSource) {
+          eventSource.close();
+        }
+      };
+    } catch (error) {
+      console.error('Failed to connect to SSE:', error);
+      setOddsError('Failed to connect');
+      setOddsLoading(false);
+    }
+
+    // Cleanup function: close EventSource when component unmounts or fixtureId changes
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [fixtureId]); // Only depend on fixtureId!
+
+  // Helper function to detect odds changes
+  const detectOddsChanges = (oldData: OddsData, newData: OddsData): Record<string, 'up' | 'down'> => {
+    const changes: Record<string, 'up' | 'down'> = {};
+    
+    newData.odds.forEach(newBookie => {
+      const oldBookie = oldData.odds.find(b => b.bookie === newBookie.bookie);
+      if (!oldBookie) return;
+
+      // Compare 1X2 odds
+      const oldX12 = oldBookie.odds_x12?.[oldBookie.odds_x12.length - 1];
+      const newX12 = newBookie.odds_x12?.[newBookie.odds_x12.length - 1];
+      if (oldX12 && newX12) {
+        ['Home', 'Draw', 'Away'].forEach((outcome, idx) => {
+          if (oldX12.x12[idx] !== newX12.x12[idx]) {
+            const key = `${newBookie.bookie}:1X2:${outcome}`;
+            changes[key] = newX12.x12[idx] > oldX12.x12[idx] ? 'up' : 'down';
+          }
+        });
+      }
+
+      // Compare Asian Handicap odds
+      const oldAH = oldBookie.odds_ah?.[oldBookie.odds_ah.length - 1];
+      const newAH = newBookie.odds_ah?.[newBookie.odds_ah.length - 1];
+      const oldLines = oldBookie.lines?.[oldBookie.lines.length - 1];
+      const newLines = newBookie.lines?.[newBookie.lines.length - 1];
+      
+      if (oldAH && newAH && oldLines && newLines) {
+        newLines.ah?.forEach((line, newLineIdx) => {
+          // Find the same line in old lines by value, not by index
+          const oldLineIdx = oldLines.ah?.indexOf(line);
+          
+          if (oldLineIdx !== undefined && oldLineIdx >= 0) {
+            if (oldAH.ah_h?.[oldLineIdx] !== newAH.ah_h?.[newLineIdx]) {
+              const key = `${newBookie.bookie}:Asian Handicap:Home:${line}`;
+              changes[key] = newAH.ah_h[newLineIdx] > oldAH.ah_h[oldLineIdx] ? 'up' : 'down';
+            }
+            if (oldAH.ah_a?.[oldLineIdx] !== newAH.ah_a?.[newLineIdx]) {
+              const key = `${newBookie.bookie}:Asian Handicap:Away:${line}`;
+              changes[key] = newAH.ah_a[newLineIdx] > oldAH.ah_a[oldLineIdx] ? 'up' : 'down';
+            }
+          }
+        });
+      }
+
+      // Compare Over/Under odds
+      const oldOU = oldBookie.odds_ou?.[oldBookie.odds_ou.length - 1];
+      const newOU = newBookie.odds_ou?.[newBookie.odds_ou.length - 1];
+      
+      if (oldOU && newOU && oldLines && newLines) {
+        newLines.ou?.forEach((line, newLineIdx) => {
+          // Find the same line in old lines by value, not by index
+          const oldLineIdx = oldLines.ou?.indexOf(line);
+          
+          if (oldLineIdx !== undefined && oldLineIdx >= 0) {
+            if (oldOU.ou_o?.[oldLineIdx] !== newOU.ou_o?.[newLineIdx]) {
+              const key = `${newBookie.bookie}:Over/Under:Over:${line}`;
+              changes[key] = newOU.ou_o[newLineIdx] > oldOU.ou_o[oldLineIdx] ? 'up' : 'down';
+            }
+            if (oldOU.ou_u?.[oldLineIdx] !== newOU.ou_u?.[newLineIdx]) {
+              const key = `${newBookie.bookie}:Over/Under:Under:${line}`;
+              changes[key] = newOU.ou_u[newLineIdx] > oldOU.ou_u[oldLineIdx] ? 'up' : 'down';
+            }
+          }
+        });
+      }
+    });
+
+    return changes;
+  };
   
   // State for odds chart
   const [chartData, setChartData] = useState<{
@@ -48,12 +237,22 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         }
       });
     } else if (marketType === 'Asian Handicap' && line !== undefined) {
-      // Find the line index in the latest lines data
-      const latestLines = bookmakerData.lines?.[bookmakerData.lines.length - 1];
-      const lineIndex = latestLines?.ah?.indexOf(line);
+      // For each historical odds entry, find the line index at that timestamp
+      bookmakerData.odds_ah?.forEach((oddsEntry, oddsIndex) => {
+        // Find the lines data at this timestamp (or the latest available before this timestamp)
+        let linesAtTime = null;
+        for (let i = 0; i < (bookmakerData.lines?.length || 0); i++) {
+          if (bookmakerData.lines![i].t <= oddsEntry.t) {
+            linesAtTime = bookmakerData.lines![i];
+          } else {
+            break;
+          }
+        }
 
-      if (lineIndex !== undefined && lineIndex >= 0) {
-        bookmakerData.odds_ah?.forEach(oddsEntry => {
+        // Find the line index at this specific timestamp
+        const lineIndex = linesAtTime?.ah?.indexOf(line);
+        
+        if (lineIndex !== undefined && lineIndex >= 0) {
           let value: number | null = null;
           if (outcome === 'Home') {
             value = oddsEntry.ah_h?.[lineIndex] || null;
@@ -66,15 +265,25 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
               value: value
             });
           }
-        });
-      }
+        }
+      });
     } else if (marketType === 'Over/Under' && line !== undefined) {
-      // Find the line index in the latest lines data
-      const latestLines = bookmakerData.lines?.[bookmakerData.lines.length - 1];
-      const lineIndex = latestLines?.ou?.indexOf(line);
+      // For each historical odds entry, find the line index at that timestamp
+      bookmakerData.odds_ou?.forEach((oddsEntry, oddsIndex) => {
+        // Find the lines data at this timestamp (or the latest available before this timestamp)
+        let linesAtTime = null;
+        for (let i = 0; i < (bookmakerData.lines?.length || 0); i++) {
+          if (bookmakerData.lines![i].t <= oddsEntry.t) {
+            linesAtTime = bookmakerData.lines![i];
+          } else {
+            break;
+          }
+        }
 
-      if (lineIndex !== undefined && lineIndex >= 0) {
-        bookmakerData.odds_ou?.forEach(oddsEntry => {
+        // Find the line index at this specific timestamp
+        const lineIndex = linesAtTime?.ou?.indexOf(line);
+        
+        if (lineIndex !== undefined && lineIndex >= 0) {
           let value: number | null = null;
           if (outcome === 'Over') {
             value = oddsEntry.ou_o?.[lineIndex] || null;
@@ -87,17 +296,17 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
               value: value
             });
           }
-        });
-      }
+        }
+      });
     }
 
     // Create title
     let title = `${marketType} - ${outcome}`;
     if (line !== undefined) {
       if (marketType === 'Asian Handicap') {
-        const formattedLine = outcome === 'Home' ? 
-          (line > 0 ? `+${line}` : `${line}`) : 
-          (line < 0 ? `+${Math.abs(line)}` : `-${line}`);
+        const formattedLine = outcome === 'Home' ?
+          (line > 0 ? `+${line}` : `${line}`) :
+          (line < 0 ? `+${Math.abs(line)}` : line === 0 ? `${line}` : `-${line}`);
         title = `${marketType} ${formattedLine} - ${outcome}`;
       } else if (marketType === 'Over/Under') {
         title = `${marketType} ${line} - ${outcome}`;
@@ -210,12 +419,141 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
     }
 
     return acc;
-  }, {} as Record<string, { bookie: string; odds: any; decimals: number; isFairOdds?: boolean; payout?: { x12: number | null; ah: number[] | null; ou: number[] | null } }>);
+  }, {} as Record<string, { bookie: string; odds: any; decimals: number; isFairOdds?: boolean; isTopOdds?: boolean; payout?: { x12: number | null; ah: number[] | null; ou: number[] | null } }>);
+
+  // Add top odds as a special bookmaker if data is available
+  if (topOddsData?.topOdds) {
+    const topOdds = topOddsData.topOdds;
+
+    // Transform top odds data into the bookmaker format
+    const topOddsBookmaker = {
+      bookie: 'TOP_ODDS',
+      odds: {
+        x12: topOdds.top_x12_odds || null,
+        ah_h: topOdds.top_ah_odds?.ah_h || null,
+        ah_a: topOdds.top_ah_odds?.ah_a || null,
+        ou_o: topOdds.top_ou_odds?.ou_o || null,
+        ou_u: topOdds.top_ou_odds?.ou_u || null,
+        lines: topOdds.top_ah_lines && topOdds.top_ou_lines ? {
+          ah: topOdds.top_ah_lines,
+          ou: topOdds.top_ou_lines
+        } : null
+      },
+      decimals: 2, // Top odds are already in decimal format
+      isFairOdds: false,
+    };
+
+    transformedData['TOP_ODDS'] = topOddsBookmaker;
+  }
 
   const bookmakers = Object.values(transformedData);
 
   // Helper function to get divisor based on decimals
   const getDivisor = (decimals: number) => Math.pow(10, decimals);
+
+  // Helper to get flash class for a cell
+  const getFlashClass = (bookie: string, market: string, outcome: string, line?: number): string => {
+    const key = line !== undefined
+      ? `${bookie}:${market}:${outcome}:${line}`
+      : `${bookie}:${market}:${outcome}`;
+
+    const direction = flashingCells[key];
+    if (!direction) return '';
+
+    return direction === 'up' ? 'odds-flash-up' : 'odds-flash-down';
+  };
+
+  // Helper to get background color class for a bookmaker
+  const getBookieColorClass = (bookie: string, isFairOdds?: boolean, isTopOdds?: boolean, market?: string, side?: string, lineIndex?: number): string => {
+    if (isFairOdds) {
+      return 'bg-gray-700'; // Dark gray for Fair Odds
+    }
+    if (isTopOdds) {
+      // For Top Odds, get the color based on the actual bookie that provided this specific odds
+      if (!topOddsData?.topOdds) {
+        return 'bg-black'; // Fallback
+      }
+
+      let bookieName = '';
+      if (market === '1X2' && side) {
+        // For 1X2, lineIndex represents the outcome index (0=Home, 1=Draw, 2=Away)
+        const outcomeIndex = side === 'Home' ? 0 : side === 'Draw' ? 1 : 2;
+        if (topOddsData.topOdds.top_x12_bookies?.[outcomeIndex]) {
+          bookieName = topOddsData.topOdds.top_x12_bookies[outcomeIndex];
+        }
+      } else if (market === 'Asian Handicap' && side && lineIndex !== undefined) {
+        if (side === 'Home' && topOddsData.topOdds.top_ah_bookies?.ah_h?.[lineIndex]) {
+          bookieName = topOddsData.topOdds.top_ah_bookies.ah_h[lineIndex];
+        } else if (side === 'Away' && topOddsData.topOdds.top_ah_bookies?.ah_a?.[lineIndex]) {
+          bookieName = topOddsData.topOdds.top_ah_bookies.ah_a[lineIndex];
+        }
+      } else if (market === 'Over/Under' && side && lineIndex !== undefined) {
+        if (side === 'Over' && topOddsData.topOdds.top_ou_bookies?.ou_o?.[lineIndex]) {
+          bookieName = topOddsData.topOdds.top_ou_bookies.ou_o[lineIndex];
+        } else if (side === 'Under' && topOddsData.topOdds.top_ou_bookies?.ou_u?.[lineIndex]) {
+          bookieName = topOddsData.topOdds.top_ou_bookies.ou_u[lineIndex];
+        }
+      }
+
+      // Now get color for this specific bookie
+      return getBookieColorFromName(bookieName);
+    }
+
+    const bookieName = bookie.toLowerCase();
+    if (bookieName.includes('veikkaus')) {
+      return 'bg-blue-900'; // Dark blue for Veikkaus
+    }
+    if (bookieName.includes('betfair')) {
+      return 'bg-yellow-800'; // Dark yellow for Betfair
+    }
+    if (bookieName.includes('pinnacle')) {
+      return 'bg-gray-900'; // Very dark gray/black for Pinnacle
+    }
+
+    return 'bg-gray-800'; // Dark background for other bookies
+  };
+
+  // Helper to get color class from bookie name (used for Top Odds)
+  const getBookieColorFromName = (bookieName: string): string => {
+    const name = bookieName.toLowerCase();
+    if (name.includes('veikkaus')) {
+      return 'bg-blue-900'; // Dark blue for Veikkaus
+    }
+    if (name.includes('betfair')) {
+      return 'bg-yellow-800'; // Dark yellow for Betfair
+    }
+    if (name.includes('pinnacle')) {
+      return 'bg-gray-900'; // Very dark gray/black for Pinnacle
+    }
+    return 'bg-black'; // Default dark background
+  };
+
+  // Helper to get payout background color class based on payout percentage
+  const getPayoutBgColorClass = (payoutPercentage: number): string => {
+    // Clamp values for better color transitions
+    const clamped = Math.max(90, Math.min(105, payoutPercentage));
+
+    if (clamped < 90) {
+      // Reddish background for values under 90%
+      return 'bg-red-900';
+    } else if (clamped >= 90 && clamped <= 103) {
+      // Transition from red to green background between 90% and 103%
+      const ratio = (clamped - 90) / (103 - 90); // 0 to 1
+      if (ratio < 0.33) {
+        // Dark red
+        return 'bg-red-800';
+      } else if (ratio < 0.66) {
+        // Orange/red
+        return 'bg-orange-900';
+      } else {
+        // Dark green
+        return 'bg-green-900';
+      }
+    } else {
+      // Bright green background for values over 103%
+      return 'bg-green-800';
+    }
+  };
 
   // Generic helper function for simple markets (1X2)
   const renderSimpleTable = (marketName: string, outcomes: { label: string; getValue: (odds: any, bm?: any) => string | null }[]) => {
@@ -224,7 +562,7 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
 
     return (
       <div className="mb-4">
-        <h4 className="text-base font-bold text-white font-mono mb-2">{marketName}</h4>
+        <h4 className="text-xs font-bold text-white font-mono mb-2">{marketName}</h4>
         <div className="overflow-x-auto">
           <table className="w-full text-xs font-mono">
             <thead>
@@ -232,7 +570,7 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                 <th className="px-2 py-1 text-left text-gray-300 border border-gray-600"></th>
                 {bookmakers.map(bm => (
                   <th key={bm.bookie} className="px-2 py-1 text-center text-gray-300 border border-gray-600 min-w-[60px]">
-                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie === 'predictions' ? 'Prediction' : bm.isTopOdds ? 'Top Odds' : bm.bookie}
                   </th>
                 ))}
               </tr>
@@ -245,12 +583,16 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                   </td>
                   {bookmakers.map(bm => {
                     const value = outcome.getValue(bm.odds, bm);
+                    const flashClass = getFlashClass(bm.bookie, marketName, outcome.label);
+                    // For 1X2, pass the outcome index (0=Home, 1=Draw, 2=Away)
+                    const outcomeIndex = outcome.label === 'Home' ? 0 : outcome.label === 'Draw' ? 1 : 2;
+                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isTopOdds, marketName, outcome.label, outcomeIndex);
                     return (
-                      <td key={bm.bookie} className="px-2 py-1 text-center border border-gray-600">
+                      <td key={bm.bookie} className={`px-2 py-1 text-center border border-gray-600 ${bgColorClass}`}>
                         {value ? (
                           <button
                             onClick={(e) => handleOddsClick(e, bm.bookie, marketName, outcome.label, undefined, bm.decimals)}
-                            className="text-white hover:text-gray-300 hover:bg-gray-700 px-1 py-0.5 rounded transition-colors cursor-pointer"
+                            className={`text-white hover:text-gray-300 px-1 py-0.5 rounded transition-colors cursor-pointer ${flashClass}`}
                           >
                             {value}
                           </button>
@@ -266,12 +608,14 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
               {marketName === '1X2' && (
                 <tr>
                   <td className="px-2 py-1 text-white border border-gray-600 font-medium text-xs">
-                    PAYOUT
+                    Payout
                   </td>
                   {bookmakers.map(bm => {
                     const payoutValue = bm.payout?.x12;
+                    const payoutPercentage = payoutValue ? payoutValue * 100 : 0;
+                    const payoutBgColorClass = payoutValue ? getPayoutBgColorClass(payoutPercentage) : '';
                     return (
-                      <td key={`${bm.bookie}-payout`} className="px-2 py-1 text-center border border-gray-600">
+                      <td key={`${bm.bookie}-payout`} className={`px-2 py-1 text-center border border-gray-600 ${payoutBgColorClass}`}>
                         {payoutValue ? (
                           <span className="text-white text-xs font-mono">
                             {(payoutValue * 100).toFixed(2)}%
@@ -310,13 +654,20 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         bm.latest_lines[linesKey].forEach((line: number) => allLines.add(line));
       }
     });
+    // Also check top odds lines
+    if (topOddsData?.topOdds) {
+      const topOddsLines = linesKey === 'ah' ? topOddsData.topOdds.top_ah_lines : topOddsData.topOdds.top_ou_lines;
+      if (topOddsLines) {
+        topOddsLines.forEach((line: number) => allLines.add(line));
+      }
+    }
     const sortedLines = Array.from(allLines).sort((a, b) => a - b);
 
     // Filter out lines that have no odds from any bookmaker
     const linesWithOdds = sortedLines.filter(line =>
       bookmakers.some(bm => {
-        if (bm.isFairOdds) {
-          // For fair odds, check if the odds array exists and has data at this line index
+        if (bm.isFairOdds || bm.isTopOdds) {
+          // For fair odds and top odds, check if the odds array exists and has data at this line index
           const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
           return lineIndex !== undefined && lineIndex >= 0 &&
                  (bm.odds[side1.oddsKey]?.[lineIndex] || bm.odds[side2.oddsKey]?.[lineIndex]);
@@ -336,8 +687,8 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
     const getOdds = (bm: any, line: number, oddsKey: string) => {
       const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
       if (lineIndex !== undefined && lineIndex >= 0 && bm.odds[oddsKey]?.[lineIndex]) {
-        if (bm.isFairOdds) {
-          // Fair odds are already in decimal format, just return as string
+        if (bm.isFairOdds || bm.isTopOdds) {
+          // Fair odds and top odds are already in decimal format, just return as string
           return bm.odds[oddsKey][lineIndex]?.toString() || null;
         } else {
           // Regular odds are in basis points, convert to decimal
@@ -349,7 +700,7 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
 
     return (
       <div className="mb-4">
-        <h4 className="text-base font-bold text-white font-mono mb-2">{marketName}</h4>
+        <h4 className="text-xs font-bold text-white font-mono mb-2">{marketName}</h4>
         <div className="overflow-x-auto">
           <table className="w-full text-xs font-mono">
             <thead>
@@ -357,17 +708,17 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                 <th className="px-2 py-1 text-left text-bg-black border border-gray-600">{side1.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side1.label}-${bm.bookie}`} className="px-2 py-1 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie === 'predictions' ? 'Prediction' : bm.isTopOdds ? 'Top Odds' : bm.bookie}
                   </th>
                 ))}
                 <th className="px-2 py-1 text-left text-bg-black border border-gray-600">{side2.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side2.label}-${bm.bookie}`} className="px-2 py-1 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie === 'predictions' ? 'Prediction' : bm.isTopOdds ? 'Top Odds' : bm.bookie}
                   </th>
                 ))}
                 <th className="px-2 py-1 text-center text-white border border-gray-600 min-w-[60px]">
-                  PAYOUT
+                  Payout
                 </th>
               </tr>
             </thead>
@@ -379,17 +730,25 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                   </td>
                   {bookmakers.map(bm => {
                     const odds = getOdds(bm, line, side1.oddsKey);
+                    const flashClass = getFlashClass(bm.bookie, marketName, side1.label, line);
+                    const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
+                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isTopOdds, marketName, side1.label, lineIndex);
                     return (
-                      <td key={`${side1.label}-${bm.bookie}`} className="px-2 py-1 text-center border border-gray-600">
+                      <td key={`${side1.label}-${bm.bookie}`} className={`px-2 py-1 text-center border border-gray-600 ${bgColorClass}`}>
                         {odds ? (
                           <button
                             onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
-                            className="text-white hover:text-gray-300 hover:bg-gray-700 px-1 py-0.5 rounded transition-colors cursor-pointer"
+                            className={`text-white hover:text-gray-300 px-1 py-0.5 rounded transition-colors cursor-pointer ${flashClass}`}
                           >
                             {odds}
                           </button>
                         ) : (
-                          <span className="text-gray-500">-</span>
+                          <button
+                            onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
+                            className={`text-gray-500 hover:text-gray-700 px-1 py-0.5 rounded transition-colors cursor-pointer`}
+                          >
+                            -
+                          </button>
                         )}
                       </td>
                     );
@@ -399,48 +758,76 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                   </td>
                   {bookmakers.map(bm => {
                     const odds = getOdds(bm, line, side2.oddsKey);
+                    const flashClass = getFlashClass(bm.bookie, marketName, side2.label, line);
+                    const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
+                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isTopOdds, marketName, side2.label, lineIndex);
                     return (
-                      <td key={`${side2.label}-${bm.bookie}`} className="px-2 py-1 text-center border border-gray-600">
+                      <td key={`${side2.label}-${bm.bookie}`} className={`px-2 py-1 text-center border border-gray-600 ${bgColorClass}`}>
                         {odds ? (
                           <button
                             onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
-                            className="text-white hover:text-gray-300 hover:bg-gray-700 px-1 py-0.5 rounded transition-colors cursor-pointer"
+                            className={`text-white hover:text-gray-300 px-1 py-0.5 rounded transition-colors cursor-pointer ${flashClass}`}
                           >
                             {odds}
                           </button>
                         ) : (
-                          <span className="text-gray-500">-</span>
+                          <button
+                            onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
+                            className={`text-gray-500 hover:text-gray-700 px-1 py-0.5 rounded transition-colors cursor-pointer`}
+                          >
+                            -
+                          </button>
                         )}
                       </td>
                     );
                   })}
                   {/* Payout column on the far right */}
-                  <td className="px-2 py-1 text-center border border-gray-600">
-                    <span className="text-white text-xs font-mono">
-                      {(() => {
-                        // Find the line index (should be the same across all bookmakers for this line)
-                        const sampleBookmaker = bookmakers.find(bm => bm.odds.lines?.[linesKey]?.includes(line));
-                        if (!sampleBookmaker) return '-';
+                  {(() => {
+                    // Find the line index (should be the same across all bookmakers for this line)
+                    const sampleBookmaker = bookmakers.find(bm => bm.odds.lines?.[linesKey]?.includes(line));
+                    if (!sampleBookmaker) return <td className="px-2 py-1 text-center border border-gray-600"><span className="text-gray-500">-</span></td>;
 
-                        const lineIndex = sampleBookmaker.odds.lines?.[linesKey]?.indexOf(line);
-                        if (lineIndex === undefined || lineIndex < 0) return '-';
+                    const lineIndex = sampleBookmaker.odds.lines?.[linesKey]?.indexOf(line);
+                    if (lineIndex === undefined || lineIndex < 0) return <td className="px-2 py-1 text-center border border-gray-600"><span className="text-gray-500">-</span></td>;
 
-                        // Get payout values from all bookmakers for this line
-                        const payoutValues = bookmakers
-                          .map(bm => {
-                            const payoutArray = linesKey === 'ah' ? bm.payout?.ah : bm.payout?.ou;
-                            return payoutArray?.[lineIndex] || null;
-                          })
-                          .filter((p): p is number => p !== null);
+                    let payoutValue: number | null = null;
+                    let displayText = '';
 
-                        if (payoutValues.length === 0) return '-';
+                    // Use top odds payout if available, otherwise fall back to averaging
+                    const topOddsBookmaker = bookmakers.find(bm => bm.isTopOdds);
+                    if (topOddsBookmaker) {
+                      const topOddsPayoutArray = linesKey === 'ah' ? topOddsBookmaker.payout?.ah : topOddsBookmaker.payout?.ou;
+                      const topOddsPayout = topOddsPayoutArray?.[lineIndex];
+                      if (topOddsPayout !== null && topOddsPayout !== undefined) {
+                        payoutValue = topOddsPayout;
+                        displayText = (topOddsPayout * 100).toFixed(1) + '%';
+                      }
+                    }
 
-                        // Calculate average payout across all bookmakers for this line
-                        const avgPayout = payoutValues.reduce((sum, p) => sum + p, 0) / payoutValues.length;
-                        return (avgPayout * 100).toFixed(1) + '%';
-                      })()}
-                    </span>
-                  </td>
+                    // Fall back to averaging individual bookmaker payouts
+                    if (payoutValue === null) {
+                      const payoutValues = bookmakers
+                        .filter(bm => !bm.isTopOdds) // Exclude top odds from averaging
+                        .map(bm => {
+                          const payoutArray = linesKey === 'ah' ? bm.payout?.ah : bm.payout?.ou;
+                          return payoutArray?.[lineIndex] || null;
+                        })
+                        .filter((p): p is number => p !== null);
+
+                      if (payoutValues.length === 0) return <td className="px-2 py-1 text-center border border-gray-600"><span className="text-gray-500">-</span></td>;
+
+                      // Calculate average payout across all bookmakers for this line
+                      payoutValue = payoutValues.reduce((sum, p) => sum + p, 0) / payoutValues.length;
+                      displayText = (payoutValue * 100).toFixed(1) + '%';
+                    }
+
+                    const payoutBgColorClass = getPayoutBgColorClass(payoutValue * 100);
+                    return (
+                      <td className={`px-2 py-1 text-center border border-gray-600 ${payoutBgColorClass}`}>
+                        <span className="text-white text-xs font-mono">{displayText}</span>
+                      </td>
+                    );
+                  })()}
                 </tr>
               ))}
             </tbody>
@@ -458,8 +845,8 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         {
           label: 'Home',
           getValue: (odds: any, bm?: any) => {
-            if (bm?.isFairOdds) {
-              // Fair odds are already in decimal format
+            if (bm?.isFairOdds || bm?.isTopOdds) {
+              // Fair odds and top odds are already in decimal format
               return odds.x12?.[0]?.toString() || null;
             } else {
               // Regular odds are in basis points
@@ -470,8 +857,8 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         {
           label: 'Draw',
           getValue: (odds: any, bm?: any) => {
-            if (bm?.isFairOdds) {
-              // Fair odds are already in decimal format
+            if (bm?.isFairOdds || bm?.isTopOdds) {
+              // Fair odds and top odds are already in decimal format
               return odds.x12?.[1]?.toString() || null;
             } else {
               // Regular odds are in basis points
@@ -482,8 +869,8 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         {
           label: 'Away',
           getValue: (odds: any, bm?: any) => {
-            if (bm?.isFairOdds) {
-              // Fair odds are already in decimal format
+            if (bm?.isFairOdds || bm?.isTopOdds) {
+              // Fair odds and top odds are already in decimal format
               return odds.x12?.[2]?.toString() || null;
             } else {
               // Regular odds are in basis points
@@ -505,7 +892,7 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         {
           label: 'Away',
           oddsKey: 'ah_a',
-          lineFormatter: (line: number) => line < 0 ? `+${Math.abs(line)}` : `-${line}`
+          lineFormatter: (line: number) => line < 0 ? `+${Math.abs(line)}` : line === 0 ? `${line}` : `-${line}`
         }
       )}
 

@@ -2,10 +2,10 @@
  * Market XG Calculator
  *
  * This module calculates market XG from betting odds using Dixon-Coles Poisson optimization.
- * Market XG is calculated for finished fixtures only (status_short = 'FT').
+ * Market XG is calculated for finished fixtures only (status_short IN ('FT', 'AET', 'PEN')).
  */
 
-import pool from '../lib/db.ts';
+import pool from '../lib/database/db.ts';
 
 /**
  * Reverse engineer market XG from fair odds using Dixon-Coles optimization
@@ -166,31 +166,86 @@ function poissonProbabilities(homeXg, awayXg, overLine = 2.5, maxGoals = 10, use
 
 /**
  * Calculate and populate market XG using Dixon-Coles Poisson optimization
+ * Uses fair odds with priority: Pinnacle > Betfair > Bet365 > Any other
  * @param {number[] | null | undefined} fixtureIds - Array of fixture IDs to process, or null for all fixtures
  */
 async function calculateMarketXG(fixtureIds = null) {
   try {
-    // Build query to get FINISHED fixtures with fair odds
+    // Build query to get FINISHED fixtures (FT, AET, PEN) with fair odds
+    // Priority: pinnacle > betfair > bet365 > any other
     let query = `
+      WITH prioritized_fair_odds AS (
+        SELECT
+          fixture_id,
+          bookie,
+          decimals,
+          fair_odds_x12,
+          fair_odds_ah,
+          fair_odds_ou,
+          latest_lines,
+          CASE LOWER(bookie)
+            WHEN 'pinnacle' THEN 1
+            WHEN 'betfair' THEN 2
+            WHEN 'bet365' THEN 3
+            ELSE 4
+          END as priority
+        FROM football_fair_odds
+        WHERE fair_odds_x12 IS NOT NULL
+          AND (fair_odds_x12->'fair_x12'->>0)::numeric > 0
+          AND (fair_odds_x12->'fair_x12'->>1)::numeric > 0
+          AND (fair_odds_x12->'fair_x12'->>2)::numeric > 0
+      ),
+      best_fair_odds AS (
+        SELECT DISTINCT ON (fixture_id)
+          fixture_id,
+          bookie,
+          decimals,
+          fair_odds_x12,
+          fair_odds_ah,
+          fair_odds_ou,
+          latest_lines
+        FROM prioritized_fair_odds
+        ORDER BY fixture_id, priority
+      ),
+      prioritized_ou_odds AS (
+        SELECT
+          fixture_id,
+          bookie,
+          lines,
+          CASE LOWER(bookie)
+            WHEN 'pinnacle' THEN 1
+            WHEN 'betfair' THEN 2
+            WHEN 'bet365' THEN 3
+            ELSE 4
+          END as priority
+        FROM football_odds
+        WHERE odds_ou IS NOT NULL
+      ),
+      best_ou_odds AS (
+        SELECT DISTINCT ON (fixture_id)
+          fixture_id,
+          bookie,
+          lines
+        FROM prioritized_ou_odds
+        ORDER BY fixture_id, priority
+      )
       SELECT
         f.id as fixture_id,
-        fov.decimals,
-        (fov.fair_odds_x12->'fair_x12'->>0)::numeric as home_odds,
-        (fov.fair_odds_x12->'fair_x12'->>1)::numeric as draw_odds,
-        (fov.fair_odds_x12->'fair_x12'->>2)::numeric as away_odds,
+        bfo.decimals,
+        (bfo.fair_odds_x12->'fair_x12'->>0)::numeric as home_odds,
+        (bfo.fair_odds_x12->'fair_x12'->>1)::numeric as draw_odds,
+        (bfo.fair_odds_x12->'fair_x12'->>2)::numeric as away_odds,
         (
-          SELECT (fov.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric
-          FROM jsonb_array_elements_text(fov.latest_lines->'ou') WITH ORDINALITY AS t(val, idx)
+          SELECT (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric
+          FROM jsonb_array_elements_text(boo.lines->'ou') WITH ORDINALITY AS t(val, idx)
           WHERE t.val::numeric = 2.5
           LIMIT 1
         ) as over25_odds
       FROM football_fixtures f
-      LEFT JOIN fair_odds_view fov ON f.id = fov.fixture_id
-      WHERE f.status_short = 'FT'
-        AND fov.fair_odds_x12 IS NOT NULL
-        AND (fov.fair_odds_x12->'fair_x12'->>0)::numeric > 0
-        AND (fov.fair_odds_x12->'fair_x12'->>1)::numeric > 0
-        AND (fov.fair_odds_x12->'fair_x12'->>2)::numeric > 0
+      LEFT JOIN best_fair_odds bfo ON f.id = bfo.fixture_id
+      LEFT JOIN best_ou_odds boo ON f.id = boo.fixture_id
+      WHERE f.status_short IN ('FT', 'AET', 'PEN')
+        AND bfo.fair_odds_x12 IS NOT NULL
     `;
 
     const params = [];

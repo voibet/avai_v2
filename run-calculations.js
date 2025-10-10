@@ -8,21 +8,25 @@
  * - ELO ratings (team ELOs + league ELOs as average of team ELOs)
  * - Rolling xG and xGA (8, 16, 32 match windows averaged, min: 4 matches per team)
  *
- * DATABASE VIEWS CREATED (when --views is used):
- * - payout_view: Calculates bookmaker payout % (1/total implied probability) for X12, AH, and OU markets
- * - fair_odds_view: Removes bookmaker margin to calculate fair odds (normalized probabilities)
+ * DATABASE TABLES CREATED & POPULATED (when --views is used):
+ * - football_odds
+ * - payouts: Stores bookmaker payout calculations per fixture/bookie (auto-updating)
+ * - fair_odds: Stores fair odds calculations per fixture/bookie (auto-updating)
+ * - Automatic triggers keep tables updated when odds change
  *
  * USAGE:
- * RUN: $env:DB_USER='postgres'; $env:DB_PASSWORD='NopoONpelle31?'; $env:DB_HOST='172.29.253.202'; $env:DB_PORT='5432'; $env:DB_NAME='mydb'; $env:DB_SSL='false'; npx ts-node run_calculations.js [function] [--fixture-ids=id1,id2,id3] [--views]
+ * RUN: $env:DB_USER='postgres'; $env:DB_PASSWORD='NopoONpelle31?'; $env:DB_HOST='172.29.253.202'; $env:DB_PORT='5432'; $env:DB_NAME='mydb'; $env:DB_SSL='false'; npx ts-node run-calculations.js [function] [--fixture-ids=id1,id2,id3] [--views]
  *
  * OPTIONS:
- *   function: '1' or 'hours', '2' or 'goals', '3' or 'elo', '4' or 'home-advantage', '5' or 'xg' or 'rolling-xg', 'all' (default)
+ *   function: '1' or 'hours', '2' or 'goals', '3' or 'elo', '4' or 'home-advantage', '5' or 'xg' or 'rolling-xg', '6' or 'market-xg', '7' or 'prediction-odds' or 'odds', 'all' (default)
  *   Multiple functions can be specified comma-separated, e.g., '2,5' to run goals and rolling-xg calculations
  *   --fixture-ids=id1,id2,id3: Process only specific fixture IDs (comma-separated)
- *   --views: Create database views (slower execution but enables additional functionality)
+ *   --views: Create & populate auto-updating calculated odds tables (payouts, fair_odds) + drop old views
  */
 
-import pool from './lib/db.ts';
+import pool from './lib/database/db.ts';
+import { calculateMarketXG } from './calculators/market-xg.js';
+import { calculateOddsFromPredictions } from './calculators/prediction-odds.js';
 
 
 async function runCalculations() {
@@ -591,6 +595,9 @@ async function runCalculations() {
                 ) / 3.0, 2))) as away_xga
             FROM calculated_adjustments
             GROUP BY fixture_id
+            -- Only include fixtures where both teams have at least 4 past matches
+            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 4 
+               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 4
         )
         UPDATE football_stats
         SET
@@ -805,6 +812,9 @@ async function runCalculations() {
                              NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 0), 2))) as away_xga
             FROM calculated_adjustments
             GROUP BY fixture_id
+            -- Only include fixtures where both teams have at least 4 past matches
+            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 4
+               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 4
         )
         UPDATE football_stats
         SET
@@ -821,6 +831,7 @@ async function runCalculations() {
         RETURN updated_count;
     END;
     $$ LANGUAGE plpgsql;
+
 
     -- Main function to populate all fixture statistics
     CREATE OR REPLACE FUNCTION populate_all_fixture_stats(calc_num INTEGER DEFAULT 0, fixture_ids BIGINT[] DEFAULT NULL) RETURNS INTEGER AS $$
@@ -863,10 +874,12 @@ async function runCalculations() {
         SELECT populate_adjusted_rolling_market_xg_batch(fixture_ids) INTO market_xg_count;
         RAISE NOTICE 'Rolling windows market xG calculations completed: %', market_xg_count;
 
+
         RETURN GREATEST(hours_count, goals_count, home_advantage_count, elo_count, xg_count, market_xg_count);
     END;
     $$ LANGUAGE plpgsql;
     `;
+
     await pool.query(sql);
 
     // Parse command line arguments
@@ -939,299 +952,694 @@ async function runCalculations() {
                 console.error('❌ Error adding columns:', alterError.message);
                 throw alterError;
             }
-        }
 
-        // Drop existing functions first to avoid conflicts
-        console.log('Dropping existing functions...');
-        try {
-            // Get all functions with our names and drop them
-            const existingFunctions = await pool.query(`
-                SELECT proname, pg_get_function_identity_arguments(oid) as args
-                FROM pg_proc
-                WHERE proname IN ('populate_hours_batch', 'populate_league_goals_batch',
-                                'populate_home_advantage_batch', 'calculate_elos_incremental',
-                                'populate_adjusted_rolling_xg_batch', 'populate_all_fixture_stats')
-                AND pg_function_is_visible(oid);
-            `);
-
-            for (const func of existingFunctions.rows) {
-                try {
-                    await pool.query(`DROP FUNCTION ${func.proname}(${func.args}) CASCADE`);
-                } catch (e) {
-                }
+            // Add latest_lines column to football_payouts if it doesn't exist
+            try {
+                await pool.query(`
+                    ALTER TABLE football_payouts
+                    ADD COLUMN IF NOT EXISTS latest_lines JSONB
+                `);
+                console.log('✅ latest_lines column added to football_payouts');
+            } catch (alterError) {
+                console.error('❌ Error adding latest_lines column:', alterError.message);
+                throw alterError;
             }
-        } catch (error) {
         }
 
-    if (createViews) {
-      // Drop dependent views first to avoid dependency conflicts
-      console.log('Dropping dependent views...');
-      try {
-        // Drop each view individually with CASCADE
-        await pool.query('DROP VIEW IF EXISTS payout_view CASCADE');
-        await pool.query('DROP VIEW IF EXISTS fair_odds_view CASCADE');
-        await pool.query('DROP MATERIALIZED VIEW IF EXISTS market_xg_view CASCADE');
-        await pool.query('DROP VIEW IF EXISTS market_xg_view CASCADE');
-        await pool.query('DROP TABLE IF EXISTS football_market_xg CASCADE');
-        console.log('✅ Dependent views and tables dropped successfully');
-      } catch (error) {
-        console.log(`⚠️  Error dropping views: ${error.message}, continuing...`);
-      }
+        // Create calculated odds tables
+        console.log('📝 Creating calculated odds tables...');
+        try {
+            const tablesSQL = `
 
-    // Create payout view
-    console.log('Creating payout view...');
-    try {
-      const payoutViewSQL = `
-      -- View to calculate payout percentages (bookmaker margin) from latest odds data
-      -- Payout shows total implied probability (should be > 1.0 due to margin)
-      -- For 2-way markets: payout = 1 / ((1/odds1) + (1/odds2))
-      -- For 3-way markets: payout = 1 / ((1/odds1) + (1/odds2) + (1/odds3))
-      CREATE VIEW payout_view AS
+                -- Payouts table - stores bookmaker payout calculations per fixture/bookie combination
+                CREATE TABLE IF NOT EXISTS football_payouts (
+                    fixture_id BIGINT,
+                    bookie VARCHAR(100),
+                    decimals INTEGER,
+
+                    -- Individual bookie payouts
+                    payout_x12 DECIMAL(5,4),
+                    payout_ah JSONB,
+                    payout_ou JSONB,
+
+                    -- Latest betting lines from bookmaker data
+                    latest_lines JSONB,
+
+                    updated_at TIMESTAMP DEFAULT NOW(),
+
+                    PRIMARY KEY (fixture_id, bookie),
+                    FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
+                );
+
+                -- Fair odds table - stores fair odds calculations per fixture/bookie combination
+                CREATE TABLE IF NOT EXISTS football_fair_odds (
+                    fixture_id BIGINT,
+                    bookie VARCHAR(100),
+                    decimals INTEGER,
+
+                    fair_odds_x12 JSONB,
+                    fair_odds_ah JSONB,
+                    fair_odds_ou JSONB,
+                    latest_lines JSONB,
+
+                    updated_at TIMESTAMP DEFAULT NOW(),
+
+                    PRIMARY KEY (fixture_id, bookie),
+                    FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
+                );
+
+                -- Indexes for calculated odds tables
+                CREATE INDEX IF NOT EXISTS idx_football_payouts_fixture_bookie ON football_payouts (fixture_id, bookie);
+                CREATE INDEX IF NOT EXISTS idx_football_payouts_payouts ON football_payouts (payout_x12, payout_ah, payout_ou);
+                CREATE INDEX IF NOT EXISTS idx_football_fair_odds_fixture_bookie ON football_fair_odds (fixture_id, bookie);
+            `;
+            await pool.query(tablesSQL);
+            console.log('✅ Calculated odds tables created');
+        } catch (error) {
+            console.error('❌ Error creating tables:', error.message);
+            throw error;
+        }
+
+        // Create update functions
+        console.log('📝 Creating update functions...');
+        try {
+            const functionsSQL = `
+
+                -- Function to update payouts for a fixture
+                CREATE OR REPLACE FUNCTION update_payouts_for_fixture(p_fixture_id BIGINT) RETURNS VOID AS $$
+                BEGIN
+
+                    -- Insert or update calculated payouts for all bookies for this fixture
+                    INSERT INTO football_payouts (
+                        fixture_id, bookie, decimals,
+                        payout_x12, payout_ah, payout_ou, latest_lines
+                    )
       SELECT
           fo.fixture_id,
           fo.bookie,
           fo.decimals,
-          -- X12 payout calculation (3-way)
+                        -- Individual bookie payouts
           CASE
               WHEN fo.odds_x12 IS NOT NULL THEN
-                  ROUND(
-                      (
-                          1.0 / (
-                              (1.0 / ((fo.odds_x12->-1->'x12'->>0)::numeric / POWER(10, fo.decimals))) +
-                              (1.0 / ((fo.odds_x12->-1->'x12'->>1)::numeric / POWER(10, fo.decimals))) +
-                              (1.0 / ((fo.odds_x12->-1->'x12'->>2)::numeric / POWER(10, fo.decimals)))
-                          )
-                      )::numeric,
-                      4
-                  )
+              ROUND(
+                  (
+                      1.0 / (
+                          (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>0)::numeric / POWER(10, fo.decimals), 0)) +
+                          (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>1)::numeric / POWER(10, fo.decimals), 0)) +
+                          (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>2)::numeric / POWER(10, fo.decimals), 0))
+                      )
+                  )::numeric,
+                  4
+              )
               ELSE NULL
           END as payout_x12,
-          -- AH payout calculation per line (2-way per handicap line)
+
           CASE
               WHEN fo.odds_ah IS NOT NULL THEN
                   (
-                      SELECT jsonb_agg(
-                          ROUND(
-                              (
-                                  1.0 / (
-                                      (1.0 / (ah_h.elem::numeric / POWER(10, fo.decimals))) +
-                                      (1.0 / (ah_a.elem::numeric / POWER(10, fo.decimals)))
-                                  )
-                              )::numeric,
-                              4
-                          )
-                      )
+                SELECT jsonb_agg(
+                    CASE
+                        WHEN (ah_h.elem::numeric = 0 OR ah_a.elem::numeric = 0) THEN NULL
+                        ELSE ROUND(
+                            (
+                                1.0 / (
+                                    (1.0 / (ah_h.elem::numeric / POWER(10, fo.decimals))) +
+                                    (1.0 / (ah_a.elem::numeric / POWER(10, fo.decimals)))
+                                )
+                            )::numeric,
+                            4
+                        )
+                                        END ORDER BY ah_h.idx
+                )
                       FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY ah_h(elem, idx)
                       JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY ah_a(elem, idx)
                       ON ah_h.idx = ah_a.idx
                   )
               ELSE NULL
           END as payout_ah,
-          -- OU payout calculation per line (2-way per total line)
+
           CASE
               WHEN fo.odds_ou IS NOT NULL THEN
                   (
-                      SELECT jsonb_agg(
-                          ROUND(
-                              (
-                                  1.0 / (
-                                      (1.0 / (ou_o.elem::numeric / POWER(10, fo.decimals))) +
-                                      (1.0 / (ou_u.elem::numeric / POWER(10, fo.decimals)))
-                                  )
-                              )::numeric,
-                              4
-                          )
-                      )
+                SELECT jsonb_agg(
+                    CASE
+                        WHEN (ou_o.elem::numeric = 0 OR ou_u.elem::numeric = 0) THEN NULL
+                        ELSE ROUND(
+                            (
+                                1.0 / (
+                                    (1.0 / (ou_o.elem::numeric / POWER(10, fo.decimals))) +
+                                    (1.0 / (ou_u.elem::numeric / POWER(10, fo.decimals)))
+                                )
+                            )::numeric,
+                            4
+                        )
+                                        END ORDER BY ou_o.idx
+                )
                       FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY ou_o(elem, idx)
                       JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY ou_u(elem, idx)
                       ON ou_o.idx = ou_u.idx
                   )
               ELSE NULL
           END as payout_ou,
-          -- Latest odds data for reference
-          fo.odds_x12->-1 as latest_x12,
-          fo.odds_ah->-1 as latest_ah,
-          fo.odds_ou->-1 as latest_ou
-      FROM football_odds fo
-      WHERE (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
-        AND fo.bookie != 'prediction';
-      `;
-      await pool.query(payoutViewSQL);
-      console.log('✅ Payout view created successfully');
-    } catch (error) {
-      console.error('❌ Error creating payout view:', error.message);
-    }
 
-    // Create fair odds view
-    console.log('Creating fair odds view...');
-    try {
-      const fairOddsViewSQL = `
-        -- View to calculate fair odds (no vig/no margin) from latest odds data
-        -- Fair odds remove the bookmaker's margin by normalizing implied probabilities
-        -- For 2-way markets: fair_odds = 1 / (implied_prob / total_implied_prob)
-        CREATE VIEW fair_odds_view AS
-          SELECT
-              fo.fixture_id,
-              fo.bookie,
-              fo.decimals,
-              -- Latest X12 odds data with fair odds calculation
-              CASE
-                  WHEN fo.odds_x12 IS NOT NULL THEN
-                      jsonb_build_object(
-                          'original_x12', (fo.odds_x12->-1->>'x12')::jsonb,
-                          'fair_x12', (
-                              SELECT jsonb_agg(
-                                  ROUND(
-                                      (
-                                          1.0 / (
-                                              (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
-                                              (
-                                                  SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                                  FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
-                                              )
-                                          )
-                                      )::numeric,
-                                      fo.decimals
-                                  )::text
-                                  ORDER BY x12_idx
-                              )
-                              FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
-                              WHERE x12_idx <= 3
-                          )
-                      )
-                  ELSE NULL
-              END as fair_odds_x12,
-              -- Latest AH odds data with fair odds calculation
-              CASE
-                  WHEN fo.odds_ah IS NOT NULL THEN
-                    jsonb_build_object(
-                        'original_ah_h', (fo.odds_ah->-1->>'ah_h')::jsonb,
-                        'original_ah_a', (fo.odds_ah->-1->>'ah_a')::jsonb,
-                        'fair_ah_h', (
-                            SELECT jsonb_agg(
-                                CASE
-                            WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
-                                ROUND(
-                                    (
-                                        1.0 / (
-                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) /
-                                            (
-                                                (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                            )
+          -- Latest lines from bookmaker data
+          (fo.lines->-1) as latest_lines
+
+                    FROM football_odds fo
+                    WHERE fo.fixture_id = p_fixture_id
+                      AND fo.bookie NOT IN ('predictions')
+                      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+                    ON CONFLICT (fixture_id, bookie) DO UPDATE SET
+                        payout_x12 = EXCLUDED.payout_x12,
+                        payout_ah = EXCLUDED.payout_ah,
+                        payout_ou = EXCLUDED.payout_ou,
+                        latest_lines = EXCLUDED.latest_lines,
+                        updated_at = NOW()
+                    WHERE football_payouts.payout_x12 IS DISTINCT FROM EXCLUDED.payout_x12
+                       OR football_payouts.payout_ah IS DISTINCT FROM EXCLUDED.payout_ah
+                       OR football_payouts.payout_ou IS DISTINCT FROM EXCLUDED.payout_ou
+                       OR football_payouts.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines;
+                END;
+                $$ LANGUAGE plpgsql;
+
+                -- Function to update fair odds for a fixture
+                CREATE OR REPLACE FUNCTION update_fair_odds_for_fixture(p_fixture_id BIGINT) RETURNS VOID AS $$
+                BEGIN
+                    -- Delete existing records for this fixture
+                    DELETE FROM football_fair_odds WHERE fixture_id = p_fixture_id;
+
+                    -- Insert new calculated fair odds for all bookies for this fixture
+                    INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines)
+                    SELECT
+                        fo.fixture_id,
+                        fo.bookie,
+                        fo.decimals,
+
+                        -- Fair X12 odds
+                        CASE
+                            WHEN fo.odds_x12 IS NOT NULL THEN
+                                jsonb_build_object(
+                                    'original_x12', (fo.odds_x12->-1->>'x12')::jsonb,
+                                    'fair_x12', (
+                                        SELECT jsonb_agg(
+                                            ROUND(
+                                                (
+                                                    1.0 / (
+                                                        (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
+                                                        (
+                                                            SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                            FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
+                                                        )
+                                                    )
+                                                )::numeric,
+                                                fo.decimals::integer
+                                            )::text
+                                            ORDER BY x12_idx
                                         )
-                                    )::numeric,
-                                    fo.decimals
-                                )::text
-                                    ELSE NULL
-                                END
-                            )
-                            FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
-                            JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
-                            ON h_idx = a_idx
-                        ),
-                        'fair_ah_a', (
-                            SELECT jsonb_agg(
-                                CASE
-                            WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
-                                ROUND(
-                                    (
-                                        1.0 / (
-                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals))) /
-                                            (
-                                                (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                            )
+                                        FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
+                                        WHERE x12_idx <= 3
+                                    )
+                                )
+                            ELSE NULL
+                        END as fair_odds_x12,
+
+                        -- Fair AH odds
+                        CASE
+                            WHEN fo.odds_ah IS NOT NULL THEN
+                                jsonb_build_object(
+                                    'original_ah_h', (fo.odds_ah->-1->>'ah_h')::jsonb,
+                                    'original_ah_a', (fo.odds_ah->-1->>'ah_a')::jsonb,
+                                    'fair_ah_h', (
+                                        SELECT jsonb_agg(
+                                            CASE
+                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                    ROUND(
+                                                        (
+                                                            1.0 / (
+                                                                (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) /
+                                                                (
+                                                                    (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                    (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                )
+                                                            )
+                                                        )::numeric,
+                                                        fo.decimals::integer
+                                                    )::text
+                                                ELSE NULL
+                                            END ORDER BY h_idx
                                         )
-                                    )::numeric,
-                                    fo.decimals
-                                )::text
-                                    ELSE NULL
-                                END
-                            )
-                            FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
-                            JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
-                            ON h_idx = a_idx
+                                        FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
+                                        JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
+                                        ON h_idx = a_idx
+                                    ),
+                                    'fair_ah_a', (
+                                        SELECT jsonb_agg(
+                                            CASE
+                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                    ROUND(
+                                                        (
+                                                            1.0 / (
+                                                                (1.0 / (a_odds::numeric / POWER(10, fo.decimals))) /
+                                                                (
+                                                                    (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                    (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                )
+                                                            )
+                                                        )::numeric,
+                                                        fo.decimals::integer
+                                                    )::text
+                                                ELSE NULL
+                                            END ORDER BY h_idx
+                                        )
+                                        FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
+                                        JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
+                                        ON h_idx = a_idx
+                                    )
+                                )
+                            ELSE NULL
+                        END as fair_odds_ah,
+
+                        -- Fair OU odds
+                        CASE
+                            WHEN fo.odds_ou IS NOT NULL THEN
+                                jsonb_build_object(
+                                    'original_ou_o', (fo.odds_ou->-1->>'ou_o')::jsonb,
+                                    'original_ou_u', (fo.odds_ou->-1->>'ou_u')::jsonb,
+                                    'fair_ou_o', (
+                                        SELECT jsonb_agg(
+                                            CASE
+                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                    ROUND(
+                                                        (
+                                                            1.0 / (
+                                                                (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) /
+                                                                (
+                                                                    (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                    (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                )
+                                                            )
+                                                        )::numeric,
+                                                        fo.decimals::integer
+                                                    )::text
+                                                ELSE NULL
+                                            END ORDER BY o_idx
+                                        )
+                                        FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
+                                        JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
+                                        ON o_idx = u_idx
+                                    ),
+                                    'fair_ou_u', (
+                                        SELECT jsonb_agg(
+                                            CASE
+                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                    ROUND(
+                                                        (
+                                                            1.0 / (
+                                                                (1.0 / (u_odds::numeric / POWER(10, fo.decimals))) /
+                                                                (
+                                                                    (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                    (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                )
+                                                            )
+                                                        )::numeric,
+                                                        fo.decimals::integer
+                                                    )::text
+                                                ELSE NULL
+                                            END ORDER BY o_idx
+                                        )
+                                        FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
+                                        JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
+                                        ON o_idx = u_idx
+                                    )
+                                )
+                            ELSE NULL
+                        END as fair_odds_ou,
+
+                        -- Latest lines from bookmaker data
+                        (fo.lines->-1) as latest_lines
+
+                    FROM football_odds fo
+                    WHERE fo.fixture_id = p_fixture_id
+                      AND fo.bookie != 'predictions'
+                      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL);
+                END;
+                $$ LANGUAGE plpgsql;
+
+            `;
+            await pool.query(functionsSQL);
+            console.log('✅ Update functions created');
+        } catch (error) {
+            console.error('❌ Error creating functions and triggers:', error.message);
+            throw error;
+        }
+
+    if (createViews) {
+        // Populate calculated odds tables
+        console.log('Populating calculated odds tables...');
+
+        // Get all fixtures that have odds
+        const fixturesResult = await pool.query(`
+            SELECT DISTINCT f.id as fixture_id
+            FROM football_fixtures f
+            JOIN football_odds fo ON f.id = fo.fixture_id
+            WHERE fo.bookie != 'predictions'
+                    AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+        `);
+
+        const fixtureIds = fixturesResult.rows.map(row => parseInt(row.fixture_id));
+        console.log(`📊 Found ${fixtureIds.length} fixtures with odds data`);
+
+        if (fixtureIds.length > 0) {
+
+            // Populate payouts table
+            console.log('Populating payouts table...');
+            for (let i = 0; i < fixtureIds.length; i += 50) {
+                const batch = fixtureIds.slice(i, i + 50);
+                const placeholders3 = batch.map((_, idx) => `$${idx + 1}`).join(',');
+                try {
+                    await pool.query(`
+                        INSERT INTO football_payouts (
+                            fixture_id, bookie, decimals,
+                            payout_x12, payout_ah, payout_ou, latest_lines
                         )
-                    )
-                ELSE NULL
-            END as fair_odds_ah,
-            -- Latest OU odds data with fair odds calculation
-            CASE
-                WHEN fo.odds_ou IS NOT NULL THEN
-                    jsonb_build_object(
-                        'original_ou_o', (fo.odds_ou->-1->>'ou_o')::jsonb,
-                        'original_ou_u', (fo.odds_ou->-1->>'ou_u')::jsonb,
-                        'fair_ou_o', (
-                            SELECT jsonb_agg(
-                                CASE
-                            WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                        SELECT
+                            fo.fixture_id,
+                            fo.bookie,
+                            fo.decimals,
+                                                -- Individual bookie payouts
+                            CASE
+                                WHEN fo.odds_x12 IS NOT NULL THEN
                                 ROUND(
                                     (
                                         1.0 / (
-                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) /
-                                            (
-                                                (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                            )
+                                            (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>0)::numeric / POWER(10, fo.decimals), 0)) +
+                                            (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>1)::numeric / POWER(10, fo.decimals), 0)) +
+                                            (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>2)::numeric / POWER(10, fo.decimals), 0))
                                         )
                                     )::numeric,
-                                    fo.decimals
-                                )::text
-                                    ELSE NULL
-                                END
-                            )
-                            FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
-                            JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
-                            ON o_idx = u_idx
-                        ),
-                        'fair_ou_u', (
-                            SELECT jsonb_agg(
-                                CASE
-                            WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
-                                ROUND(
+                                    4
+                                )
+                                ELSE NULL
+                            END as payout_x12,
+
+                            CASE
+                                WHEN fo.odds_ah IS NOT NULL THEN
                                     (
-                                        1.0 / (
-                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals))) /
-                                            (
-                                                (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                    SELECT jsonb_agg(
+                                        CASE
+                                            WHEN (ah_h.elem::numeric = 0 OR ah_a.elem::numeric = 0) THEN NULL
+                                            ELSE ROUND(
+                                                (
+                                                    1.0 / (
+                                                        (1.0 / (ah_h.elem::numeric / POWER(10, fo.decimals))) +
+                                                        (1.0 / (ah_a.elem::numeric / POWER(10, fo.decimals)))
+                                                    )
+                                                )::numeric,
+                                                4
                                             )
+                                                                END ORDER BY ah_h.idx
+                                    )
+                                        FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY ah_h(elem, idx)
+                                        JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY ah_a(elem, idx)
+                                        ON ah_h.idx = ah_a.idx
+                                    )
+                                ELSE NULL
+                            END as payout_ah,
+
+                            CASE
+                                WHEN fo.odds_ou IS NOT NULL THEN
+                                    (
+                                    SELECT jsonb_agg(
+                                        CASE
+                                            WHEN (ou_o.elem::numeric = 0 OR ou_u.elem::numeric = 0) THEN NULL
+                                            ELSE ROUND(
+                                                (
+                                                    1.0 / (
+                                                        (1.0 / (ou_o.elem::numeric / POWER(10, fo.decimals))) +
+                                                        (1.0 / (ou_u.elem::numeric / POWER(10, fo.decimals)))
+                                                    )
+                                                )::numeric,
+                                                4
+                                            )
+                                                                END ORDER BY ou_o.idx
+                                    )
+                                        FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY ou_o(elem, idx)
+                                        JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY ou_u(elem, idx)
+                                        ON ou_o.idx = ou_u.idx
+                                    )
+                                ELSE NULL
+                            END as payout_ou,
+
+                            -- Latest lines from bookmaker data
+                            (fo.lines->-1) as latest_lines
+                        FROM football_odds fo
+                        WHERE fo.fixture_id = ANY(ARRAY[${placeholders3}]::BIGINT[])
+                          AND fo.bookie != 'predictions'
+                          AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+                        ON CONFLICT (fixture_id, bookie) DO UPDATE SET
+                            payout_x12 = EXCLUDED.payout_x12,
+                            payout_ah = EXCLUDED.payout_ah,
+                            payout_ou = EXCLUDED.payout_ou,
+                            latest_lines = EXCLUDED.latest_lines,
+                            updated_at = NOW()
+                        WHERE football_payouts.payout_x12 IS DISTINCT FROM EXCLUDED.payout_x12
+                           OR football_payouts.payout_ah IS DISTINCT FROM EXCLUDED.payout_ah
+                           OR football_payouts.payout_ou IS DISTINCT FROM EXCLUDED.payout_ou
+                           OR football_payouts.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
+                    `, batch);
+                } catch (error) {
+                    console.error(`❌ Error populating payouts batch ${Math.floor(i/50) + 1}:`, error.message);
+                }
+            }
+            console.log('✅ Payouts table populated successfully');
+
+            // Populate fair_odds table
+            console.log('Populating fair_odds table...');
+            for (let i = 0; i < fixtureIds.length; i += 50) {
+                const batch = fixtureIds.slice(i, i + 50);
+                const placeholders = batch.map((_, idx) => `$${idx + 1}`).join(',');
+                try {
+                    await pool.query(`
+                        INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines)
+                        SELECT
+                            fo.fixture_id,
+                            fo.bookie,
+                            fo.decimals,
+
+                            -- Fair X12 odds
+                            CASE
+                                WHEN fo.odds_x12 IS NOT NULL THEN
+                                    jsonb_build_object(
+                                        'original_x12', (fo.odds_x12->-1->>'x12')::jsonb,
+                                        'fair_x12', (
+                                            SELECT jsonb_agg(
+                                                ROUND(
+                                                    (
+                                                        1.0 / (
+                                                            (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
+                                                            (
+                                                                SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                                FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
+                                                            )
+                                                        )
+                                                    )::numeric,
+                                                    fo.decimals::integer
+                                                )::text
+                                                ORDER BY x12_idx
+                                            )
+                                            FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
+                                            WHERE x12_idx <= 3
                                         )
-                                    )::numeric,
-                                    fo.decimals
-                                )::text
-                                    ELSE NULL
-                                END
-                            )
-                            FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
-                            JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
-                            ON o_idx = u_idx
-                        )
-                    )
-                ELSE NULL
-            END as fair_odds_ou,
-            -- Include lines for reference
-            fo.lines->-1 as latest_lines
-        FROM football_odds fo
-        WHERE (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
-          AND fo.bookie != 'predictions';
-        `;
-      await pool.query(fairOddsViewSQL);
-      console.log('✅ Fair odds view created successfully');
+                                    )
+                                ELSE NULL
+                            END as fair_odds_x12,
+
+                            -- Fair AH odds
+                            CASE
+                                WHEN fo.odds_ah IS NOT NULL THEN
+                                    jsonb_build_object(
+                                        'original_ah_h', (fo.odds_ah->-1->>'ah_h')::jsonb,
+                                        'original_ah_a', (fo.odds_ah->-1->>'ah_a')::jsonb,
+                                        'fair_ah_h', (
+                                            SELECT jsonb_agg(
+                                                CASE
+                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                        ROUND(
+                                                            (
+                                                                1.0 / (
+                                                                    (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) /
+                                                                    (
+                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                    )
+                                                                )
+                                                            )::numeric,
+                                                            fo.decimals::integer
+                                                        )::text
+                                                    ELSE NULL
+                                                END ORDER BY h_idx
+                                            )
+                                            FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
+                                            JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
+                                            ON h_idx = a_idx
+                                        ),
+                                        'fair_ah_a', (
+                                            SELECT jsonb_agg(
+                                                CASE
+                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                        ROUND(
+                                                            (
+                                                                1.0 / (
+                                                                    (1.0 / (a_odds::numeric / POWER(10, fo.decimals))) /
+                                                                    (
+                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                    )
+                                                                )
+                                                            )::numeric,
+                                                            fo.decimals::integer
+                                                        )::text
+                                                    ELSE NULL
+                                                END ORDER BY h_idx
+                                            )
+                                            FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
+                                            JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
+                                            ON h_idx = a_idx
+                                        )
+                                    )
+                                ELSE NULL
+                            END as fair_odds_ah,
+
+                            -- Fair OU odds
+                            CASE
+                                WHEN fo.odds_ou IS NOT NULL THEN
+                                    jsonb_build_object(
+                                        'original_ou_o', (fo.odds_ou->-1->>'ou_o')::jsonb,
+                                        'original_ou_u', (fo.odds_ou->-1->>'ou_u')::jsonb,
+                                        'fair_ou_o', (
+                                            SELECT jsonb_agg(
+                                                CASE
+                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                        ROUND(
+                                                            (
+                                                                1.0 / (
+                                                                    (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) /
+                                                                    (
+                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                    )
+                                                                )
+                                                            )::numeric,
+                                                            fo.decimals::integer
+                                                        )::text
+                                                    ELSE NULL
+                                                END ORDER BY o_idx
+                                            )
+                                            FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
+                                            JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
+                                            ON o_idx = u_idx
+                                        ),
+                                        'fair_ou_u', (
+                                            SELECT jsonb_agg(
+                                                CASE
+                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                        ROUND(
+                                                            (
+                                                                1.0 / (
+                                                                    (1.0 / (u_odds::numeric / POWER(10, fo.decimals))) /
+                                                                    (
+                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                    )
+                                                                )
+                                                            )::numeric,
+                                                            fo.decimals::integer
+                                                        )::text
+                                                    ELSE NULL
+                                                END ORDER BY o_idx
+                                            )
+                                            FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
+                                            JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
+                                            ON o_idx = u_idx
+                                        )
+                                    )
+                                ELSE NULL
+                            END as fair_odds_ou,
+
+                            -- Latest lines from bookmaker data
+                            (fo.lines->-1) as latest_lines
+
+                        FROM football_odds fo
+                        WHERE fo.fixture_id = ANY(ARRAY[${placeholders}]::BIGINT[])
+                          AND fo.bookie != 'predictions'
+                          AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+                        ON CONFLICT (fixture_id, bookie) DO UPDATE SET
+                            fair_odds_x12 = EXCLUDED.fair_odds_x12,
+                            fair_odds_ah = EXCLUDED.fair_odds_ah,
+                            fair_odds_ou = EXCLUDED.fair_odds_ou,
+                            latest_lines = EXCLUDED.latest_lines,
+                            updated_at = NOW()
+                        WHERE football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12
+                           OR football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah
+                           OR football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou
+                           OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
+                    `, batch);
     } catch (error) {
-      console.error('❌ Error creating fair odds view:', error.message);
-    }
+                    console.error(`❌ Error populating fair_odds batch ${Math.floor(i/50) + 1}:`, error.message);
+                }
+            }
+            console.log('✅ Fair odds table populated successfully');
+        } else {
+            console.log('⚠️  No fixtures with odds data found');
+        }
 
     } else {
-      console.log('⏭️  Skipping view creation (use --views to enable)');
+      console.log('⏭️  Skipping calculated odds table population (use --views to enable)');
     }
-        // Create all functions
-        console.log('Creating database functions...');
-        await pool.query(sql);
     } else {
         console.log('⏭️  Skipping database setup (use --views to enable)');
     }
+
+    // Create calculated odds trigger (needed regardless of --views flag)
+    console.log('Creating calculated odds trigger...');
+    try {
+        await pool.query(`
+                -- Trigger function to update all calculated odds tables
+            CREATE OR REPLACE FUNCTION update_calculated_odds_data() RETURNS TRIGGER AS $$
+            DECLARE
+                fixture_id BIGINT;
+            BEGIN
+                -- Handle INSERT/UPDATE vs DELETE operations
+                fixture_id := COALESCE(NEW.fixture_id, OLD.fixture_id);
+
+                -- Update all calculated tables for this fixture
+                PERFORM update_payouts_for_fixture(fixture_id);
+                PERFORM update_fair_odds_for_fixture(fixture_id);
+
+                -- Return appropriate value for AFTER trigger
+                IF TG_OP = 'DELETE' THEN
+                    RETURN OLD;
+                ELSE
+                    RETURN NEW;
+                END IF;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            -- Trigger on football_odds to automatically update calculated tables
+            DROP TRIGGER IF EXISTS trg_update_calculated_odds ON football_odds;
+            CREATE TRIGGER trg_update_calculated_odds
+                AFTER INSERT OR UPDATE OR DELETE ON football_odds
+                FOR EACH ROW EXECUTE FUNCTION update_calculated_odds_data();
+        `);
+        console.log('✅ Calculated odds trigger created');
+    } catch (error) {
+        console.error('❌ Error creating calculated odds trigger:', error.message);
+        throw error;
+    }
+
+    // Create all statistical functions (needed regardless of --views flag)
+    console.log('Creating database functions...');
+    await pool.query(sql);
 
     const startTime = Date.now();
     let totalCount = 0;
@@ -1240,9 +1648,19 @@ async function runCalculations() {
     if (isAll) {
         console.log('Running all calculations...');
 
+        // Calculate market XG first (uses betting odds)
+        console.log('Running market XG calculations...');
+        const marketXgCount = await calculateMarketXG(fixtureIds);
+        console.log(`✅ Market XG calculations completed: ${marketXgCount} fixtures processed`);
+
         // Run all SQL-based calculations
         const result = await pool.query('SELECT populate_all_fixture_stats(0, $1) as count', [fixtureIds]);
         totalCount = result.rows[0].count;
+
+        // Calculate prediction odds last (uses MLP predictions)
+        console.log('Running prediction odds calculations...');
+        const predictionOddsCount = await calculateOddsFromPredictions(fixtureIds);
+        console.log(`✅ Prediction odds calculations completed: ${predictionOddsCount} fixtures processed`);
 
         console.log(`✅ All calculations completed: ${totalCount} fixtures processed total`);
     } else {
@@ -1287,111 +1705,25 @@ async function runCalculations() {
             console.log(`✅ Rolling windows xG calculations completed: ${count} fixtures processed`);
         }
 
+        if (functionsToRun.includes('6') || functionsToRun.includes('market-xg')) {
+            console.log('Running market XG calculations...');
+            const count = await calculateMarketXG(fixtureIds);
+            totalCount += count;
+            console.log(`✅ Market XG calculations completed: ${count} fixtures processed`);
+        }
 
+        if (functionsToRun.includes('7') || functionsToRun.includes('prediction-odds') || functionsToRun.includes('odds')) {
+            console.log('Running prediction odds calculations...');
+            const count = await calculateOddsFromPredictions(fixtureIds);
+            totalCount += count;
+            console.log(`✅ Prediction odds calculations completed: ${count} fixtures processed`);
+        }
 
         console.log(`✅ Selected calculations completed: ${totalCount} fixtures processed total`);
     }
 
     const executionTime = (Date.now() - startTime) / 1000;
     console.log(`⏱️  Total execution time: ${executionTime}s`);
-
-    // Show relevant summaries based on what was run
-    if (functionsToRun.includes('1') || functionsToRun.includes('hours') || isAll) {
-        let hoursQuery = `
-          SELECT
-            COUNT(*) as total_fixtures,
-            COUNT(CASE WHEN hours_since_last_match_home IS NOT NULL THEN 1 END) as with_home_hours,
-            COUNT(CASE WHEN hours_since_last_match_away IS NOT NULL THEN 1 END) as with_away_hours,
-            ROUND(AVG(hours_since_last_match_home), 1) as avg_home_hours,
-            ROUND(AVG(hours_since_last_match_away), 1) as avg_away_hours
-          FROM football_stats`;
-
-        if (fixtureIds && fixtureIds.length > 0) {
-          hoursQuery += ` WHERE fixture_id = ANY(ARRAY[${fixtureIds.join(',')}])`;
-        }
-    }
-
-    if (functionsToRun.includes('2') || functionsToRun.includes('goals') || isAll) {
-        let goalsQuery = `
-          SELECT
-            COUNT(*) as fixtures_with_avg_goals,
-            ROUND(AVG(avg_goals_league), 2) as overall_avg_goals,
-            MIN(avg_goals_league) as min_league_goals,
-            MAX(avg_goals_league) as max_league_goals
-          FROM football_stats
-          WHERE avg_goals_league IS NOT NULL`;
-
-        if (fixtureIds && fixtureIds.length > 0) {
-          goalsQuery += ` AND fixture_id = ANY(ARRAY[${fixtureIds.join(',')}])`;
-        }
-    }
-    
-    if (functionsToRun.includes('3') || functionsToRun.includes('elo') || isAll) {
-        let eloQuery = `
-          SELECT
-            COUNT(*) as fixtures_with_team_elo,
-            ROUND(AVG(elo_home), 0) as avg_home_elo,
-            ROUND(AVG(elo_away), 0) as avg_away_elo,
-            MIN(LEAST(elo_home, elo_away)) as min_team_elo,
-            MAX(GREATEST(elo_home, elo_away)) as max_team_elo
-          FROM football_stats
-          WHERE elo_home IS NOT NULL AND elo_away IS NOT NULL`;
-
-        if (fixtureIds && fixtureIds.length > 0) {
-          eloQuery += ` AND fixture_id = ANY(ARRAY[${fixtureIds.join(',')}])`;
-        }
-
-        let leagueEloQuery = `
-          SELECT
-            COUNT(*) as fixtures_with_league_elo,
-            ROUND(AVG(league_elo), 0) as avg_league_elo,
-            MIN(league_elo) as min_league_elo,
-            MAX(league_elo) as max_league_elo
-          FROM football_stats
-          WHERE league_elo IS NOT NULL`;
-
-        if (fixtureIds && fixtureIds.length > 0) {
-          leagueEloQuery += ` AND fixture_id = ANY(ARRAY[${fixtureIds.join(',')}])`;
-        }
-    }
-    // Show sample results for completed calculations
-    if (totalCount > 0) {
-        let sampleQuery = `
-          SELECT f.id as fixture_id, f.home_team_name, f.away_team_name,
-                 s.hours_since_last_match_home, s.hours_since_last_match_away,
-                 s.league_elo, s.avg_goals_league, s.elo_home, s.elo_away,
-                 s.home_advantage`;
-
-        // Add xG columns if they exist and were calculated
-        if (functionsToRun.includes('5') || functionsToRun.includes('xg') || functionsToRun.includes('rolling-xg') || isAll) {
-            sampleQuery += `,
-                 s.adjusted_rolling_xg_home, s.adjusted_rolling_xga_home,
-                 s.adjusted_rolling_xg_away, s.adjusted_rolling_xga_away`;
-        }
-
-        // Add market xG columns if they exist and were calculated
-        if (functionsToRun.includes('6') || functionsToRun.includes('market-xg') || functionsToRun.includes('rolling-market-xg') || isAll) {
-            sampleQuery += `,
-                 s.adjusted_rolling_market_xg_home, s.adjusted_rolling_market_xga_home,
-                 s.adjusted_rolling_market_xg_away, s.adjusted_rolling_market_xga_away`;
-        }
-
-        sampleQuery += `
-          FROM football_fixtures f
-          JOIN football_stats s ON f.id = s.fixture_id
-          WHERE s.avg_goals_league IS NOT NULL`;
-
-        // If specific fixture IDs were processed, prioritize showing those
-        if (fixtureIds && fixtureIds.length > 0) {
-          sampleQuery += `
-          ORDER BY CASE WHEN f.id = ANY(ARRAY[${fixtureIds.join(',')}]) THEN 0 ELSE 1 END, f.date DESC
-          LIMIT ${Math.min(fixtureIds.length, 5)}`;
-        } else {
-          sampleQuery += `
-          ORDER BY f.date DESC
-          LIMIT 5`;
-        }
-    }
 
   } catch (error) {
     console.error('❌ Error:', error.message);
@@ -1401,3 +1733,4 @@ async function runCalculations() {
 }
 
 runCalculations();
+

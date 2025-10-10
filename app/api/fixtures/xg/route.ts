@@ -1,4 +1,4 @@
-import { XGFetcher } from '@/lib/xg-fetcher';
+import { XGFetcher } from '@/lib/services/xg-fetcher';
 
 
 export async function POST() {

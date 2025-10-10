@@ -6,7 +6,7 @@ import { setTrainingFlag } from './ml-cache';
  * Generic function to spawn ML task in separate process
  */
 function spawnMLProcess(mode: string, data: any, onComplete?: () => void): void {
-  const scriptPath = join(process.cwd(), 'lib', 'ml-background-process.ts');
+  const scriptPath = join(process.cwd(), 'lib', 'ml', 'ml-background-process.ts');
   
   const child = spawn('npx', ['tsx', scriptPath], {
     stdio: ['pipe', 'inherit', 'inherit'],

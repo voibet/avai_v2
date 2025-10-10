@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { predictFixtures } from '../../../../../lib/ml-predict';
-import { getCachedModel } from '../../../../../lib/ml-cache';
+import { predictFixtures } from '../../../../../lib/ml/ml-predict';
+import { getCachedModel } from '../../../../../lib/ml/ml-cache';
 
 
 export const dynamic = 'force-dynamic';

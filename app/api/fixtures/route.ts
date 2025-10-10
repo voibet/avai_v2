@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { withErrorHandler } from '../../../lib/db-utils';
-import { parseTableParams, executeTableQuery } from '../../../lib/server-table-utils';
+import { withErrorHandler } from '../../../lib/database/db-utils';
+import { parseTableParams, executeTableQuery } from '../../../lib/utils/server-table-utils';
 import { Fixture } from '../../../types/database';
 
 
@@ -59,12 +59,22 @@ async function getFixtures(request: Request) {
     } else if (dateFilter === 'tomorrow') {
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
       endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2);
-    } else if (dateFilter === 'last_7_days') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    } else if (dateFilter === 'next_7_days') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+    } else if (dateFilter.startsWith('last')) {
+      // Handle 'last{day_number}' pattern (e.g., 'last14', 'last30')
+      const dayMatch = dateFilter.match(/^last(\d+)$/);
+      if (dayMatch) {
+        const days = parseInt(dayMatch[1], 10);
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+        endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      }
+    } else if (dateFilter.startsWith('next')) {
+      // Handle 'next{day_number}' pattern (e.g., 'next14', 'next30')
+      const dayMatch = dateFilter.match(/^next(\d+)$/);
+      if (dayMatch) {
+        const days = parseInt(dayMatch[1], 10);
+        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+      }
     }
 
     if (startDate && endDate) {

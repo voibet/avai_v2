@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getCachedModel, clearCachedModel } from '../../../lib/ml-cache';
+import { getCachedModel, clearCachedModel } from '../../../lib/ml/ml-cache';
 
 
 export const dynamic = 'force-dynamic';

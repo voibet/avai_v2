@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { XGFetcher } from '@/lib/xg-fetcher';
+import { XGFetcher } from '@/lib/services/xg-fetcher';
 
 
 async function fetchXGData(request: Request): Promise<Response> {

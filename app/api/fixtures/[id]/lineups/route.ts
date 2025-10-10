@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { withErrorHandler } from '../../../../../lib/db-utils';
+import { withErrorHandler } from '../../../../../lib/database/db-utils';
 import axios from 'axios';
 
 interface ApiFootballLineupPlayer {

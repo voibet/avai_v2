@@ -74,6 +74,7 @@ export interface Team {
   name: string;
   country?: string;
   venue?: string;
+  mappings?: string[]; // JSONB array of alternative team names
   created_at: string;
   updated_at: string;
 }
