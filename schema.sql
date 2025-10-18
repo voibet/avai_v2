@@ -619,9 +619,8 @@ BEGIN
                                             FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
                                         )
                                     )
-                                )::numeric,
-                                fo.decimals::integer
-                            )::text
+                                ) * POWER(10, fo.decimals)
+                            )::integer
                             ORDER BY x12_idx
                         )
                         FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
@@ -650,9 +649,8 @@ BEGIN
                                                     (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
                                                 )
                                             )
-                                        )::numeric,
-                                        fo.decimals::integer
-                                    )::text
+                                        ) * POWER(10, fo.decimals)
+                                    )::integer
                                 ELSE NULL
                             END ORDER BY h_idx
                         )
@@ -673,9 +671,8 @@ BEGIN
                                                     (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
                                                 )
                                             )
-                                        )::numeric,
-                                        fo.decimals::integer
-                                    )::text
+                                        ) * POWER(10, fo.decimals)
+                                    )::integer
                                 ELSE NULL
                             END ORDER BY h_idx
                         )
@@ -706,9 +703,8 @@ BEGIN
                                                     (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
                                                 )
                                             )
-                                        )::numeric,
-                                        fo.decimals::integer
-                                    )::text
+                                        ) * POWER(10, fo.decimals)
+                                    )::integer
                                 ELSE NULL
                             END ORDER BY o_idx
                         )
@@ -729,9 +725,8 @@ BEGIN
                                                     (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
                                                 )
                                             )
-                                        )::numeric,
-                                        fo.decimals::integer
-                                    )::text
+                                        ) * POWER(10, fo.decimals)
+                                    )::integer
                                 ELSE NULL
                             END ORDER BY o_idx
                         )

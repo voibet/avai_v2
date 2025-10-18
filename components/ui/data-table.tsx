@@ -13,6 +13,14 @@ export interface Column<T> {
   sortKey?: string; // If different from key, specify the field to sort by
   sortType?: 'string' | 'number' | 'date' | 'custom';
   customSort?: (a: T, b: T, direction: 'asc' | 'desc') => number;
+  customFilterRenderer?: (props: CustomFilterProps) => React.ReactNode; // Custom filter UI renderer
+}
+
+export interface CustomFilterProps {
+  column: Column<any>;
+  currentFilters: Record<string, Set<string>>;
+  onFilterChange: (columnKey: string, value: string | null) => void;
+  onClose: () => void;
 }
 
 export interface DataTableProps<T> {
@@ -51,9 +59,31 @@ export interface DataTableProps<T> {
   // Data source
   data?: T[]; // Client-side data (optional, overrides server-side fetching)
   apiEndpoint?: string; // Server-side API endpoint (optional if data provided)
+  searchParams?: URLSearchParams; // Additional search parameters to include in API request
   currentPage?: number; // Required if using server-side
   onPageChange?: (page: number) => void; // Required if using server-side
 }
+
+// Helper function to generate proper flex basis from span
+const getFlexBasis = (span: number): string => {
+  // Use basis-0 and rely on inline styles for flex properties
+  return `basis-0`;
+};
+
+// Helper function to get inline flex styles based on span
+const getFlexStyles = (span: number) => ({
+  flexGrow: span,
+  flexShrink: 1,
+});
+
+// Helper to calculate min-width based on span value for text overflow handling
+const getColumnMinWidth = (span: number): string => {
+  // Larger spans get more minimum width to prevent text wrapping too early
+  if (span >= 2) return 'min-w-40';
+  if (span >= 1) return 'min-w-20';
+  // For fractional spans (like 0.75), use smaller minimum width
+  return 'min-w-16';
+};
 
 export default function DataTable<T>({
   title,
@@ -86,6 +116,7 @@ export default function DataTable<T>({
   // Data source
   data,
   apiEndpoint,
+  searchParams,
   currentPage = 1,
   onPageChange,
 }: DataTableProps<T>) {
@@ -110,46 +141,57 @@ export default function DataTable<T>({
     if (!data && apiEndpoint) {
       fetchServerData();
     }
-  }, [data, apiEndpoint, currentSort, currentFilters, currentPage]);
+  }, [data, apiEndpoint, currentSort, currentFilters, currentPage, searchParams]);
 
   const fetchServerData = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      const searchParams = new URLSearchParams();
-      
+      const queryParams = new URLSearchParams();
+
       // Add pagination
-      searchParams.append('page', currentPage.toString());
-      searchParams.append('limit', '50');
-      
+      queryParams.append('page', currentPage.toString());
+      queryParams.append('limit', '50');
+
       // Add sorting
       if (currentSort) {
-        searchParams.append('sortColumn', currentSort.key);
-        searchParams.append('sortDirection', currentSort.direction);
+        queryParams.append('sortColumn', currentSort.key);
+        queryParams.append('sortDirection', currentSort.direction);
       }
-      
+
       // Add filters
       let filterIndex = 0;
       Object.entries(currentFilters).forEach((filterEntry) => {
         const [columnKey, filterValues] = filterEntry;
         if (filterValues.size > 0) {
           const value = Array.from(filterValues)[0];
-          
+
           // Handle date specially as a direct query parameter
           if (columnKey === 'date') {
-            searchParams.append('date', value);
+            queryParams.append('date', value);
           } else {
             // Standard filter format for other columns
-            searchParams.append(`filters[${filterIndex}][column]`, columnKey);
-            searchParams.append(`filters[${filterIndex}][value]`, value);
-            searchParams.append(`filters[${filterIndex}][operator]`, 'eq');
+            queryParams.append(`filters[${filterIndex}][column]`, columnKey);
+            queryParams.append(`filters[${filterIndex}][value]`, value);
+            queryParams.append(`filters[${filterIndex}][operator]`, 'eq');
             filterIndex++;
           }
         }
       });
-      
-      const response = await fetch(`${apiEndpoint}?${searchParams}`);
+
+      // Add any additional search parameters from props
+      if (searchParams) {
+        for (const [key, value] of Array.from(searchParams.entries())) {
+          // Skip parameters that are already handled by the component
+          if (!['page', 'sortColumn', 'sortDirection'].includes(key) &&
+              !key.startsWith('filters[')) {
+            queryParams.append(key, value);
+          }
+        }
+      }
+
+      const response = await fetch(`${apiEndpoint}?${queryParams}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -173,6 +215,8 @@ export default function DataTable<T>({
 
   
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownTriggerRef = useRef<HTMLDivElement>(null);
+  const [dropdownHorizontalPosition, setDropdownHorizontalPosition] = useState<'left' | 'right'>('left');
 
   // Close filter dropdown when clicking outside
   useEffect(() => {
@@ -194,6 +238,25 @@ export default function DataTable<T>({
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
+  }, [showFilterDropdown]);
+
+  // Position dropdown horizontally to stay within viewport
+  useEffect(() => {
+    if (showFilterDropdown && dropdownTriggerRef.current) {
+      const triggerRect = dropdownTriggerRef.current.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const dropdownWidth = 320; // Approximate min width of dropdown
+
+      // Horizontal positioning
+      const spaceRight = viewportWidth - triggerRect.right;
+      const spaceLeft = triggerRect.left;
+
+      if (spaceRight < dropdownWidth && spaceLeft > spaceRight) {
+        setDropdownHorizontalPosition('right');
+      } else {
+        setDropdownHorizontalPosition('left');
+      }
+    }
   }, [showFilterDropdown]);
 
   const handleItemSelect = (itemId: string | number) => {
@@ -468,9 +531,9 @@ export default function DataTable<T>({
       </div>
 
       {/* Column Headers */}
-      <div ref={dropdownRef} className={`relative grid ${expandable && selectable ? 'grid-cols-15' : expandable || selectable ? 'grid-cols-14' : 'grid-cols-13'} gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white`}>
+      <div ref={dropdownRef} className={`relative flex gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white`}>
         {selectable && (
-          <div className="col-span-1">
+          <div className="w-6 flex-shrink-0">
             <input
               type="checkbox"
               checked={selectedIds.size === displayData.length && displayData.length > 0}
@@ -496,15 +559,19 @@ export default function DataTable<T>({
           return (
             <div
               key={column.key}
-              className={`col-span-${column.span} ${column.className || ''} relative ${
+              ref={showFilterDropdown === column.key ? dropdownTriggerRef : null}
+              className={`${getFlexBasis(column.span)} ${getColumnMinWidth(column.span)} ${column.className || ''} relative px-2 ${
                 isSortable ? 'cursor-pointer hover:bg-gray-700 transition-colors' : ''
               }`}
               onClick={() => isSortable && handleSort(column)}
-              style={{ pointerEvents: isSortable ? 'auto' : 'none' }}
+              style={{
+                pointerEvents: isSortable ? 'auto' : 'none',
+                ...getFlexStyles(column.span)
+              }}
             >
               <div className="flex items-center gap-1">
                 <span>{column.header}</span>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   {isSortable && (
                     <span className="text-xs">
                       {isSorted ? (
@@ -534,8 +601,22 @@ export default function DataTable<T>({
 
               {/* Filter Dropdown */}
               {showFilterDropdown === column.key && isFilterable && (
-                <div className="absolute top-full left-0 mt-1 z-40 bg-gray-800 border border-gray-600 rounded shadow-lg min-w-48 max-h-80 overflow-hidden">
-                  <div className="p-2 border-b border-gray-600">
+                <div
+                  ref={dropdownRef}
+                  className={`absolute top-full mt-1 z-40 bg-gray-800 border border-gray-600 rounded shadow-lg min-w-48 max-h-80 overflow-hidden ${
+                    dropdownHorizontalPosition === 'right' ? 'right-0' : 'left-0'
+                  }`}
+                >
+                  {column.customFilterRenderer ? (
+                    column.customFilterRenderer({
+                      column,
+                      currentFilters,
+                      onFilterChange: onFilterChange || (() => {}),
+                      onClose: () => setShowFilterDropdown(null)
+                    })
+                  ) : (
+                    <>
+                      <div className="p-2 border-b border-gray-600">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-mono text-white">Filter {column.header}</span>
                       {hasFilter && (
@@ -662,7 +743,9 @@ export default function DataTable<T>({
                         );
                       });
                     })()}
-                  </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -684,12 +767,12 @@ export default function DataTable<T>({
 
             const RowContent = (
               <div
-                className={`grid ${expandable && selectable ? 'grid-cols-15' : expandable || selectable ? 'grid-cols-14' : 'grid-cols-13'} gap-1 py-1 border-b border-gray-600 text-xs font-mono ${rowClassName} ${expandable ? 'cursor-pointer hover:bg-gray-800' : ''} ${expandable && isExpanded ? 'bg-gray-900' : ''}`}
+                className={`flex gap-1 py-1 border-b border-gray-600 text-xs font-mono ${rowClassName} ${expandable ? 'cursor-pointer hover:bg-gray-800' : ''} ${expandable && isExpanded ? 'bg-gray-900' : ''}`}
                 onClick={expandable ? () => toggleRowExpansion(itemId, item) : undefined}
                 style={{ pointerEvents: expandable ? 'auto' : 'none' }}
               >
                 {selectable && (
-                  <div className="col-span-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="w-6 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={selectedIds.has(itemId)}
@@ -702,7 +785,8 @@ export default function DataTable<T>({
                 {columns.map((column) => (
                   <div
                     key={`${itemId}-${column.key}`}
-                    className={`col-span-${column.span} ${column.className || ''}`}
+                    className={`${getFlexBasis(column.span)} ${getColumnMinWidth(column.span)} ${column.className || ''} px-2 overflow-hidden`}
+                    style={getFlexStyles(column.span)}
                   >
                     {column.render(item, index)}
                   </div>

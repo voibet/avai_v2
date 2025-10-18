@@ -120,8 +120,8 @@ export async function POST(request: Request) {
         SELECT
             f.id,
             CASE
-                WHEN lg.fixture_count < 50 THEN 2.70
-                WHEN lg.avg_goals IS NULL THEN 2.70
+                WHEN lg.fixture_count < 50 THEN 2.76
+                WHEN lg.avg_goals IS NULL THEN 2.76
                 WHEN lg.avg_goals < 1.5 THEN 1.5
                 WHEN lg.avg_goals > 4 THEN 4.0
                 ELSE ROUND(lg.avg_goals, 2)

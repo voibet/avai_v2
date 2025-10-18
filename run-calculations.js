@@ -3,7 +3,7 @@
  *
  * This script populates the football_stats table with calculated metrics for fixtures:
  * - Hours since last match for home and away teams (includes all scheduled matches)
- * - League average goals (rolling average of last 300 matches, min: 50, capped 1.5-4.0, default 2.70)
+ * - League average goals (rolling average of last 300 matches, min: 50, capped 1.5-4.0, default 2.76)
  * - Home advantage (average home_goals - away_goals for past 300 matches, min: 50, capped 0.1-0.6, default 0.30)
  * - ELO ratings (team ELOs + league ELOs as average of team ELOs)
  * - Rolling xG and xGA (8, 16, 32 match windows averaged, min: 4 matches per team)
@@ -106,8 +106,8 @@ async function runCalculations() {
         SELECT 
             f.id,
             CASE
-                WHEN lg.fixture_count < 50 THEN 2.70
-                WHEN lg.avg_goals IS NULL THEN 2.70
+                WHEN lg.fixture_count < 50 THEN 2.76
+                WHEN lg.avg_goals IS NULL THEN 2.76
                 WHEN lg.avg_goals < 1.5 THEN 1.5
                 WHEN lg.avg_goals > 4 THEN 4.0
                 ELSE ROUND(lg.avg_goals, 2)
@@ -1135,7 +1135,7 @@ async function runCalculations() {
                         fo.bookie,
                         fo.decimals,
 
-                        -- Fair X12 odds
+                        -- Fair X12 odds (Margin Proportional to Odds method)
                         CASE
                             WHEN fo.odds_x12 IS NOT NULL THEN
                                 jsonb_build_object(
@@ -1144,16 +1144,17 @@ async function runCalculations() {
                                         SELECT jsonb_agg(
                                             ROUND(
                                                 (
-                                                    1.0 / (
-                                                        (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
-                                                        (
-                                                            SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                                            FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
-                                                        )
+                                                    3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
+                                                    (
+                                                        3.0 - (
+                                                            (
+                                                                SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                                FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
+                                                            ) - 1.0
+                                                        ) * (x12_odds::numeric / POWER(10, fo.decimals))
                                                     )
-                                                )::numeric,
-                                                fo.decimals::integer
-                                            )::text
+                                                ) * POWER(10, fo.decimals)
+                                            )::integer
                                             ORDER BY x12_idx
                                         )
                                         FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
@@ -1175,16 +1176,17 @@ async function runCalculations() {
                                                 WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
                                                     ROUND(
                                                         (
-                                                            1.0 / (
-                                                                (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) /
-                                                                (
-                                                                    (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                    (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                )
+                                                            2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
+                                                            (
+                                                                2.0 - (
+                                                                    (
+                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                    ) - 1.0
+                                                                ) * (h_odds::numeric / POWER(10, fo.decimals))
                                                             )
-                                                        )::numeric,
-                                                        fo.decimals::integer
-                                                    )::text
+                                                        ) * POWER(10, fo.decimals)
+                                                    )::integer
                                                 ELSE NULL
                                             END ORDER BY h_idx
                                         )
@@ -1198,16 +1200,17 @@ async function runCalculations() {
                                                 WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
                                                     ROUND(
                                                         (
-                                                            1.0 / (
-                                                                (1.0 / (a_odds::numeric / POWER(10, fo.decimals))) /
-                                                                (
-                                                                    (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                    (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                )
+                                                            2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
+                                                            (
+                                                                2.0 - (
+                                                                    (
+                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                    ) - 1.0
+                                                                ) * (a_odds::numeric / POWER(10, fo.decimals))
                                                             )
-                                                        )::numeric,
-                                                        fo.decimals::integer
-                                                    )::text
+                                                        ) * POWER(10, fo.decimals)
+                                                    )::integer
                                                 ELSE NULL
                                             END ORDER BY h_idx
                                         )
@@ -1231,16 +1234,17 @@ async function runCalculations() {
                                                 WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
                                                     ROUND(
                                                         (
-                                                            1.0 / (
-                                                                (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) /
-                                                                (
-                                                                    (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                    (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                )
+                                                            2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
+                                                            (
+                                                                2.0 - (
+                                                                    (
+                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                    ) - 1.0
+                                                                ) * (o_odds::numeric / POWER(10, fo.decimals))
                                                             )
-                                                        )::numeric,
-                                                        fo.decimals::integer
-                                                    )::text
+                                                        ) * POWER(10, fo.decimals)
+                                                    )::integer
                                                 ELSE NULL
                                             END ORDER BY o_idx
                                         )
@@ -1254,16 +1258,17 @@ async function runCalculations() {
                                                 WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
                                                     ROUND(
                                                         (
-                                                            1.0 / (
-                                                                (1.0 / (u_odds::numeric / POWER(10, fo.decimals))) /
-                                                                (
-                                                                    (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                    (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                )
+                                                            2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
+                                                            (
+                                                                2.0 - (
+                                                                    (
+                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                    ) - 1.0
+                                                                ) * (u_odds::numeric / POWER(10, fo.decimals))
                                                             )
-                                                        )::numeric,
-                                                        fo.decimals::integer
-                                                    )::text
+                                                        ) * POWER(10, fo.decimals)
+                                                    )::integer
                                                 ELSE NULL
                                             END ORDER BY o_idx
                                         )
@@ -1426,7 +1431,7 @@ async function runCalculations() {
                             fo.bookie,
                             fo.decimals,
 
-                            -- Fair X12 odds
+                            -- Fair X12 odds (Margin Proportional to Odds method)
                             CASE
                                 WHEN fo.odds_x12 IS NOT NULL THEN
                                     jsonb_build_object(
@@ -1435,16 +1440,17 @@ async function runCalculations() {
                                             SELECT jsonb_agg(
                                                 ROUND(
                                                     (
-                                                        1.0 / (
-                                                            (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
-                                                            (
-                                                                SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                                                FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
-                                                            )
+                                                        3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
+                                                        (
+                                                            3.0 - (
+                                                                (
+                                                                    SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                                    FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
+                                                                ) - 1.0
+                                                            ) * (x12_odds::numeric / POWER(10, fo.decimals))
                                                         )
-                                                    )::numeric,
-                                                    fo.decimals::integer
-                                                )::text
+                                                    ) * POWER(10, fo.decimals)
+                                                )::integer
                                                 ORDER BY x12_idx
                                             )
                                             FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
@@ -1466,16 +1472,17 @@ async function runCalculations() {
                                                     WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
                                                         ROUND(
                                                             (
-                                                                1.0 / (
-                                                                    (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) /
-                                                                    (
-                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                    )
+                                                                2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
+                                                                (
+                                                                    2.0 - (
+                                                                        (
+                                                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                        ) - 1.0
+                                                                    ) * (h_odds::numeric / POWER(10, fo.decimals))
                                                                 )
-                                                            )::numeric,
-                                                            fo.decimals::integer
-                                                        )::text
+                                                            ) * POWER(10, fo.decimals)
+                                                        )::integer
                                                     ELSE NULL
                                                 END ORDER BY h_idx
                                             )
@@ -1489,16 +1496,17 @@ async function runCalculations() {
                                                     WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
                                                         ROUND(
                                                             (
-                                                                1.0 / (
-                                                                    (1.0 / (a_odds::numeric / POWER(10, fo.decimals))) /
-                                                                    (
-                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                    )
+                                                                2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
+                                                                (
+                                                                    2.0 - (
+                                                                        (
+                                                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                        ) - 1.0
+                                                                    ) * (a_odds::numeric / POWER(10, fo.decimals))
                                                                 )
-                                                            )::numeric,
-                                                            fo.decimals::integer
-                                                        )::text
+                                                            ) * POWER(10, fo.decimals)
+                                                        )::integer
                                                     ELSE NULL
                                                 END ORDER BY h_idx
                                             )
@@ -1522,16 +1530,17 @@ async function runCalculations() {
                                                     WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
                                                         ROUND(
                                                             (
-                                                                1.0 / (
-                                                                    (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) /
-                                                                    (
-                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                    )
+                                                                2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
+                                                                (
+                                                                    2.0 - (
+                                                                        (
+                                                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                        ) - 1.0
+                                                                    ) * (o_odds::numeric / POWER(10, fo.decimals))
                                                                 )
-                                                            )::numeric,
-                                                            fo.decimals::integer
-                                                        )::text
+                                                            ) * POWER(10, fo.decimals)
+                                                        )::integer
                                                     ELSE NULL
                                                 END ORDER BY o_idx
                                             )
@@ -1545,16 +1554,17 @@ async function runCalculations() {
                                                     WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
                                                         ROUND(
                                                             (
-                                                                1.0 / (
-                                                                    (1.0 / (u_odds::numeric / POWER(10, fo.decimals))) /
-                                                                    (
-                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                    )
+                                                                2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
+                                                                (
+                                                                    2.0 - (
+                                                                        (
+                                                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                        ) - 1.0
+                                                                    ) * (u_odds::numeric / POWER(10, fo.decimals))
                                                                 )
-                                                            )::numeric,
-                                                            fo.decimals::integer
-                                                        )::text
+                                                            ) * POWER(10, fo.decimals)
+                                                        )::integer
                                                     ELSE NULL
                                                 END ORDER BY o_idx
                                             )
@@ -1654,8 +1664,10 @@ async function runCalculations() {
         console.log(`✅ Market XG calculations completed: ${marketXgCount} fixtures processed`);
 
         // Run all SQL-based calculations
+        console.log('Running all fixture stats calculations...');
         const result = await pool.query('SELECT populate_all_fixture_stats(0, $1) as count', [fixtureIds]);
         totalCount = result.rows[0].count;
+        console.log(`✅ All fixture stats calculations completed: ${totalCount} fixtures processed`);
 
         // Calculate prediction odds last (uses MLP predictions)
         console.log('Running prediction odds calculations...');

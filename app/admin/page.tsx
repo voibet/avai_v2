@@ -172,6 +172,14 @@ export default function AdminPage() {
         message: data.message || 'Action completed successfully'
       });
 
+      // Reload available leagues if we're on the add-leagues tab and operation was successful
+      if (activeTab === 'add-leagues' && data.success !== false) {
+        loadAvailableLeagues();
+        // Clear selections after successful addition
+        setSelectedSeasons({});
+        setSelectedLeagues(new Set());
+      }
+
     } catch (error) {
       setResult({
         success: false,

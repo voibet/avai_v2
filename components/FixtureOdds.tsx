@@ -1,8 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
 
+interface OddsRatio {
+  odds: number;
+  ratio: number;
+}
+
 interface FixtureOddsProps {
   fixtureId: string | null;
+  fixture?: {
+    odds_ratios_x12?: OddsRatio[];
+    odds_ratios_ou?: Array<{
+      line: number;
+      over_ratio: OddsRatio | null;
+      under_ratio: OddsRatio | null;
+    }>;
+    odds_ratios_ah?: Array<{
+      line: number;
+      away_ratio: OddsRatio | null;
+      home_ratio: OddsRatio | null;
+    }>;
+    odds_bookie_used?: string;
+    fair_odds_bookie_used?: string;
+  };
 }
 
 interface OddsData {
@@ -30,30 +50,11 @@ interface OddsData {
   }>;
 }
 
-interface TopOddsData {
-  topOdds: {
-    fixture_id: number;
-    home_team_name: string;
-    away_team_name: string;
-    league_name: string;
-    fixture_date: string;
-    top_x12_odds: number[];
-    top_x12_bookies: string[];
-    top_ah_odds?: { ah_h: number[]; ah_a: number[] };
-    top_ah_lines?: number[];
-    top_ah_bookies?: { ah_h: string[]; ah_a: string[] };
-    top_ou_odds?: { ou_o: number[]; ou_u: number[] };
-    top_ou_lines?: number[];
-    top_ou_bookies?: { ou_o: string[]; ou_u: string[] };
-  };
-}
 
-export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
+export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
   const [oddsData, setOddsData] = useState<OddsData | null>(null);
   const [oddsLoading, setOddsLoading] = useState(true);
   const [oddsError, setOddsError] = useState<string | null>(null);
-  const [topOddsData, setTopOddsData] = useState<TopOddsData | null>(null);
-  const [topOddsLoading, setTopOddsLoading] = useState(true);
 
   // Track which cells have flashed and their direction: 'up' (green) or 'down' (red)
   // Key format: "bookie:market:outcome[:line]"
@@ -419,31 +420,51 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
     }
 
     return acc;
-  }, {} as Record<string, { bookie: string; odds: any; decimals: number; isFairOdds?: boolean; isTopOdds?: boolean; payout?: { x12: number | null; ah: number[] | null; ou: number[] | null } }>);
+  }, {} as Record<string, { bookie: string; odds: any; decimals: number; isFairOdds?: boolean; isRatios?: boolean; payout?: { x12: number | null; ah: number[] | null; ou: number[] | null } }>);
 
-  // Add top odds as a special bookmaker if data is available
-  if (topOddsData?.topOdds) {
-    const topOdds = topOddsData.topOdds;
+  // Add ratios bookmaker if fixture has odds ratios
+  if (fixture?.odds_ratios_x12 || fixture?.odds_ratios_ah || fixture?.odds_ratios_ou) {
+    // Prepare AH and OU ratios data
+    let ahLines: number[] = [];
+    let ouLines: number[] = [];
+    let ah_h_ratios: number[] = [];
+    let ah_a_ratios: number[] = [];
+    let ou_o_ratios: number[] = [];
+    let ou_u_ratios: number[] = [];
 
-    // Transform top odds data into the bookmaker format
-    const topOddsBookmaker = {
-      bookie: 'TOP_ODDS',
+    if (fixture.odds_ratios_ah) {
+      ahLines = fixture.odds_ratios_ah.map(r => r.line);
+      ah_h_ratios = fixture.odds_ratios_ah.map(r => r.home_ratio?.ratio || 0);
+      ah_a_ratios = fixture.odds_ratios_ah.map(r => r.away_ratio?.ratio || 0);
+    }
+
+    if (fixture.odds_ratios_ou) {
+      ouLines = fixture.odds_ratios_ou.map(r => r.line);
+      ou_o_ratios = fixture.odds_ratios_ou.map(r => r.over_ratio?.ratio || 0);
+      ou_u_ratios = fixture.odds_ratios_ou.map(r => r.under_ratio?.ratio || 0);
+    }
+
+    transformedData['RATIOS'] = {
+      bookie: 'RATIOS',
       odds: {
-        x12: topOdds.top_x12_odds || null,
-        ah_h: topOdds.top_ah_odds?.ah_h || null,
-        ah_a: topOdds.top_ah_odds?.ah_a || null,
-        ou_o: topOdds.top_ou_odds?.ou_o || null,
-        ou_u: topOdds.top_ou_odds?.ou_u || null,
-        lines: topOdds.top_ah_lines && topOdds.top_ou_lines ? {
-          ah: topOdds.top_ah_lines,
-          ou: topOdds.top_ou_lines
+        x12: fixture.odds_ratios_x12?.map(r => r.ratio) || null,
+        ah_h: ah_h_ratios.length > 0 ? ah_h_ratios : null,
+        ah_a: ah_a_ratios.length > 0 ? ah_a_ratios : null,
+        ou_o: ou_o_ratios.length > 0 ? ou_o_ratios : null,
+        ou_u: ou_u_ratios.length > 0 ? ou_u_ratios : null,
+        lines: ahLines.length > 0 || ouLines.length > 0 ? {
+          ah: ahLines,
+          ou: ouLines
         } : null
       },
-      decimals: 2, // Top odds are already in decimal format
-      isFairOdds: false,
+      decimals: 3, // Ratios are displayed with 3 decimal places
+      isRatios: true,
+      payout: {
+        x12: null,
+        ah: null,
+        ou: null
+      }
     };
-
-    transformedData['TOP_ODDS'] = topOddsBookmaker;
   }
 
   const bookmakers = Object.values(transformedData);
@@ -464,39 +485,12 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
   };
 
   // Helper to get background color class for a bookmaker
-  const getBookieColorClass = (bookie: string, isFairOdds?: boolean, isTopOdds?: boolean, market?: string, side?: string, lineIndex?: number): string => {
+  const getBookieColorClass = (bookie: string, isFairOdds?: boolean, isRatios?: boolean, ratioValue?: number): string => {
     if (isFairOdds) {
       return 'bg-gray-700'; // Dark gray for Fair Odds
     }
-    if (isTopOdds) {
-      // For Top Odds, get the color based on the actual bookie that provided this specific odds
-      if (!topOddsData?.topOdds) {
-        return 'bg-black'; // Fallback
-      }
-
-      let bookieName = '';
-      if (market === '1X2' && side) {
-        // For 1X2, lineIndex represents the outcome index (0=Home, 1=Draw, 2=Away)
-        const outcomeIndex = side === 'Home' ? 0 : side === 'Draw' ? 1 : 2;
-        if (topOddsData.topOdds.top_x12_bookies?.[outcomeIndex]) {
-          bookieName = topOddsData.topOdds.top_x12_bookies[outcomeIndex];
-        }
-      } else if (market === 'Asian Handicap' && side && lineIndex !== undefined) {
-        if (side === 'Home' && topOddsData.topOdds.top_ah_bookies?.ah_h?.[lineIndex]) {
-          bookieName = topOddsData.topOdds.top_ah_bookies.ah_h[lineIndex];
-        } else if (side === 'Away' && topOddsData.topOdds.top_ah_bookies?.ah_a?.[lineIndex]) {
-          bookieName = topOddsData.topOdds.top_ah_bookies.ah_a[lineIndex];
-        }
-      } else if (market === 'Over/Under' && side && lineIndex !== undefined) {
-        if (side === 'Over' && topOddsData.topOdds.top_ou_bookies?.ou_o?.[lineIndex]) {
-          bookieName = topOddsData.topOdds.top_ou_bookies.ou_o[lineIndex];
-        } else if (side === 'Under' && topOddsData.topOdds.top_ou_bookies?.ou_u?.[lineIndex]) {
-          bookieName = topOddsData.topOdds.top_ou_bookies.ou_u[lineIndex];
-        }
-      }
-
-      // Now get color for this specific bookie
-      return getBookieColorFromName(bookieName);
+    if (isRatios && ratioValue !== undefined) {
+      return getRatioBgColorClass(ratioValue); // Dynamic color based on ratio value
     }
 
     const bookieName = bookie.toLowerCase();
@@ -513,20 +507,6 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
     return 'bg-gray-800'; // Dark background for other bookies
   };
 
-  // Helper to get color class from bookie name (used for Top Odds)
-  const getBookieColorFromName = (bookieName: string): string => {
-    const name = bookieName.toLowerCase();
-    if (name.includes('veikkaus')) {
-      return 'bg-blue-900'; // Dark blue for Veikkaus
-    }
-    if (name.includes('betfair')) {
-      return 'bg-yellow-800'; // Dark yellow for Betfair
-    }
-    if (name.includes('pinnacle')) {
-      return 'bg-gray-900'; // Very dark gray/black for Pinnacle
-    }
-    return 'bg-black'; // Default dark background
-  };
 
   // Helper to get payout background color class based on payout percentage
   const getPayoutBgColorClass = (payoutPercentage: number): string => {
@@ -555,6 +535,33 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
     }
   };
 
+  // Helper to get ratio background color class based on ratio value
+  const getRatioBgColorClass = (ratio: number): string => {
+    // Clamp values for better color transitions (ratios typically 0.8 to 1.2)
+    const clamped = Math.max(0.8, Math.min(1.2, ratio));
+
+    if (clamped < 0.9) {
+      // Green background for low ratios (bad value)
+      return 'bg-red-800';
+    } else if (clamped >= 0.9 && clamped <= 1.05) {
+      // Transition from green to red background between 0.9 and 1.05
+      const colorRatio = (clamped - 0.9) / (1.05 - 0.9); // 0 to 1
+      if (colorRatio < 0.33) {
+        // Dark green
+        return 'bg-red-900';
+      } else if (colorRatio < 0.66) {
+        // Orange/green
+        return 'bg-orange-900';
+      } else {
+        // Dark greenn
+        return 'bg-green-800';
+      }
+    } else {
+      // Bright green background for values over 1.05 (good value)
+      return 'bg-green-900';
+    }
+  };
+
   // Generic helper function for simple markets (1X2)
   const renderSimpleTable = (marketName: string, outcomes: { label: string; getValue: (odds: any, bm?: any) => string | null }[]) => {
     const hasData = bookmakers.some(bm => outcomes.some(outcome => outcome.getValue(bm.odds, bm) !== null));
@@ -570,7 +577,7 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                 <th className="px-2 py-1 text-left text-gray-300 border border-gray-600"></th>
                 {bookmakers.map(bm => (
                   <th key={bm.bookie} className="px-2 py-1 text-center text-gray-300 border border-gray-600 min-w-[60px]">
-                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie === 'predictions' ? 'Prediction' : bm.isTopOdds ? 'Top Odds' : bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.isRatios ? 'Ratios' : bm.bookie === 'predictions' ? 'Prediction' : bm.bookie}
                   </th>
                 ))}
               </tr>
@@ -586,10 +593,25 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                     const flashClass = getFlashClass(bm.bookie, marketName, outcome.label);
                     // For 1X2, pass the outcome index (0=Home, 1=Draw, 2=Away)
                     const outcomeIndex = outcome.label === 'Home' ? 0 : outcome.label === 'Draw' ? 1 : 2;
-                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isTopOdds, marketName, outcome.label, outcomeIndex);
+                    // Get ratio value for color calculation
+                    let ratioValue: number | undefined;
+                    if (bm.isRatios) {
+                      if (outcome.label === 'Home' && bm.odds.x12?.[0]) ratioValue = bm.odds.x12[0];
+                      else if (outcome.label === 'Draw' && bm.odds.x12?.[1]) ratioValue = bm.odds.x12[1];
+                      else if (outcome.label === 'Away' && bm.odds.x12?.[2]) ratioValue = bm.odds.x12[2];
+                    }
+
+                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isRatios, ratioValue);
                     return (
                       <td key={bm.bookie} className={`px-2 py-1 text-center border border-gray-600 ${bgColorClass}`}>
-                        {value ? (
+                        {bm.isRatios ? (
+                          // For ratios, just display the value without click handler
+                          value ? (
+                            <span className="text-white font-mono">{value}</span>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )
+                        ) : value ? (
                           <button
                             onClick={(e) => handleOddsClick(e, bm.bookie, marketName, outcome.label, undefined, bm.decimals)}
                             className={`text-white hover:text-gray-300 px-1 py-0.5 rounded transition-colors cursor-pointer ${flashClass}`}
@@ -654,20 +676,14 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         bm.latest_lines[linesKey].forEach((line: number) => allLines.add(line));
       }
     });
-    // Also check top odds lines
-    if (topOddsData?.topOdds) {
-      const topOddsLines = linesKey === 'ah' ? topOddsData.topOdds.top_ah_lines : topOddsData.topOdds.top_ou_lines;
-      if (topOddsLines) {
-        topOddsLines.forEach((line: number) => allLines.add(line));
-      }
-    }
+
     const sortedLines = Array.from(allLines).sort((a, b) => a - b);
 
     // Filter out lines that have no odds from any bookmaker
     const linesWithOdds = sortedLines.filter(line =>
       bookmakers.some(bm => {
-        if (bm.isFairOdds || bm.isTopOdds) {
-          // For fair odds and top odds, check if the odds array exists and has data at this line index
+        if (bm.isFairOdds) {
+          // For fair odds, check if the odds array exists and has data at this line index
           const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
           return lineIndex !== undefined && lineIndex >= 0 &&
                  (bm.odds[side1.oddsKey]?.[lineIndex] || bm.odds[side2.oddsKey]?.[lineIndex]);
@@ -685,15 +701,19 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
 
     // Helper to get odds for a specific line and side
     const getOdds = (bm: any, line: number, oddsKey: string) => {
+      if (bm.isRatios) {
+        // For ratios bookmaker, get ratio directly from the odds array
+        const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
+        if (lineIndex !== undefined && lineIndex >= 0 && bm.odds[oddsKey]?.[lineIndex]) {
+          return bm.odds[oddsKey][lineIndex].toFixed(3);
+        }
+        return null;
+      }
+
       const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
       if (lineIndex !== undefined && lineIndex >= 0 && bm.odds[oddsKey]?.[lineIndex]) {
-        if (bm.isFairOdds || bm.isTopOdds) {
-          // Fair odds and top odds are already in decimal format, just return as string
-          return bm.odds[oddsKey][lineIndex]?.toString() || null;
-        } else {
-          // Regular odds are in basis points, convert to decimal
-          return (bm.odds[oddsKey][lineIndex] / getDivisor(bm.decimals)).toString();
-        }
+        // Regular odds and fair odds are in basis points, convert to decimal
+        return (bm.odds[oddsKey][lineIndex] / getDivisor(bm.decimals)).toString();
       }
       return null;
     };
@@ -708,13 +728,13 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                 <th className="px-2 py-1 text-left text-bg-black border border-gray-600">{side1.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side1.label}-${bm.bookie}`} className="px-2 py-1 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie === 'predictions' ? 'Prediction' : bm.isTopOdds ? 'Top Odds' : bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.isRatios ? 'Ratios' : bm.bookie === 'predictions' ? 'Prediction' : bm.bookie}
                   </th>
                 ))}
                 <th className="px-2 py-1 text-left text-bg-black border border-gray-600">{side2.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side2.label}-${bm.bookie}`} className="px-2 py-1 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.isFairOdds ? 'Fair Odds' : bm.bookie === 'predictions' ? 'Prediction' : bm.isTopOdds ? 'Top Odds' : bm.bookie}
+                    {bm.isFairOdds ? 'Fair Odds' : bm.isRatios ? 'Ratios' : bm.bookie === 'predictions' ? 'Prediction' : bm.bookie}
                   </th>
                 ))}
                 <th className="px-2 py-1 text-center text-white border border-gray-600 min-w-[60px]">
@@ -732,10 +752,29 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                     const odds = getOdds(bm, line, side1.oddsKey);
                     const flashClass = getFlashClass(bm.bookie, marketName, side1.label, line);
                     const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
-                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isTopOdds, marketName, side1.label, lineIndex);
+                    // Get ratio value for color calculation
+                    let ratioValue: number | undefined;
+                    if (bm.isRatios) {
+                      const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
+                      if (lineIndex !== undefined && lineIndex >= 0) {
+                        if (side1.oddsKey === 'ah_h' && bm.odds.ah_h?.[lineIndex]) ratioValue = bm.odds.ah_h[lineIndex];
+                        else if (side1.oddsKey === 'ah_a' && bm.odds.ah_a?.[lineIndex]) ratioValue = bm.odds.ah_a[lineIndex];
+                        else if (side1.oddsKey === 'ou_o' && bm.odds.ou_o?.[lineIndex]) ratioValue = bm.odds.ou_o[lineIndex];
+                        else if (side1.oddsKey === 'ou_u' && bm.odds.ou_u?.[lineIndex]) ratioValue = bm.odds.ou_u[lineIndex];
+                      }
+                    }
+
+                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isRatios, ratioValue);
                     return (
                       <td key={`${side1.label}-${bm.bookie}`} className={`px-2 py-1 text-center border border-gray-600 ${bgColorClass}`}>
-                        {odds ? (
+                        {bm.isRatios ? (
+                          // For ratios, just display the value without click handler
+                          odds ? (
+                            <span className="text-white font-mono">{odds}</span>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )
+                        ) : odds ? (
                           <button
                             onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
                             className={`text-white hover:text-gray-300 px-1 py-0.5 rounded transition-colors cursor-pointer ${flashClass}`}
@@ -760,10 +799,29 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                     const odds = getOdds(bm, line, side2.oddsKey);
                     const flashClass = getFlashClass(bm.bookie, marketName, side2.label, line);
                     const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
-                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isTopOdds, marketName, side2.label, lineIndex);
+                    // Get ratio value for color calculation
+                    let ratioValue: number | undefined;
+                    if (bm.isRatios) {
+                      const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
+                      if (lineIndex !== undefined && lineIndex >= 0) {
+                        if (side2.oddsKey === 'ah_h' && bm.odds.ah_h?.[lineIndex]) ratioValue = bm.odds.ah_h[lineIndex];
+                        else if (side2.oddsKey === 'ah_a' && bm.odds.ah_a?.[lineIndex]) ratioValue = bm.odds.ah_a[lineIndex];
+                        else if (side2.oddsKey === 'ou_o' && bm.odds.ou_o?.[lineIndex]) ratioValue = bm.odds.ou_o[lineIndex];
+                        else if (side2.oddsKey === 'ou_u' && bm.odds.ou_u?.[lineIndex]) ratioValue = bm.odds.ou_u[lineIndex];
+                      }
+                    }
+
+                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds, bm.isRatios, ratioValue);
                     return (
                       <td key={`${side2.label}-${bm.bookie}`} className={`px-2 py-1 text-center border border-gray-600 ${bgColorClass}`}>
-                        {odds ? (
+                        {bm.isRatios ? (
+                          // For ratios, just display the value without click handler
+                          odds ? (
+                            <span className="text-white font-mono">{odds}</span>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )
+                        ) : odds ? (
                           <button
                             onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
                             className={`text-white hover:text-gray-300 px-1 py-0.5 rounded transition-colors cursor-pointer ${flashClass}`}
@@ -793,21 +851,9 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
                     let payoutValue: number | null = null;
                     let displayText = '';
 
-                    // Use top odds payout if available, otherwise fall back to averaging
-                    const topOddsBookmaker = bookmakers.find(bm => bm.isTopOdds);
-                    if (topOddsBookmaker) {
-                      const topOddsPayoutArray = linesKey === 'ah' ? topOddsBookmaker.payout?.ah : topOddsBookmaker.payout?.ou;
-                      const topOddsPayout = topOddsPayoutArray?.[lineIndex];
-                      if (topOddsPayout !== null && topOddsPayout !== undefined) {
-                        payoutValue = topOddsPayout;
-                        displayText = (topOddsPayout * 100).toFixed(1) + '%';
-                      }
-                    }
-
-                    // Fall back to averaging individual bookmaker payouts
                     if (payoutValue === null) {
                       const payoutValues = bookmakers
-                        .filter(bm => !bm.isTopOdds) // Exclude top odds from averaging
+                        .filter(bm => bm.payout && !bm.isRatios) // Only include bookmakers with payout data, exclude ratios
                         .map(bm => {
                           const payoutArray = linesKey === 'ah' ? bm.payout?.ah : bm.payout?.ou;
                           return payoutArray?.[lineIndex] || null;
@@ -845,37 +891,40 @@ export function FixtureOdds({ fixtureId }: FixtureOddsProps) {
         {
           label: 'Home',
           getValue: (odds: any, bm?: any) => {
-            if (bm?.isFairOdds || bm?.isTopOdds) {
-              // Fair odds and top odds are already in decimal format
-              return odds.x12?.[0]?.toString() || null;
-            } else {
-              // Regular odds are in basis points
-              return odds.x12?.[0] ? (odds.x12[0] / getDivisor(bm?.decimals || 2)).toString() : null;
+            if (bm?.isRatios) {
+              // For ratios bookmaker, show ratio directly
+              return odds.x12?.[0]?.toFixed(3) || null;
             }
+
+            // Regular odds and fair odds are in basis points
+            const oddsValue = odds.x12?.[0] ? (odds.x12[0] / getDivisor(bm?.decimals || 2)) : null;
+            return oddsValue?.toString() || null;
           }
         },
         {
           label: 'Draw',
           getValue: (odds: any, bm?: any) => {
-            if (bm?.isFairOdds || bm?.isTopOdds) {
-              // Fair odds and top odds are already in decimal format
-              return odds.x12?.[1]?.toString() || null;
-            } else {
-              // Regular odds are in basis points
-              return odds.x12?.[1] ? (odds.x12[1] / getDivisor(bm?.decimals || 2)).toString() : null;
+            if (bm?.isRatios) {
+              // For ratios bookmaker, show ratio directly
+              return odds.x12?.[1]?.toFixed(3) || null;
             }
+
+            // Regular odds and fair odds are in basis points
+            const oddsValue = odds.x12?.[1] ? (odds.x12[1] / getDivisor(bm?.decimals || 2)) : null;
+            return oddsValue?.toString() || null;
           }
         },
         {
           label: 'Away',
           getValue: (odds: any, bm?: any) => {
-            if (bm?.isFairOdds || bm?.isTopOdds) {
-              // Fair odds and top odds are already in decimal format
-              return odds.x12?.[2]?.toString() || null;
-            } else {
-              // Regular odds are in basis points
-              return odds.x12?.[2] ? (odds.x12[2] / getDivisor(bm?.decimals || 2)).toString() : null;
+            if (bm?.isRatios) {
+              // For ratios bookmaker, show ratio directly
+              return odds.x12?.[2]?.toFixed(3) || null;
             }
+
+            // Regular odds and fair odds are in basis points
+            const oddsValue = odds.x12?.[2] ? (odds.x12[2] / getDivisor(bm?.decimals || 2)) : null;
+            return oddsValue?.toString() || null;
           }
         }
       ])}

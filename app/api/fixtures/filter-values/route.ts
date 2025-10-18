@@ -18,7 +18,10 @@ async function getFilterValues(request: Request) {
     'home_team_name',
     'away_team_name',
     'season',
-    'status_short'
+    'status_short',
+    'odds_bookies',
+    'fair_odds_bookies',
+    'odds_ratio'
   ];
 
   if (!allowedFields.includes(field)) {
@@ -34,6 +37,19 @@ async function getFilterValues(request: Request) {
       query = `SELECT DISTINCT league_name, league_country FROM football_fixtures WHERE league_name IS NOT NULL AND league_country IS NOT NULL ORDER BY league_country, league_name`;
       const result = await executeQuery(query);
       values = result.rows.map(row => `${row.league_name} (${row.league_country})`).filter(value => value !== null && value !== undefined && value !== '');
+    } else if (field === 'odds_bookies') {
+      // Get available bookmakers from football_payouts table
+      query = `SELECT DISTINCT bookie FROM football_payouts WHERE payout_x12 IS NOT NULL ORDER BY bookie`;
+      const result = await executeQuery(query);
+      values = result.rows.map(row => row.bookie).filter(value => value !== null && value !== undefined && value !== '');
+    } else if (field === 'fair_odds_bookies') {
+      // Get available fair odds bookmakers from football_fair_odds table
+      query = `SELECT DISTINCT bookie FROM football_fair_odds WHERE fair_odds_x12 IS NOT NULL ORDER BY bookie`;
+      const result = await executeQuery(query);
+      values = result.rows.map(row => row.bookie).filter(value => value !== null && value !== undefined && value !== '');
+    } else if (field === 'odds_ratio') {
+      // Special filter - no predefined values, custom UI handles this
+      values = [];
     } else {
       // Default behavior for other fields
       query = `SELECT DISTINCT ${field} FROM football_fixtures WHERE ${field} IS NOT NULL ORDER BY ${field}`;

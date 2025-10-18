@@ -10,22 +10,30 @@ import pool from '../lib/database/db.ts';
 /**
  * Reverse engineer market XG from fair odds using Dixon-Coles optimization
  * Uses simple grid search + gradient descent for optimization
+ * When over25Odds is null, uses league average goals or 2.76 as fallback
  */
-function calculateMarketXgFromOdds(homeOdds, drawOdds, awayOdds, over25Odds = null) {
-  // Convert odds to probabilities
-  let homeProb = 1.0 / homeOdds;
-  let drawProb = 1.0 / drawOdds;
-  let awayProb = 1.0 / awayOdds;
+function calculateMarketXgFromOdds(homeOdds, drawOdds, awayOdds, over25Odds = null, leagueAvgGoals = null) {
+  // Convert fair odds to probabilities (keep over-round - don't normalize!)
+  // Odds are already in decimal format (e.g., 2.48) from SQL conversion using decimals column
+  const homeProb = 1.0 / homeOdds;
+  const drawProb = 1.0 / drawOdds;
+  const awayProb = 1.0 / awayOdds;
 
-  // Normalize if needed
-  const totalProb = homeProb + drawProb + awayProb;
-  if (Math.abs(totalProb - 1.0) > 0.02) {
-    homeProb /= totalProb;
-    drawProb /= totalProb;
-    awayProb /= totalProb;
+  // Calculate over25 probability - use odds if available, otherwise use league average goals
+  let over25Prob = null;
+  if (over25Odds) {
+    over25Prob = 1.0 / over25Odds;
+  } else {
+    // Use league average goals, or 2.76 as fallback
+    const totalGoals = leagueAvgGoals || 2.76;
+    // Calculate over 2.5 probability using Poisson distribution
+    const lambda = totalGoals;
+    let overProb = 0;
+    for (let goals = 3; goals <= 10; goals++) {
+      overProb += poissonPMF(goals, lambda);
+    }
+    over25Prob = overProb;
   }
-
-  const over25Prob = over25Odds ? 1.0 / over25Odds : null;
 
   // Objective function: minimize squared error
   function objective(homeXg, awayXg) {
@@ -33,11 +41,8 @@ function calculateMarketXgFromOdds(homeOdds, drawOdds, awayOdds, over25Odds = nu
 
     let error = Math.pow(probs.homeWin - homeProb, 2) +
                 Math.pow(probs.draw - drawProb, 2) +
-                Math.pow(probs.awayWin - awayProb, 2);
-
-    if (over25Prob !== null) {
-      error += Math.pow(probs.over - over25Prob, 2);
-    }
+                Math.pow(probs.awayWin - awayProb, 2) +
+                Math.pow(probs.over - over25Prob, 2);
 
     return error;
   }
@@ -45,8 +50,8 @@ function calculateMarketXgFromOdds(homeOdds, drawOdds, awayOdds, over25Odds = nu
   // Initial guess based on win probabilities
   const totalWinProb = homeProb + awayProb;
   const homeRatio = totalWinProb > 0 ? homeProb / totalWinProb : 0.5;
-  let bestHomeXg = 2.7 * homeRatio;
-  let bestAwayXg = 2.7 * (1 - homeRatio);
+  let bestHomeXg = 2.76 * homeRatio;
+  let bestAwayXg = 2.76 * (1 - homeRatio);
   let bestError = objective(bestHomeXg, bestAwayXg);
 
   // Simple gradient descent with adaptive step size
@@ -206,44 +211,23 @@ async function calculateMarketXG(fixtureIds = null) {
           latest_lines
         FROM prioritized_fair_odds
         ORDER BY fixture_id, priority
-      ),
-      prioritized_ou_odds AS (
-        SELECT
-          fixture_id,
-          bookie,
-          lines,
-          CASE LOWER(bookie)
-            WHEN 'pinnacle' THEN 1
-            WHEN 'betfair' THEN 2
-            WHEN 'bet365' THEN 3
-            ELSE 4
-          END as priority
-        FROM football_odds
-        WHERE odds_ou IS NOT NULL
-      ),
-      best_ou_odds AS (
-        SELECT DISTINCT ON (fixture_id)
-          fixture_id,
-          bookie,
-          lines
-        FROM prioritized_ou_odds
-        ORDER BY fixture_id, priority
       )
       SELECT
         f.id as fixture_id,
+        fs.avg_goals_league,
         bfo.decimals,
-        (bfo.fair_odds_x12->'fair_x12'->>0)::numeric as home_odds,
-        (bfo.fair_odds_x12->'fair_x12'->>1)::numeric as draw_odds,
-        (bfo.fair_odds_x12->'fair_x12'->>2)::numeric as away_odds,
+        (bfo.fair_odds_x12->'fair_x12'->>0)::numeric / (10^bfo.decimals) as home_odds,
+        (bfo.fair_odds_x12->'fair_x12'->>1)::numeric / (10^bfo.decimals) as draw_odds,
+        (bfo.fair_odds_x12->'fair_x12'->>2)::numeric / (10^bfo.decimals) as away_odds,
         (
-          SELECT (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric
-          FROM jsonb_array_elements_text(boo.lines->'ou') WITH ORDINALITY AS t(val, idx)
+          SELECT (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / (10^bfo.decimals)
+          FROM jsonb_array_elements_text(bfo.latest_lines->'ou') WITH ORDINALITY AS t(val, idx)
           WHERE t.val::numeric = 2.5
           LIMIT 1
         ) as over25_odds
       FROM football_fixtures f
+      LEFT JOIN football_stats fs ON f.id = fs.fixture_id
       LEFT JOIN best_fair_odds bfo ON f.id = bfo.fixture_id
-      LEFT JOIN best_ou_odds boo ON f.id = boo.fixture_id
       WHERE f.status_short IN ('FT', 'AET', 'PEN')
         AND bfo.fair_odds_x12 IS NOT NULL
     `;
@@ -256,7 +240,6 @@ async function calculateMarketXG(fixtureIds = null) {
 
     const result = await pool.query(query, params);
     const fixtures = result.rows;
-
 
     let calculated = 0;
     let errors = 0;
@@ -274,7 +257,8 @@ async function calculateMarketXG(fixtureIds = null) {
             fixture.home_odds,
             fixture.draw_odds,
             fixture.away_odds,
-            fixture.over25_odds
+            fixture.over25_odds,
+            fixture.avg_goals_league
           );
 
           values.push({
@@ -286,7 +270,7 @@ async function calculateMarketXG(fixtureIds = null) {
 
           calculated++;
         } catch (error) {
-          console.error(`   ❌ Error calculating market XG for fixture ${fixture.fixture_id}:`, error.message);
+          console.error(`❌ Error calculating market XG for fixture ${fixture.fixture_id}:`, error.message);
           errors++;
         }
       }

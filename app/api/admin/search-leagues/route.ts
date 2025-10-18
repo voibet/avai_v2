@@ -61,22 +61,28 @@ async function getAvailableLeagues(_request: Request) {
 
     const apiLeagues: ApiFootballLeague[] = response.data.response || [];
 
-    // Get existing league IDs to filter out already added leagues
+    // Get existing league IDs to mark already added leagues
     const existingResult = await executeQuery<{ id: number }>(
       'SELECT id FROM football_leagues'
     );
     const existingLeagueIds = new Set(existingResult.rows.map((row: { id: number }) => row.id));
 
-    // Filter out already existing leagues and transform the data
+    // Transform all leagues and mark which ones are already added
     const availableLeagues = apiLeagues
-      .filter(apiLeague => !existingLeagueIds.has(apiLeague.league.id))
       .map(apiLeague => ({
         id: apiLeague.league.id,
         name: apiLeague.league.name,
         country: apiLeague.country.name,
-        seasons: apiLeague.seasons.map(season => season.year.toString())
+        seasons: apiLeague.seasons.map(season => season.year.toString()),
+        alreadyAdded: existingLeagueIds.has(apiLeague.league.id)
       }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        // Sort by added status first (added leagues at bottom), then by name
+        if (a.alreadyAdded !== b.alreadyAdded) {
+          return a.alreadyAdded ? 1 : -1;
+        }
+        return a.name.localeCompare(b.name);
+      });
 
     return NextResponse.json({
       leagues: availableLeagues
