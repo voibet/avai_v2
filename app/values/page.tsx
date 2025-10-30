@@ -303,9 +303,65 @@ export default function ValuesPage() {
         Found {opportunities.length} value opportunities from {analyzedFixtures} analyzed fixtures ({fixtures.length} total fixtures)
       </div>
 
+      <div className="space-y-4">
+        {opportunities.map((opp, index) => {
+          const veikkausBookie = opp.fixture.odds.find(o => o.bookie === 'Veikkaus')
+          const pinnacleBookie = opp.fixture.odds.find(o => o.bookie === 'Pinnacle')
+          return (
+            <div key={index} className="bg-gray-900 p-4 rounded border border-gray-700">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-1">
+                  <div className="text-sm text-gray-400">Fixture</div>
+                  <div className="font-semibold">
+                    {opp.fixture.home_team} vs {opp.fixture.away_team}
+                  </div>
+                  <div className="text-sm text-gray-400">
+                    {opp.fixture.league} • {new Date(opp.fixture.date).toLocaleString()}
+                  </div>
+                </div>
+
+                <div className="md:col-span-1">
+                  <div className="text-sm text-gray-400">Market</div>
+                  <div className="font-semibold">
+                    {getTypeLabel(opp.type, opp.oddsIndex, opp.line)}
+                  </div>
+                  <div className="text-sm text-gray-400">Bookie: {opp.bookie}</div>
+                </div>
+
+                <div className="md:col-span-1">
+                  <div className="text-sm text-gray-400">Odds & Ratio</div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between">
+                      <span>Veikkaus:</span>
+                      <span className="font-semibold">
+                        {veikkausBookie ? formatOdds(opp.veikkausOdds, veikkausBookie.decimals) : opp.veikkausOdds}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Pinnacle Fair:</span>
+                      <span>{(opp.pinnacleFairOdds / Math.pow(10, pinnacleBookie?.decimals || 3)).toFixed(pinnacleBookie?.decimals === 2 ? 2 : 3)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Ratio:</span>
+                      <span className="font-bold text-green-400">{opp.ratio.toFixed(3)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+
+        {opportunities.length === 0 && (
+          <div className="text-center py-8 text-gray-400">
+            No value opportunities found with ratio &gt; 1.03
+          </div>
+        )}
+      </div>
+
       {/* Debug section - show 5 random fixtures with all odds ratios */}
       {fixtures.length > 0 && (
-        <div className="bg-yellow-900 p-4 rounded border border-yellow-700 mb-6">
+        <div className="bg-yellow-900 p-4 rounded border border-yellow-700 mt-6">
           <div className="text-yellow-400 font-bold mb-2">DEBUG - 5 Random Fixtures (All Odds Ratios - Including Past Fixtures):</div>
           <div className="space-y-4 text-sm">
             {[...fixtures].sort(() => 0.5 - Math.random()).slice(0, Math.min(5, fixtures.length)).map((fixture, fixtureIndex) => {
@@ -462,62 +518,6 @@ export default function ValuesPage() {
           </div>
         </div>
       )}
-
-      <div className="space-y-4">
-        {opportunities.map((opp, index) => {
-          const veikkausBookie = opp.fixture.odds.find(o => o.bookie === 'Veikkaus')
-          const pinnacleBookie = opp.fixture.odds.find(o => o.bookie === 'Pinnacle')
-          return (
-            <div key={index} className="bg-gray-900 p-4 rounded border border-gray-700">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="md:col-span-1">
-                  <div className="text-sm text-gray-400">Fixture</div>
-                  <div className="font-semibold">
-                    {opp.fixture.home_team} vs {opp.fixture.away_team}
-                  </div>
-                  <div className="text-sm text-gray-400">
-                    {opp.fixture.league} • {new Date(opp.fixture.date).toLocaleString()}
-                  </div>
-                </div>
-
-                <div className="md:col-span-1">
-                  <div className="text-sm text-gray-400">Market</div>
-                  <div className="font-semibold">
-                    {getTypeLabel(opp.type, opp.oddsIndex, opp.line)}
-                  </div>
-                  <div className="text-sm text-gray-400">Bookie: {opp.bookie}</div>
-                </div>
-
-                <div className="md:col-span-1">
-                  <div className="text-sm text-gray-400">Odds & Ratio</div>
-                  <div className="space-y-1">
-                    <div className="flex justify-between">
-                      <span>Veikkaus:</span>
-                      <span className="font-semibold">
-                        {veikkausBookie ? formatOdds(opp.veikkausOdds, veikkausBookie.decimals) : opp.veikkausOdds}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Pinnacle Fair:</span>
-                      <span>{(opp.pinnacleFairOdds / Math.pow(10, pinnacleBookie?.decimals || 3)).toFixed(pinnacleBookie?.decimals === 2 ? 2 : 3)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Ratio:</span>
-                      <span className="font-bold text-green-400">{opp.ratio.toFixed(3)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-
-        {opportunities.length === 0 && (
-          <div className="text-center py-8 text-gray-400">
-            No value opportunities found with ratio &gt; 1.03
-          </div>
-        )}
-      </div>
     </div>
   )
 }
