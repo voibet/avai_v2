@@ -1,6 +1,7 @@
 import pool from '@/lib/database/db';
 import { FixtureFetcher } from './fixture-fetcher';
 import { XGFetcher } from './xg-fetcher';
+import { IN_PAST } from '../constants';
 
 interface ChainOptions {
   type: 'league' | 'all';
@@ -55,28 +56,41 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
   // Step 2: Fetch xG data
   console.log('[2/5] Fetching xG data...');
   onProgress?.('Step 2/5: Fetching xG data...', 2, 5);
-  
+
+  // Get all fixtures and leagues that will be processed for XG
   let xgCheckQuery = `
-    SELECT DISTINCT f.league_id, l.name as league_name
+    SELECT DISTINCT f.id as fixture_id, f.league_id, l.name as league_name
     FROM football_fixtures f
     JOIN football_leagues l ON f.league_id = l.id
-    WHERE f.status_short = 'FT'
+    WHERE f.date < NOW() AND f.date > NOW() - INTERVAL '5 days'
+      AND LOWER(f.status_short) IN ('${IN_PAST.join("', '")}')
       AND (f.xg_home IS NULL OR f.xg_away IS NULL)
+      AND f.goals_home IS NOT NULL
+      AND f.goals_away IS NOT NULL
       AND l.xg_source IS NOT NULL
   `;
-  
+
   const xgCheckParams: any[] = [];
   if (type === 'league' && leagueId) {
     xgCheckQuery += ' AND f.league_id = $1';
     xgCheckParams.push(leagueId);
   }
-  
+
   const xgCheckResult = await pool.query(xgCheckQuery, xgCheckParams);
-  const leaguesNeedingXG = xgCheckResult.rows;
+  const fixturesAndLeagues = xgCheckResult.rows;
+
+  // Extract fixture IDs and league info
+  const fixturesToProcessIds = fixturesAndLeagues.map(row => row.fixture_id);
+  const leaguesNeedingXG = Array.from(new Map(
+    fixturesAndLeagues.map(row => [row.league_id, { league_id: row.league_id, league_name: row.league_name }])
+  ).values());
+
+  // Add all fixtures that will be processed to the updated list
+  allUpdatedFixtureIds.push(...fixturesToProcessIds);
 
   if (leaguesNeedingXG.length > 0) {
     const xgFetcher = new XGFetcher();
-    
+
     for (const league of leaguesNeedingXG) {
       onProgress?.(`Fetching xG: ${league.league_name}`, 2, 5);
 
@@ -86,11 +100,8 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
           (msg: string) => onProgress?.(`xG: ${league.league_name} - ${msg}`, 2, 5)
         );
 
-        if (xgResult.success && xgResult.updatedCount) {
+        if (xgResult.updatedCount) {
           xgUpdated += xgResult.updatedCount;
-          if (xgResult.updatedFixtureIds) {
-            allUpdatedFixtureIds.push(...xgResult.updatedFixtureIds);
-          }
         }
       } catch (error) {
         console.error(`Error fetching xG for league ${league.league_name}:`, error);

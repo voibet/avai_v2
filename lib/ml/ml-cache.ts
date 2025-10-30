@@ -157,20 +157,6 @@ export async function saveModelToDisk(modelData: ModelCache) {
   }
 }
 
-export function clearCachedModel() {
-  if (global.mlModelCache) {
-    try {
-      global.mlModelCache.model.dispose()
-      global.mlModelCache.minVals.dispose()
-      global.mlModelCache.maxVals.dispose()
-      global.mlModelCache.range.dispose()
-      console.log('[Cache] Model cache cleared')
-    } catch (err) {
-      console.error('[Cache] Error clearing model cache:', err)
-    }
-    global.mlModelCache = null
-  }
-}
 
 export async function hasCachedModel(): Promise<boolean> {
   // Check in-memory cache

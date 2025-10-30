@@ -1,11 +1,118 @@
 import { useApi } from './use-api';
 
+// Hook for fetching league standings
+export function useLeagueStandings(leagueId: string | null, season?: string | null) {
+  const url = leagueId ? `/api/leagues/${leagueId}${season ? `?season=${season}` : ''}` : null;
+  return useApi<{
+    success: boolean;
+    league: {
+      id: number;
+      name: string;
+      type: string;
+      country: string;
+      seasons: Record<string, any>;
+      xg_source: Record<string, any>;
+      updated_at: string;
+      pinnacle_league_id?: number;
+      betfair_competition_id?: number;
+      veikkaus_league_id?: number;
+      requested_season: string;
+      season_used: string;
+    };
+    standings: {
+      league_info: {
+        id: number;
+        name: string;
+        country: string;
+        logo: string;
+        flag: string;
+        season: number;
+      };
+      standings: Array<{
+        rank: number;
+        team: {
+          id: number;
+          name: string;
+          logo: string;
+        };
+        points: number;
+        goalsDiff: number;
+        group: string;
+        form: string;
+        status: string;
+        description: string;
+        all: {
+          played: number;
+          win: number;
+          draw: number;
+          lose: number;
+          goals: {
+            for: number;
+            against: number;
+          };
+        };
+        home: {
+          played: number;
+          win: number;
+          draw: number;
+          lose: number;
+          goals: {
+            for: number;
+            against: number;
+          };
+        };
+        away: {
+          played: number;
+          win: number;
+          draw: number;
+          lose: number;
+          goals: {
+            for: number;
+            against: number;
+          };
+        };
+        update: string;
+        xg_stats: {
+          name: string;
+          all: {
+            played: number;
+            xg_for: number;
+            xg_against: number;
+          };
+          home: {
+            played: number;
+            xg_for: number;
+            xg_against: number;
+          };
+          away: {
+            played: number;
+            xg_for: number;
+            xg_against: number;
+          };
+          expected_points_total: number;
+          expected_points_projected: number;
+        };
+        win_percentage: number;
+        description_percentages?: Record<string, number>;
+      }>;
+      descriptions: Record<string, Array<{
+        description: string;
+        ranks: number[];
+      }>>;
+    };
+  }>(url);
+}
 
 // Hook for fetching fixture lineups
 export function useFixtureLineups(fixtureId: string | null) {
   const url = fixtureId ? `/api/fixtures/${fixtureId}/lineups` : null;
   return useApi<{
     home: {
+      coach: {
+        id: number;
+        name: string;
+        photo: string;
+      } | null;
       formation: string | null;
       startXI: Array<{
         id: number;
@@ -23,6 +130,11 @@ export function useFixtureLineups(fixtureId: string | null) {
       }>;
     };
     away: {
+      coach: {
+        id: number;
+        name: string;
+        photo: string;
+      } | null;
       formation: string | null;
       startXI: Array<{
         id: number;
@@ -66,36 +178,6 @@ export function useTeamInjuries(fixtureId: string | null, teamId: string | null)
   }>>(url);
 }
 
-// Hook for fetching fixture odds
-export function useFixtureOdds(fixtureId: string | null) {
-  const url = fixtureId ? `/api/fixtures/${fixtureId}/odds` : null;
-  return useApi<{
-    odds: Array<{
-      fixture_id: number;
-      bookie_id: number;
-      bookie: string;
-      odds_x12: Array<{ t: number; x12: number[] }>;
-      odds_ah: Array<{ t: number; ah_h: number[]; ah_a: number[] }>;
-      odds_ou: Array<{ t: number; ou_o: number[]; ou_u: number[] }>;
-      lines: Array<{ t: number; ah: number[]; ou: number[] }>;
-      ids: Array<{ t: number; line_id: number; line_ids: { x12: string; ah: string[]; ou: string[] } }>;
-      max_stakes: Array<{ t: number; max_stake_x12: number[]; max_stake_ah: { h: number[]; a: number[] }; max_stake_ou: { o: number[]; u: number[] } }>;
-      latest_t: { x12_ts: number; ah_ts: number; ou_ts: number; ids_ts: number; stakes_ts: number; lines_ts: number };
-      decimals: number;
-      created_at: string;
-      updated_at: string;
-      // Fair odds data (for PINNACLE_FAIR_ODDS bookmaker)
-      fair_odds_x12?: any;
-      fair_odds_ah?: any;
-      fair_odds_ou?: any;
-      latest_lines?: any;
-      // Payout data (bookmaker margin percentages)
-      payout_x12?: number;
-      payout_ah?: number[];  // Array of payout values, one per handicap line
-      payout_ou?: number[];  // Array of payout values, one per total line
-    }>;
-  }>(url);
-}
 
 // Hook for fetching fixture stats
 export function useFixtureStats(fixtureId: string | null) {
@@ -124,6 +206,57 @@ export function useFixtureStats(fixtureId: string | null) {
       ai_away_pred: number | null;
     } | null;
   }>(url);
+}
+
+// Hook for fetching fixture coaches
+export function useFixtureCoaches(fixtureId: string | null) {
+  const url = fixtureId ? `/api/fixtures/${fixtureId}/coaches` : null;
+  return useApi<{
+    home: {
+      id: number;
+      name: string;
+      nationality: string;
+      photo: string;
+      careerStartDate: string;
+      team: {
+        id: number;
+        name: string;
+        logo: string;
+      };
+    } | null;
+    away: {
+      id: number;
+      name: string;
+      nationality: string;
+      photo: string;
+      careerStartDate: string;
+      team: {
+        id: number;
+        name: string;
+        logo: string;
+      };
+    } | null;
+  }>(url);
+}
+
+// Hook for fetching player statistics
+export function usePlayerStats(playerId: string | null, season: string | null, teamId?: string | null, leagueId?: string | null) {
+  const url = playerId && season ? `/api/player-stats?player_id=${playerId}&season=${season}${teamId ? `&team_id=${teamId}` : ''}${leagueId ? `&league_id=${leagueId}` : ''}` : null;
+  return useApi<{
+    player: {
+      id: number;
+      name: string;
+      firstname: string;
+      lastname: string;
+      age: number;
+      nationality: string;
+      height: string;
+      weight: string;
+      injured: boolean;
+      photo: string;
+    };
+    statistics: any;
+  } | null>(url);
 }
 
 

@@ -41,6 +41,12 @@ interface ApiFootballLineup {
   substitutes: ApiFootballLineupPlayer[];
 }
 
+interface CoachInfo {
+  id: number;
+  name: string;
+  photo: string;
+}
+
 async function getFixtureLineups(_request: Request, { params }: { params: { id: string } }) {
   const fixtureId = parseInt(params.id);
 
@@ -71,8 +77,8 @@ async function getFixtureLineups(_request: Request, { params }: { params: { id: 
 
     if (apiResponse.length === 0) {
       return NextResponse.json({
-        home: { formation: null, startXI: [], substitutes: [] },
-        away: { formation: null, startXI: [], substitutes: [] }
+        home: { coach: null, formation: null, startXI: [], substitutes: [] },
+        away: { coach: null, formation: null, startXI: [], substitutes: [] }
       });
     }
 
@@ -81,6 +87,11 @@ async function getFixtureLineups(_request: Request, { params }: { params: { id: 
       const teamKey = lineup.team.id === apiResponse[0].team.id ? 'home' : 'away';
 
       acc[teamKey] = {
+        coach: lineup.coach ? {
+          id: lineup.coach.id,
+          name: lineup.coach.name,
+          photo: lineup.coach.photo
+        } : null,
         formation: lineup.formation,
         startXI: (lineup.startXI || []).map(player => ({
           id: player.player.id,
@@ -108,8 +119,8 @@ async function getFixtureLineups(_request: Request, { params }: { params: { id: 
     if (error.response?.status === 404) {
       // Lineups not available for this fixture
       return NextResponse.json({
-        home: { formation: null, startXI: [], substitutes: [] },
-        away: { formation: null, startXI: [], substitutes: [] }
+        home: { coach: null, formation: null, startXI: [], substitutes: [] },
+        away: { coach: null, formation: null, startXI: [], substitutes: [] }
       });
     }
 

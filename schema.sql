@@ -8,7 +8,7 @@
 --
 -- KEY CONCEPTS:
 -- - xG (Expected Goals): Mathematical prediction of scoring probability per shot
--- - Fair Odds: Odds without bookmaker margin, calculated from market probabilities
+-- - Fair Odds: Odds without bookmaker margin
 -- - Market XG: Expected goals derived from betting market odds using Dixon-Coles Poisson optimization
 -- - ELO Ratings: Team strength ratings based on historical performance
 -- - MLP: Multi-Layer Perceptron neural network that predicts goals using team statistics
@@ -164,7 +164,6 @@ CREATE TABLE IF NOT EXISTS football_odds (
   -- [ { "t": 1758213041, "ah": [-0.25, 0, 0.25], "ou": [2.0, 2.25, 2.5] }, ... ]
   ids          JSONB        NULL,
   -- For regular bookies: [ { "t": 1758213041, "line_id": 346756, "line_ids": { "x12": "554785", "ah": ["523624", "316974", "964878"], "ou": ["316447", "464879", "649743"] } }, ... ]
-  -- For "top" bookie: { "t": 1758213041, "top_x12_bookies": ["Pinnacle", "Bet365", "William"], "top_ah_bookies": {"ah_h": [...], "ah_a": [...]}, "top_ou_bookies": {"ou_o": [...], "ou_u": [...]} }
   max_stakes   JSONB        NULL,
   -- [ { "t": 1758213041, "max_stake_x12": [500, 500, 500], "max_stake_ah": { "h": [300, 350, 400], "a": [300, 350, 400] }, "max_stake_ou": { "o": [250, 260, 270], "u": [250, 260, 270] } }, ... ]
   latest_t     JSONB        NULL,
@@ -254,70 +253,6 @@ CREATE INDEX IF NOT EXISTS idx_football_payouts_fixture_bookie ON football_payou
 CREATE INDEX IF NOT EXISTS idx_football_payouts_payouts ON football_payouts (payout_x12, payout_ah, payout_ou);
 CREATE INDEX IF NOT EXISTS idx_football_fair_odds_fixture_bookie ON football_fair_odds (fixture_id, bookie);
 
-
--- ============================================
--- MACHINE LEARNING PREDICTIONS (MLP)
--- ============================================
---
--- MLP (Multi-Layer Perceptron) Neural Network for Goal Prediction
---
--- HOW IT WORKS:
--- 1. The MLP is a neural network trained on historical fixture data (season >= 2022)
--- 2. It learns patterns from team statistics to predict goals_home and goals_away
--- 3. The model uses TensorFlow.js and is cached in memory for fast predictions
---
--- INPUT FEATURES (10 features):
--- - home_advantage: League-specific home field advantage (goals difference)
--- - adjusted_rolling_xg_home: Home team's adjusted expected goals (rolling average)
--- - adjusted_rolling_xga_home: Home team's adjusted expected goals against
--- - adjusted_rolling_xg_away: Away team's adjusted expected goals
--- - adjusted_rolling_xga_away: Away team's adjusted expected goals against
--- - adjusted_rolling_market_xg_home: Home team's market xG (from odds)
--- - adjusted_rolling_market_xga_home: Home team's market xGA
--- - adjusted_rolling_market_xg_away: Away team's market xG
--- - adjusted_rolling_market_xga_away: Away team's market xGA
--- - avg_goals_league: League average goals per match
--- - hours_since_last_match_home: Hours since last match for home team
--- - hours_since_last_match_away: Hours since last match for away team
--- - elo_home: Home team's ELO rating
--- - elo_away: Away team's ELO rating
--- - league_elo: League's ELO rating
---
--- OUTPUT:
--- - home_pred: Predicted goals for home team (DECIMAL)
--- - away_pred: Predicted goals for away team (DECIMAL)
---
--- ADMIN API ENDPOINTS:
--- - POST /api/admin/mlp/train: Train new model on historical data, saves to cache
--- - POST /api/admin/mlp/predict: Generate predictions for all upcoming fixtures (auto-trains if needed)
--- - GET /api/admin/mlp/predict/[id]: Predict single fixture by ID
--- - POST /api/admin/mlp/test: Test model performance on historical data (calculates MAE, RMSE), does not predict
---
--- ADMIN FIXTURES API ENDPOINTS:
--- - POST /api/admin/fixtures/fetch: Start fixture fetching
---   * Body: { type: 'all' } - fetch all current seasons
---   * Body: { type: 'league', leagueId: 123 } - fetch specific league's current season
---
--- ADMIN XG API ENDPOINTS:
--- - POST /api/admin/fetch-xg-data: Start XG data fetching
---   * Body: { type: 'all' } - fetch XG for all leagues with XG sources
---   * Body: { type: 'league', leagueId: 123 } - fetch XG for specific league
---   * Automatically triggers: /market-xg (for updated fixtures) → /stats → /predict → /prediction-odds (for future fixtures of updated teams)
--- - POST /api/admin/update-xg-source: Configure XG data sources for leagues
---   * Body: { leagueId, season, rounds, xgSource }
---
--- ADMIN CALCULATIONS API ENDPOINTS:
--- - POST /api/admin/market-xg: Calculate market XG for all finished fixtures
--- - POST /api/admin/market-xg/[...ids]: Calculate market XG for specific fixture IDs
---   * URL: /api/admin/market-xg/123,456,789 - comma-separated fixture IDs
--- - POST /api/admin/prediction-odds: Calculate betting odds from all MLP predictions
--- - POST /api/admin/prediction-odds/[...ids]: Calculate betting odds for specific fixture IDs
---   * URL: /api/admin/prediction-odds/123,456,789 - comma-separated fixture IDs
--- - POST /api/admin/stats: Run statistics calculations
---   * Body: { "functions": ["all"], "fixtureIds": [123, 456], "createViews": false }
---
--- MLP Predictions and Manual Adjustments
-
 CREATE TABLE football_predictions (
     fixture_id              BIGINT PRIMARY KEY,
     home_pred               DECIMAL(5,4),
@@ -385,9 +320,9 @@ CREATE INDEX IF NOT EXISTS idx_football_fixtures_season ON football_fixtures (se
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_status ON football_fixtures (status_short);
 
 -- Performance indexes for calculations
-CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date ON football_fixtures (home_team_id, date) WHERE status_short = 'FT';
-CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date_away ON football_fixtures (away_team_id, date) WHERE status_short = 'FT';
-CREATE INDEX IF NOT EXISTS idx_football_fixtures_league_date_status ON football_fixtures (league_id, date DESC, status_short) WHERE status_short = 'FT';
+CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date ON football_fixtures (home_team_id, date) WHERE LOWER(status_short) IN ('ft', 'aet', 'pen');
+CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date_away ON football_fixtures (away_team_id, date) WHERE LOWER(status_short) IN ('ft', 'aet', 'pen');
+CREATE INDEX IF NOT EXISTS idx_football_fixtures_league_date_status ON football_fixtures (league_id, date DESC, status_short) WHERE LOWER(status_short) IN ('ft', 'aet', 'pen');
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_market_xg ON football_fixtures (market_xg_home, market_xg_away) WHERE market_xg_home IS NOT NULL;
 
 -- Primary composite index for your main query pattern
@@ -412,8 +347,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_stats_fixture_elo ON footba
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_stats_elos ON football_stats (elo_home, elo_away, league_elo) WHERE elo_home IS NOT NULL AND elo_away IS NOT NULL AND league_elo IS NOT NULL;
 
 -- Index for rolling calculations (team + date filtering)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_team_date_league ON football_fixtures (home_team_id, date DESC, league_id) WHERE status_short = 'FT';
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_away_team_date_league ON football_fixtures (away_team_id, date DESC, league_id) WHERE status_short = 'FT';
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_team_date_league ON football_fixtures (home_team_id, date DESC, league_id) WHERE LOWER(status_short) IN ('ft', 'aet', 'pen');
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_away_team_date_league ON football_fixtures (away_team_id, date DESC, league_id) WHERE LOWER(status_short) IN ('ft', 'aet', 'pen');
 
 -- Indexes for JSONB fields
 CREATE INDEX IF NOT EXISTS idx_football_odds_odds_jsonb ON football_odds USING GIN (odds);
@@ -579,7 +514,7 @@ SELECT
 
     FROM football_odds fo
     WHERE fo.fixture_id = p_fixture_id
-      AND fo.bookie NOT IN ('predictions')
+      AND fo.bookie NOT IN ('Prediction')
       AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
     ON CONFLICT (fixture_id, bookie) DO UPDATE SET
         payout_x12 = EXCLUDED.payout_x12,
@@ -603,39 +538,40 @@ BEGIN
         fo.bookie,
         fo.decimals,
 
-        -- Fair X12 odds
+        -- Fair X12 odds (return empty array if odds array is empty)
         CASE
-            WHEN fo.odds_x12 IS NOT NULL THEN
-                jsonb_build_object(
-                    'original_x12', (fo.odds_x12->-1->>'x12')::jsonb,
-                    'fair_x12', (
-                        SELECT jsonb_agg(
-                            ROUND(
-                                (
-                                    1.0 / (
-                                        (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
-                                        (
-                                            SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                            FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
-                                        )
+            WHEN fo.odds_x12 IS NOT NULL AND (fo.odds_x12->-1)->'x12' IS NOT NULL AND jsonb_array_length((fo.odds_x12->-1)->'x12') > 0 AND
+                                  EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem WHERE elem::numeric > 0) THEN
+                (
+                    SELECT jsonb_agg(
+                        ROUND(
+                            (
+                                1.0 / (
+                                    (1.0 / (x12_odds::numeric / POWER(10, fo.decimals))) /
+                                    (
+                                                            SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                            FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
+                                                            WHERE elem::numeric > 0
                                     )
-                                ) * POWER(10, fo.decimals)
-                            )::integer
-                            ORDER BY x12_idx
-                        )
-                        FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
-                        WHERE x12_idx <= 3
+                                )
+                            ) * POWER(10, fo.decimals)
+                        )::integer
+                        ORDER BY x12_idx
                     )
+                    FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
+                    WHERE x12_idx <= 3 AND x12_odds::numeric > 0
                 )
+            WHEN fo.odds_x12 IS NOT NULL THEN
+                '[]'::jsonb
             ELSE NULL
         END as fair_odds_x12,
 
-        -- Fair AH odds
+        -- Fair AH odds (return empty object with empty arrays if odds arrays are empty)
         CASE
-            WHEN fo.odds_ah IS NOT NULL THEN
+            WHEN fo.odds_ah IS NOT NULL AND (fo.odds_ah->-1)->'ah_h' IS NOT NULL AND (fo.odds_ah->-1)->'ah_a' IS NOT NULL AND jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
+                                  EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                  EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0) THEN
                 jsonb_build_object(
-                    'original_ah_h', (fo.odds_ah->-1->>'ah_h')::jsonb,
-                    'original_ah_a', (fo.odds_ah->-1->>'ah_a')::jsonb,
                     'fair_ah_h', (
                         SELECT jsonb_agg(
                             CASE
@@ -681,15 +617,17 @@ BEGIN
                         ON h_idx = a_idx
                     )
                 )
+            WHEN fo.odds_ah IS NOT NULL THEN
+                jsonb_build_object('fair_ah_h', '[]'::jsonb, 'fair_ah_a', '[]'::jsonb)
             ELSE NULL
         END as fair_odds_ah,
 
-        -- Fair OU odds
+        -- Fair OU odds (return empty object with empty arrays if odds arrays are empty)
         CASE
-            WHEN fo.odds_ou IS NOT NULL THEN
+            WHEN fo.odds_ou IS NOT NULL AND (fo.odds_ou->-1)->'ou_o' IS NOT NULL AND (fo.odds_ou->-1)->'ou_u' IS NOT NULL AND jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
+                                  EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                  EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0) THEN
                 jsonb_build_object(
-                    'original_ou_o', (fo.odds_ou->-1->>'ou_o')::jsonb,
-                    'original_ou_u', (fo.odds_ou->-1->>'ou_u')::jsonb,
                     'fair_ou_o', (
                         SELECT jsonb_agg(
                             CASE
@@ -735,6 +673,8 @@ BEGIN
                         ON o_idx = u_idx
                     )
                 )
+            WHEN fo.odds_ou IS NOT NULL THEN
+                jsonb_build_object('fair_ou_o', '[]'::jsonb, 'fair_ou_u', '[]'::jsonb)
             ELSE NULL
         END as fair_odds_ou,
 
@@ -743,7 +683,7 @@ BEGIN
 
     FROM football_odds fo
     WHERE fo.fixture_id = p_fixture_id
-      AND fo.bookie != 'predictions'
+      AND fo.bookie != 'Prediction'
       AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL);
 END;
 $$ LANGUAGE plpgsql;

@@ -20,8 +20,7 @@ async function getFilterValues(request: Request) {
     'season',
     'status_short',
     'odds_bookies',
-    'fair_odds_bookies',
-    'odds_ratio'
+    'fair_odds_bookies'
   ];
 
   if (!allowedFields.includes(field)) {
@@ -47,9 +46,6 @@ async function getFilterValues(request: Request) {
       query = `SELECT DISTINCT bookie FROM football_fair_odds WHERE fair_odds_x12 IS NOT NULL ORDER BY bookie`;
       const result = await executeQuery(query);
       values = result.rows.map(row => row.bookie).filter(value => value !== null && value !== undefined && value !== '');
-    } else if (field === 'odds_ratio') {
-      // Special filter - no predefined values, custom UI handles this
-      values = [];
     } else {
       // Default behavior for other fields
       query = `SELECT DISTINCT ${field} FROM football_fixtures WHERE ${field} IS NOT NULL ORDER BY ${field}`;

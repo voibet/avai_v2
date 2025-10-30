@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { executeQuery, executeTransaction } from '../database/db-utils';
 import { League } from '../../types/database';
+import { CANCELLED } from '../constants';
 
 
 interface SeasonData {
@@ -100,6 +101,15 @@ interface ApiFootballTeam {
 export class FixtureFetcher {
   private readonly apiKey = process.env.API_KEY;
   private readonly apiBaseUrl = process.env.API_BASE_URL;
+
+  // Leagues that should exclude fixtures during July-August
+  private readonly EXCLUDED_LEAGUES_SUMMER = [2, 848, 3];
+
+  private isJulyAugust(timestamp: number): boolean {
+    const date = new Date(timestamp * 1000); // Convert to milliseconds
+    const month = date.getMonth(); // 0-indexed: 6 = July, 7 = August
+    return month === 6 || month === 7;
+  }
 
   async fetchAndUpdateFixtures(
     onProgress?: (league: string, index: number, total: number) => void,
@@ -380,19 +390,49 @@ export class FixtureFetcher {
 
     if (apiFixtures.length === 0) return 0;
 
-    // Get all unique team IDs from fixtures
+    // Filter out fixtures from excluded leagues during July-August
+    const nonSummerFixtures = apiFixtures.filter(fixture =>
+      !this.EXCLUDED_LEAGUES_SUMMER.includes(fixture.league.id) ||
+      !this.isJulyAugust(fixture.fixture.timestamp)
+    );
+
+    // Filter out cancelled fixtures - don't add them if they don't exist
+    const validFixtures = nonSummerFixtures.filter(fixture =>
+      !CANCELLED.includes(fixture.fixture.status.short.toLowerCase())
+    );
+
+    // Identify cancelled fixtures that may need to be deleted from database
+    const cancelledFixtures = apiFixtures.filter(fixture =>
+      CANCELLED.includes(fixture.fixture.status.short.toLowerCase())
+    );
+
+    // Delete cancelled fixtures that exist in the database
+    if (cancelledFixtures.length > 0) {
+      const cancelledIds = cancelledFixtures.map(f => f.fixture.id);
+      try {
+        await executeQuery(
+          'DELETE FROM football_fixtures WHERE id = ANY($1)',
+          [cancelledIds]
+        );
+        console.log(`Deleted ${cancelledFixtures.length} cancelled fixtures from database`);
+      } catch (error) {
+        console.error('Error deleting cancelled fixtures:', error);
+      }
+    }
+
+    if (validFixtures.length === 0) return 0;
+
+    // Get all unique team IDs from valid fixtures
     const allTeamIds = Array.from(new Set([
-      ...apiFixtures.map(f => f.teams.home.id),
-      ...apiFixtures.map(f => f.teams.away.id)
+      ...validFixtures.map(f => f.teams.home.id),
+      ...validFixtures.map(f => f.teams.away.id)
     ]));
 
     // Fetch team countries for all teams in these fixtures
     const teamCountryMap = await this.fetchMissingTeamCountries(allTeamIds);
 
-
-
     // Build transaction queries
-    const queries = await Promise.all(apiFixtures.map(async (fixture) => {
+    const queries = await Promise.all(validFixtures.map(async (fixture) => {
       // Get existing fixture to preserve xg_home, xg_away (but get xg_source from league)
       let existingXG = null;
       try {

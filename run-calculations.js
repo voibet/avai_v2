@@ -5,8 +5,8 @@
  * - Hours since last match for home and away teams (includes all scheduled matches)
  * - League average goals (rolling average of last 300 matches, min: 50, capped 1.5-4.0, default 2.76)
  * - Home advantage (average home_goals - away_goals for past 300 matches, min: 50, capped 0.1-0.6, default 0.30)
- * - ELO ratings (team ELOs + league ELOs as average of team ELOs)
- * - Rolling xG and xGA (8, 16, 32 match windows averaged, min: 4 matches per team)
+ * - ELO ratings (team ELOs using XG ratio as continuous scores + league ELOs as average of team ELOs)
+ * - Rolling xG and xGA (8, 16, 32 match windows averaged, min: 5 matches per team WITH league-specific filtering)
  *
  * DATABASE TABLES CREATED & POPULATED (when --views is used):
  * - football_odds
@@ -22,6 +22,10 @@
  *   Multiple functions can be specified comma-separated, e.g., '2,5' to run goals and rolling-xg calculations
  *   --fixture-ids=id1,id2,id3: Process only specific fixture IDs (comma-separated)
  *   --views: Create & populate auto-updating calculated odds tables (payouts, fair_odds) + drop old views
+ *
+ * LEAGUE-SPECIFIC FILTERING:
+ *   - For League matches: Only same-country League matches are used for rolling xG calculations (min: 5 matches)
+ *   - For Cup matches: ALL matches from past 365 days are used for rolling xG calculations (min: 5 matches)
  */
 
 import pool from './lib/database/db.ts';
@@ -125,7 +129,7 @@ async function runCalculations() {
                 FROM football_fixtures ff
                 WHERE ff.league_id = f.league_id
                   AND ff.date < f.date
-                  AND ff.status_short = 'FT'
+                  AND LOWER(ff.status_short) IN ('ft', 'aet', 'pen')
                   AND ff.goals_home IS NOT NULL
                   AND ff.goals_away IS NOT NULL
                 ORDER BY ff.date DESC
@@ -147,10 +151,71 @@ async function runCalculations() {
         updated_count INTEGER;
     BEGIN
         -- Set-based calculation of home advantage (home_goals - away_goals average)
+        -- Priority order:
+        -- 0. Special hardcoded leagues (e.g., league_id = 15) always get home advantage 0
+        -- 1. If playing at official home venue (from football_teams.venue), use normal home advantage
+        -- 2. If team has never played any of their last 10 home matches at current venue, set to 0
+        -- 3. Otherwise use league-wide home advantage
         INSERT INTO football_stats (fixture_id, home_advantage)
         SELECT
             f.id,
             CASE
+                -- Special hardcoded leagues that always get home advantage 0
+                WHEN f.league_id = 15 THEN 0.0
+                -- If current venue matches team's official venue, use normal home advantage
+                WHEN ft.venue IS NOT NULL AND f.venue_name IS NOT NULL
+                     AND (
+                         -- Exact match or one contains the other
+                         LOWER(TRIM(ft.venue)) = LOWER(TRIM(f.venue_name))
+                         OR LOWER(TRIM(ft.venue)) LIKE '%' || LOWER(TRIM(f.venue_name)) || '%'
+                         OR LOWER(TRIM(f.venue_name)) LIKE '%' || LOWER(TRIM(ft.venue)) || '%'
+                         -- Or token-based matching (handles "Claudio Fabian Tapia" vs "Estadio Claudio Chiqui Tapia")
+                         OR (
+                             SELECT COUNT(*) >= 2
+                             FROM (
+                                 SELECT UNNEST(string_to_array(LOWER(TRIM(ft.venue)), ' ')) INTERSECT
+                                        SELECT UNNEST(string_to_array(LOWER(TRIM(f.venue_name)), ' '))
+                             ) common_tokens
+                         )
+                     ) THEN
+                    CASE
+                        WHEN ha.fixture_count < 50 THEN 0.30
+                        WHEN ha.avg_home_advantage IS NULL THEN 0.30
+                        WHEN ha.avg_home_advantage < 0.1 THEN 0.10
+                        WHEN ha.avg_home_advantage > 0.6 THEN 0.60
+                        ELSE ROUND(ha.avg_home_advantage, 2)
+                    END
+                -- Check if team has played any of their last 10 home matches at current venue
+                WHEN f.venue_name IS NOT NULL AND (
+                    -- Count how many of their last 10 home matches were at this venue
+                    SELECT COUNT(*)
+                    FROM (
+                        SELECT 1
+                        FROM football_fixtures past_f
+                        WHERE past_f.home_team_id = f.home_team_id
+                          AND past_f.date < f.date
+                          AND LOWER(past_f.status_short) IN ('ft', 'aet', 'pen')
+                          AND past_f.venue_name IS NOT NULL
+                          AND (
+                              -- Exact match
+                              LOWER(TRIM(past_f.venue_name)) = LOWER(TRIM(f.venue_name))
+                              -- Or one contains the other (handles "Estadio Camp Nou" vs "Camp Nou")
+                              OR LOWER(TRIM(past_f.venue_name)) LIKE '%' || LOWER(TRIM(f.venue_name)) || '%'
+                              OR LOWER(TRIM(f.venue_name)) LIKE '%' || LOWER(TRIM(past_f.venue_name)) || '%'
+                              -- Or token-based matching (handles "Claudio Fabian Tapia" vs "Estadio Claudio Chiqui Tapia")
+                              OR (
+                                  SELECT COUNT(*) >= 2
+                                  FROM (
+                                      SELECT UNNEST(string_to_array(LOWER(TRIM(past_f.venue_name)), ' ')) INTERSECT
+                                             SELECT UNNEST(string_to_array(LOWER(TRIM(f.venue_name)), ' '))
+                                  ) common_tokens
+                              )
+                          )
+                        ORDER BY past_f.date DESC
+                        LIMIT 10
+                    ) last_10_home_at_venue
+                ) = 0 THEN 0.0  -- Never played at this venue in last 10 home matches, zero home advantage
+                -- Otherwise use league-wide home advantage calculation
                 WHEN ha.fixture_count < 50 THEN 0.30
                 WHEN ha.avg_home_advantage IS NULL THEN 0.30
                 WHEN ha.avg_home_advantage < 0.1 THEN 0.10
@@ -161,6 +226,7 @@ async function runCalculations() {
             SELECT * FROM football_fixtures
             WHERE (fixture_ids IS NULL OR id = ANY(fixture_ids))
         ) f
+        LEFT JOIN football_teams ft ON f.home_team_id = ft.id
         LEFT JOIN LATERAL (
             SELECT
                 COUNT(*) as fixture_count,
@@ -170,7 +236,7 @@ async function runCalculations() {
                 FROM football_fixtures ff
                 WHERE ff.league_id = f.league_id
                   AND ff.date < f.date
-                  AND ff.status_short = 'FT'
+                  AND LOWER(ff.status_short) IN ('ft', 'aet', 'pen')
                   AND ff.goals_home IS NOT NULL
                   AND ff.goals_away IS NOT NULL
                 ORDER BY ff.date DESC
@@ -187,10 +253,14 @@ async function runCalculations() {
     $$ LANGUAGE plpgsql;
 
     -- Function to calculate and update ELO ratings with full recalculation
+    -- ELO SYSTEM: Teams start with league base ELO from football_initial_league_elos
+    -- Then evolve individually based on match results across all competitions
     -- Always recalculates ALL fixtures from the beginning for complete data consistency
-    -- Calculates team ELOs first, then league ELOs (average of team ELOs)
-    -- For matches with XG/goals data: calculates ELO changes normally
+    -- Calculates team ELOs first (each team has one rating that evolves individually)
+    -- Then calculates league ELOs (average strength of teams historically in that league)
+    -- Uses XG data as continuous scores (XG ratio) to reflect match performance
     -- For matches without data: uses current team ELO ratings
+    -- Teams carry their evolved ELO to World leagues, domestic leagues, etc.
     -- Ensures any changes to XG data or calculation logic are fully reflected
     CREATE OR REPLACE FUNCTION calculate_elos_incremental(fixture_ids BIGINT[] DEFAULT NULL) RETURNS INTEGER AS $$
     DECLARE
@@ -201,12 +271,18 @@ async function runCalculations() {
         expected_away DECIMAL;
         actual_home_score DECIMAL;
         actual_away_score DECIMAL;
-        k_factor INTEGER := 32;
+        total_score DECIMAL;
+        k_factor INTEGER := 30;
         updated_count INTEGER := 0;
         last_processed_date TIMESTAMP;
         league_base_elo INTEGER;
+        pre_match_home_elo INTEGER;
+        pre_match_away_elo INTEGER;
+        new_home_elo INTEGER;
+        new_away_elo INTEGER;
     BEGIN
-        -- Always calculate all ELOs from the beginning for data consistency
+        -- CORRECT ELO SYSTEM: Teams start with league base ELO from football_initial_league_elos
+        -- Then evolve individually based on match results across all competitions
 
         -- Create temporary table for league ELO ratings
         CREATE TEMP TABLE IF NOT EXISTS league_elo_ratings (
@@ -221,11 +297,10 @@ async function runCalculations() {
         INSERT INTO league_elo_ratings (league_id, base_elo) VALUES
         ${leagueEloValues};
 
-        -- Create temporary table for team ELO ratings (reset each calculation)
+        -- Create temporary table for team ELO ratings (each team has ONE rating)
         DROP TABLE IF EXISTS temp_team_elo;
         CREATE TEMP TABLE temp_team_elo (
             team_id BIGINT PRIMARY KEY,
-            league_id BIGINT,
             elo_rating INTEGER NOT NULL DEFAULT 1500
         );
 
@@ -239,21 +314,115 @@ async function runCalculations() {
             ) f
             ORDER BY f.date ASC, f.id ASC
         LOOP
-            -- Get league base ELO
+            -- Get league base ELO for initialization of new teams
             SELECT COALESCE(base_elo, 1500) INTO league_base_elo
             FROM league_elo_ratings
             WHERE league_id = fixture_record.league_id;
 
+            -- Set K-factor based on league country
+            -- Default K-factor = 30, but "World" leagues get K-factor = 50 for more volatility
+            SELECT CASE
+                WHEN l.country = 'World' THEN 50
+                ELSE 30
+            END INTO k_factor
+            FROM football_leagues l
+            WHERE l.id = fixture_record.league_id;
+
             -- Get or create home team ELO
+            -- When processing specific fixtures (fixture_ids is not NULL), calculate current Elo including last fixture's result
             IF NOT EXISTS (SELECT 1 FROM temp_team_elo WHERE team_id = fixture_record.home_team_id) THEN
-                INSERT INTO temp_team_elo (team_id, league_id, elo_rating)
-                VALUES (fixture_record.home_team_id, fixture_record.league_id, league_base_elo);
+                IF fixture_ids IS NOT NULL THEN
+                    -- Get the most recent past fixture data for this team
+                    SELECT COALESCE(
+                        (SELECT
+                            -- Calculate the POST-MATCH Elo by applying the fixture result to the pre-match Elo
+                            CASE
+                                WHEN f.home_team_id = fixture_record.home_team_id THEN
+                                    fs.elo_home + ROUND(k_factor * (
+                                        CASE
+                                            WHEN (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)) > 0 THEN
+                                                POWER(COALESCE(f.xg_home, f.goals_home, 0) / (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)), 1.5)
+                                            ELSE 0.5
+                                        END -
+                                        (1.0 / (1.0 + POWER(10, (fs.elo_away - fs.elo_home)::DECIMAL / 400)))
+                                    ))::INTEGER
+                                ELSE
+                                    fs.elo_away + ROUND(k_factor * (
+                                        CASE
+                                            WHEN (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)) > 0 THEN
+                                                1.0 - POWER(COALESCE(f.xg_home, f.goals_home, 0) / (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)), 1.5)
+                                            ELSE 0.5
+                                        END -
+                                        (1.0 - (1.0 / (1.0 + POWER(10, (fs.elo_away - fs.elo_home)::DECIMAL / 400))))
+                                    ))::INTEGER
+                            END
+                        FROM football_fixtures f
+                        JOIN football_stats fs ON f.id = fs.fixture_id
+                        WHERE (f.home_team_id = fixture_record.home_team_id OR f.away_team_id = fixture_record.home_team_id)
+                          AND f.date < fixture_record.date
+                          AND fs.elo_home IS NOT NULL
+                          AND LOWER(f.status_short) IN ('ft', 'aet', 'pen')
+                          AND (f.xg_home IS NOT NULL OR f.goals_home IS NOT NULL)
+                        ORDER BY f.date DESC, f.id DESC
+                        LIMIT 1),
+                        league_base_elo
+                    ) INTO home_elo;
+
+                    INSERT INTO temp_team_elo (team_id, elo_rating)
+                    VALUES (fixture_record.home_team_id, home_elo);
+                ELSE
+                    -- Full recalculation mode: use league base ELO
+                    INSERT INTO temp_team_elo (team_id, elo_rating)
+                    VALUES (fixture_record.home_team_id, league_base_elo);
+                END IF;
             END IF;
 
             -- Get or create away team ELO
             IF NOT EXISTS (SELECT 1 FROM temp_team_elo WHERE team_id = fixture_record.away_team_id) THEN
-                INSERT INTO temp_team_elo (team_id, league_id, elo_rating)
-                VALUES (fixture_record.away_team_id, fixture_record.league_id, league_base_elo);
+                IF fixture_ids IS NOT NULL THEN
+                    -- Get the most recent past fixture data for this team
+                    SELECT COALESCE(
+                        (SELECT
+                            -- Calculate the POST-MATCH Elo by applying the fixture result to the pre-match Elo
+                            CASE
+                                WHEN f.home_team_id = fixture_record.away_team_id THEN
+                                    fs.elo_home + ROUND(k_factor * (
+                                        CASE
+                                            WHEN (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)) > 0 THEN
+                                                POWER(COALESCE(f.xg_home, f.goals_home, 0) / (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)), 1.5)
+                                            ELSE 0.5
+                                        END -
+                                        (1.0 / (1.0 + POWER(10, (fs.elo_away - fs.elo_home)::DECIMAL / 400)))
+                                    ))::INTEGER
+                                ELSE
+                                    fs.elo_away + ROUND(k_factor * (
+                                        CASE
+                                            WHEN (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)) > 0 THEN
+                                                1.0 - POWER(COALESCE(f.xg_home, f.goals_home, 0) / (COALESCE(f.xg_home, f.goals_home, 0) + COALESCE(f.xg_away, f.goals_away, 0)), 1.5)
+                                            ELSE 0.5
+                                        END -
+                                        (1.0 - (1.0 / (1.0 + POWER(10, (fs.elo_away - fs.elo_home)::DECIMAL / 400))))
+                                    ))::INTEGER
+                            END
+                        FROM football_fixtures f
+                        JOIN football_stats fs ON f.id = fs.fixture_id
+                        WHERE (f.home_team_id = fixture_record.away_team_id OR f.away_team_id = fixture_record.away_team_id)
+                          AND f.date < fixture_record.date
+                          AND fs.elo_home IS NOT NULL
+                          AND LOWER(f.status_short) IN ('ft', 'aet', 'pen')
+                          AND (f.xg_home IS NOT NULL OR f.goals_home IS NOT NULL)
+                        ORDER BY f.date DESC, f.id DESC
+                        LIMIT 1),
+                        league_base_elo
+                    ) INTO away_elo;
+
+                    INSERT INTO temp_team_elo (team_id, elo_rating)
+                    VALUES (fixture_record.away_team_id, away_elo);
+                ELSE
+                    -- Full recalculation mode: use league base ELO
+                    INSERT INTO temp_team_elo (team_id, elo_rating)
+                    VALUES (fixture_record.away_team_id, league_base_elo);
+                END IF;
             END IF;
 
             -- Get current ELO ratings (before this match)
@@ -261,14 +430,11 @@ async function runCalculations() {
             SELECT elo_rating INTO away_elo FROM temp_team_elo WHERE team_id = fixture_record.away_team_id;
 
             -- Store pre-match ELO ratings for this fixture
-            DECLARE
-                pre_match_home_elo INTEGER := home_elo;
-                pre_match_away_elo INTEGER := away_elo;
-                new_home_elo INTEGER;
-                new_away_elo INTEGER;
+            pre_match_home_elo := home_elo;
+            pre_match_away_elo := away_elo;
             BEGIN
                 -- Check if we have XG/goals data to calculate ELO changes
-                IF (fixture_record.xg_home IS NOT NULL OR fixture_record.goals_home IS NOT NULL) AND fixture_record.status_short = 'FT' THEN
+                IF (fixture_record.xg_home IS NOT NULL OR fixture_record.goals_home IS NOT NULL) AND LOWER(fixture_record.status_short) IN ('ft', 'aet', 'pen') THEN
                     -- We have match data, calculate ELO changes normally
 
                     -- Calculate expected scores using ELO formula
@@ -276,30 +442,27 @@ async function runCalculations() {
                     expected_away := 1.0 - expected_home;
 
                     -- Use XG if available, otherwise use actual goals
+                    -- Convert XG to continuous score (0 to 1 range) with boost for better performance
                     actual_home_score := COALESCE(fixture_record.xg_home, fixture_record.goals_home, 0);
                     actual_away_score := COALESCE(fixture_record.xg_away, fixture_record.goals_away, 0);
 
-                    -- Determine win/draw/loss based on XG difference threshold of 0.38
-                    -- If XG difference is less than 0.38, consider it a draw (both teams get 0.5)
-                    -- Otherwise, winner gets 1.0, loser gets 0.0
-                    IF ABS(actual_home_score - actual_away_score) < 0.38 THEN
-                        -- Draw: both teams get 0.5 points
-                        actual_home_score := 0.5;
-                        actual_away_score := 0.5;
-                    ELSE
-                        -- Win/loss: higher XG team gets 1.0, lower gets 0.0
+                    IF (actual_home_score + actual_away_score) > 0 THEN
+                        -- Boost the better team's performance by amplifying raw XG differences
+                        -- This makes stronger teams even stronger: 0.9 vs 0.6 becomes 1.1 vs 0.4
                         IF actual_home_score > actual_away_score THEN
-                            actual_home_score := 1.0;
-                            actual_away_score := 0.0;
-                        ELSE
-                            actual_home_score := 0.0;
-                            actual_away_score := 1.0;
+                            actual_home_score := POWER(actual_home_score, 1.1);
+                            actual_away_score := POWER(actual_away_score, 0.9);
+                        ELSIF actual_away_score > actual_home_score THEN
+                            actual_away_score := POWER(actual_away_score, 1.1);
+                            actual_home_score := POWER(actual_home_score, 0.9);
                         END IF;
-                    END IF;
 
-                    -- Handle edge cases for very low XG games (treat as more random)
-                    IF (COALESCE(fixture_record.xg_home, fixture_record.goals_home, 0) +
-                        COALESCE(fixture_record.xg_away, fixture_record.goals_away, 0)) < 0.5 THEN
+                        -- Normalize to 0-1 range
+                        total_score := actual_home_score + actual_away_score;
+                        actual_home_score := actual_home_score / total_score;
+                        actual_away_score := actual_away_score / total_score;
+                    ELSE
+                        -- Edge case: no XG for either team (treat as draw)
                         actual_home_score := 0.5;
                         actual_away_score := 0.5;
                     END IF;
@@ -308,9 +471,9 @@ async function runCalculations() {
                     new_home_elo := home_elo + ROUND(k_factor * (actual_home_score - expected_home))::INTEGER;
                     new_away_elo := away_elo + ROUND(k_factor * (actual_away_score - expected_away))::INTEGER;
 
-                    -- Ensure ELO doesn't go below 1000 or above 3000
-                    new_home_elo := GREATEST(1000, LEAST(3000, new_home_elo));
-                    new_away_elo := GREATEST(1000, LEAST(3000, new_away_elo));
+                    -- Ensure ELO doesn't go below 900 or above 3000
+                    new_home_elo := GREATEST(900, LEAST(3000, new_home_elo));
+                    new_away_elo := GREATEST(900, LEAST(3000, new_away_elo));
 
                     -- Update team ELO ratings for future matches
                     UPDATE temp_team_elo SET elo_rating = new_home_elo
@@ -319,44 +482,62 @@ async function runCalculations() {
                     UPDATE temp_team_elo SET elo_rating = new_away_elo
                     WHERE team_id = fixture_record.away_team_id;
                 END IF;
-
-                -- Always store the PRE-MATCH ELO ratings for this fixture
-                -- This ensures the stored ELO doesn't include the current match's result
-                INSERT INTO football_stats (fixture_id, elo_home, elo_away)
-                VALUES (fixture_record.id, pre_match_home_elo, pre_match_away_elo)
-                ON CONFLICT (fixture_id) DO UPDATE SET
-                    elo_home = EXCLUDED.elo_home,
-                    elo_away = EXCLUDED.elo_away,
-                    updated_at = NOW();
             END;
+
+            -- Always store the PRE-MATCH ELO ratings for this fixture
+            -- This ensures the stored ELO doesn't include the current match's result
+            INSERT INTO football_stats (fixture_id, elo_home, elo_away)
+            VALUES (fixture_record.id, pre_match_home_elo, pre_match_away_elo)
+            ON CONFLICT (fixture_id) DO UPDATE SET
+                elo_home = EXCLUDED.elo_home,
+                elo_away = EXCLUDED.elo_away,
+                updated_at = NOW();
 
             updated_count := updated_count + 1;
         END LOOP;
 
         -- Calculate league ELOs as average of PRE-MATCH team ELOs for each fixture
-        -- This ensures no data leakage - each fixture's league ELO only includes historical data
+        -- This represents the average strength of teams that have historically played in this league
+        -- Used for adjusting team performance when they move between leagues of different strengths
         RAISE NOTICE 'Calculating league ELOs...';
         UPDATE football_stats
         SET league_elo = (
-            SELECT ROUND(AVG(fs.elo_home))::INTEGER
-            FROM football_stats fs
-            JOIN football_fixtures f ON fs.fixture_id = f.id
-            WHERE f.league_id = (
-                SELECT ff.league_id
-                FROM football_fixtures ff
-                WHERE ff.id = football_stats.fixture_id
-            )
-            AND f.date < (
-                SELECT fff.date
-                FROM football_fixtures fff
-                WHERE fff.id = football_stats.fixture_id
-            )
-            AND fs.elo_home IS NOT NULL
+            SELECT ROUND(AVG(team_elo))::INTEGER
+            FROM (
+                SELECT fs.elo_home as team_elo
+                FROM football_stats fs
+                JOIN football_fixtures f ON fs.fixture_id = f.id
+                WHERE f.league_id = (
+                    SELECT ff.league_id
+                    FROM football_fixtures ff
+                    WHERE ff.id = football_stats.fixture_id
+                )
+                AND f.date < (
+                    SELECT fff.date
+                    FROM football_fixtures fff
+                    WHERE fff.id = football_stats.fixture_id
+                )
+                AND fs.elo_home IS NOT NULL
+                UNION ALL
+                SELECT fs.elo_away as team_elo
+                FROM football_stats fs
+                JOIN football_fixtures f ON fs.fixture_id = f.id
+                WHERE f.league_id = (
+                    SELECT ff.league_id
+                    FROM football_fixtures ff
+                    WHERE ff.id = football_stats.fixture_id
+                )
+                AND f.date < (
+                    SELECT fff.date
+                    FROM football_fixtures fff
+                    WHERE fff.id = football_stats.fixture_id
+                )
+                AND fs.elo_away IS NOT NULL
+            ) team_elos
         )
         WHERE (fixture_ids IS NULL OR football_stats.fixture_id = ANY(fixture_ids));
 
         -- Clean up temporary tables (will be auto-dropped at end of session anyway)
-        DROP TABLE IF EXISTS league_elo_ratings;
         DROP TABLE IF EXISTS temp_team_elo;
 
         RETURN updated_count;
@@ -365,16 +546,18 @@ async function runCalculations() {
 
     -- Function to calculate adjusted rolling xG and xGA using rolling windows (8, 16, 32 matches averaged)
     CREATE OR REPLACE FUNCTION populate_adjusted_rolling_xg_batch(fixture_ids BIGINT[] DEFAULT NULL) RETURNS INTEGER AS $$
-    -- Updated to require at least 4 past fixtures for adjusted rolling calculations
+    -- Updated to require at least 5 past fixtures WITH league-specific filtering
+    -- For League matches: only same-country League matches count toward the 5-match threshold
+    -- For Cup matches: ALL matches count toward the 5-match threshold
     DECLARE
         updated_count INTEGER;
     BEGIN
         -- Single batch update using window functions for maximum performance
-        -- Teams must have at least 4 past fixtures to get adjusted rolling calculations
+        -- BOTH teams must individually have at least 5 past fixtures (with filtering) to get adjusted rolling calculations
         WITH fixture_data AS (
         -- First function: populate_adjusted_rolling_xg_batch
             -- Get all fixtures that need calculation
-            -- Requires minimum 4 past fixtures for adjusted rolling calculations
+            -- Requires minimum 5 past fixtures for adjusted rolling calculations
             SELECT
                 f.id as fixture_id,
                 f.home_team_id,
@@ -398,9 +581,35 @@ async function runCalculations() {
                   AND fs.league_elo IS NOT NULL AND fs.home_advantage IS NOT NULL
                   AND fs.avg_goals_league IS NOT NULL
         ),
+        team_match_counts AS (
+            -- Count past matches for each team WITH league-specific filtering for the 5-match threshold
+            -- For League matches: only count same-country League matches
+            -- For Cup matches: count ALL matches
+            SELECT
+                fd.fixture_id,
+                fd.home_team_id,
+                fd.away_team_id,
+                COUNT(DISTINCT CASE WHEN pf.home_team_id = fd.home_team_id OR pf.away_team_id = fd.home_team_id THEN pf.id END) as home_team_total_matches,
+                COUNT(DISTINCT CASE WHEN pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id THEN pf.id END) as away_team_total_matches
+            FROM fixture_data fd
+            CROSS JOIN LATERAL (
+                SELECT pf.id, pf.home_team_id, pf.away_team_id
+                FROM football_fixtures pf
+                LEFT JOIN football_leagues pl ON pf.league_id = pl.id
+                WHERE (pf.home_team_id = fd.home_team_id OR pf.away_team_id = fd.home_team_id
+                       OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
+                  AND pf.date < fd.fixture_date
+                  AND pf.date >= fd.fixture_date - INTERVAL '1 year'
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
+                  -- Apply league-specific filtering: Cup matches include all, League matches only same-country League
+                  AND (fd.league_type != 'League' OR (pl.country = fd.league_country AND pl.type = 'League'))
+            ) pf
+            GROUP BY fd.fixture_id, fd.home_team_id, fd.away_team_id
+        ),
         all_past_matches AS (
-            -- Get all past matches for all teams (pre-filtered for efficiency)
-            -- Only include teams with at least 4 past fixtures
+            -- Get past matches for XG calculations (with league-specific filtering)
+            -- Only include fixtures where both teams have at least 5 total past matches
+            -- EARLY FILTERING: Skip fixtures that don't meet threshold to avoid expensive calculations
             SELECT
                 fd.fixture_id,
                 fd.home_team_id,
@@ -426,24 +635,25 @@ async function runCalculations() {
                 pms.elo_away as past_elo_away,
                 pms.league_elo as past_league_elo,
                 pms.avg_goals_league as past_league_avg_goals,
-                pms.home_advantage as past_league_home_advantage,
-                -- Count total matches for this team in this fixture
-                COUNT(*) OVER (PARTITION BY fd.fixture_id, CASE WHEN pm.home_team_id = fd.home_team_id OR pm.away_team_id = fd.home_team_id THEN fd.home_team_id ELSE fd.away_team_id END) as team_match_count
+                pms.home_advantage as past_league_home_advantage
             FROM fixture_data fd
-            -- Cross join with all past matches for both home and away teams
+            JOIN team_match_counts tmc ON fd.fixture_id = tmc.fixture_id
+                                       AND tmc.home_team_total_matches >= 5
+                                       AND tmc.away_team_total_matches >= 5
+            -- Cross join with past matches using league-specific filtering
             CROSS JOIN LATERAL (
                 SELECT pf.id, pf.date, pf.league_id, pf.home_team_id, pf.away_team_id, pf.xg_home, pf.xg_away, pf.goals_home, pf.goals_away
                 FROM football_fixtures pf
+                LEFT JOIN football_leagues pl ON pf.league_id = pl.id
                 WHERE (pf.home_team_id = fd.home_team_id OR pf.away_team_id = fd.home_team_id
                        OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
                   AND pf.date < fd.fixture_date
                   AND pf.date >= fd.fixture_date - INTERVAL '1 year'
-                  AND pf.status_short = 'FT'
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
                   -- Conditional filtering based on league type
-                  AND (fd.league_type = 'Cup' OR EXISTS (
-                      SELECT 1 FROM football_leagues pl
-                      WHERE pl.id = pf.league_id AND pl.country = fd.league_country AND pl.type = 'League'
-                  ))
+                  -- For League matches: only include past League matches from same country
+                  -- For Cup/other matches: include ALL past matches
+                  AND (fd.league_type != 'League' OR (pl.country = fd.league_country AND pl.type = 'League'))
                 ORDER BY pf.date DESC
                 LIMIT 32
             ) pm
@@ -451,153 +661,149 @@ async function runCalculations() {
             WHERE pms.elo_home IS NOT NULL AND pms.elo_away IS NOT NULL AND pms.league_elo IS NOT NULL
                   AND pms.avg_goals_league IS NOT NULL
         ),
-        -- Filter to only include teams with at least 4 past fixtures
-        filtered_past_matches AS (
-            SELECT * FROM all_past_matches
-            WHERE team_match_count >= 4
-        ),
         calculated_adjustments AS (
             -- Calculate adjusted xG for each past match from both home and away perspectives
             SELECT
-                fpm.fixture_id,
-                fpm.past_match_id,
+                apm.fixture_id,
+                apm.past_match_id,
                 -- Home team perspective
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.home_team_id THEN
+                    WHEN apm.past_home_team_id = apm.home_team_id THEN
                         -- Home team was home in this past match - PENALIZE xG, BENEFIT xGA
-                        fpm.past_xg_home * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Home team was away in this past match - BENEFIT xG, PENALIZE xGA
-                        fpm.past_xg_away * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_away * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
+                        (apm.league_home_advantage / 2.0)
                 END as home_team_adjusted_xg,
 
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.home_team_id THEN
+                    WHEN apm.past_home_team_id = apm.home_team_id THEN
                         -- Home team's xGA when they were home - PENALIZE defense
-                        fpm.past_xg_away / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_away / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Home team's xGA when they were away - BENEFIT defense
-                        fpm.past_xg_home / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                 END as home_team_adjusted_xga,
 
                 -- Away team perspective
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.away_team_id THEN
+                    WHEN apm.past_home_team_id = apm.away_team_id THEN
                         -- Away team was home in this past match - PENALIZE xG, BENEFIT xGA
-                        fpm.past_xg_home * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Away team was away in this past match - BENEFIT xG, PENALIZE xGA
-                        fpm.past_xg_away * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000)) *
+                        apm.past_xg_away * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000)) *
                         CASE WHEN past_league_id != league_id THEN (current_league_avg_goals / GREATEST(past_league_avg_goals, 1.0)) ELSE 1.0 END 
                         ) +
                         (past_league_home_advantage / 2.0)
                 END as away_team_adjusted_xg,
 
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.away_team_id THEN
+                    WHEN apm.past_home_team_id = apm.away_team_id THEN
                         -- Away team's xGA when they were home - PENALIZE defense
-                        fpm.past_xg_away / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_away / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Away team's xGA when they were away - BENEFIT defense
-                        fpm.past_xg_home / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                 END as away_team_adjusted_xga,
 
                 -- Match recency ranking (1 = most recent for this team)
-                ROW_NUMBER() OVER (PARTITION BY fpm.fixture_id, CASE WHEN fpm.past_home_team_id = fpm.home_team_id OR fpm.past_away_team_id = fpm.home_team_id THEN fpm.home_team_id ELSE fpm.away_team_id END ORDER BY fpm.past_date DESC) as match_rank,
+                ROW_NUMBER() OVER (PARTITION BY apm.fixture_id, CASE WHEN apm.past_home_team_id = apm.home_team_id OR apm.past_away_team_id = apm.home_team_id THEN apm.home_team_id ELSE apm.away_team_id END ORDER BY apm.past_date DESC) as match_rank,
                 -- Which team this match belongs to
-                CASE WHEN fpm.past_home_team_id = fpm.home_team_id OR fpm.past_away_team_id = fpm.home_team_id THEN 'home' ELSE 'away' END as team_side
-            FROM filtered_past_matches fpm
+                CASE WHEN apm.past_home_team_id = apm.home_team_id OR apm.past_away_team_id = apm.home_team_id THEN 'home' ELSE 'away' END as team_side
+            FROM all_past_matches apm
         ),
         aggregated_xg AS (
             -- Calculate 16-match rolling window
-            SELECT
+            -- NO default values - if insufficient data, HAVING clause filters out the entire fixture
+             SELECT
                 fixture_id,
                 -- Home team rolling windows averaged (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND((
                     -- 8-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN home_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN home_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN 1 END), 0)) +
                     -- 16-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0)) +
                     -- 32-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN home_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN 1 END), 0), 0)
+                    (SUM(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN home_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN 1 END), 0))
                 ) / 3.0, 2))) as home_xg,
 
                 -- Home team rolling windows xGA averaged (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND((
                     -- 8-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN home_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN home_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 8 THEN 1 END), 0)) +
                     -- 16-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0)) +
                     -- 32-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN home_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN 1 END), 0), 0)
+                    (SUM(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN home_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 32 THEN 1 END), 0))
                 ) / 3.0, 2))) as home_xga,
 
                 -- Away team rolling windows averaged (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND((
                     -- 8-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN away_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN away_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN 1 END), 0)) +
                     -- 16-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0)) +
                     -- 32-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN away_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN 1 END), 0), 0)
+                    (SUM(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN away_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN 1 END), 0))
                 ) / 3.0, 2))) as away_xg,
 
                 -- Away team rolling windows xGA averaged (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND((
                     -- 8-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN away_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN away_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 8 THEN 1 END), 0)) +
                     -- 16-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 0) +
+                    (SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0)) +
                     -- 32-match window
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN away_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN 1 END), 0), 0)
+                    (SUM(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN away_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 32 THEN 1 END), 0))
                 ) / 3.0, 2))) as away_xga
             FROM calculated_adjustments
             GROUP BY fixture_id
-            -- Only include fixtures where both teams have at least 4 past matches
-            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 4 
-               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 4
+            -- Only include fixtures where both teams have at least 5 past matches
+            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 5 
+               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 5
         )
         UPDATE football_stats
         SET
@@ -617,11 +823,14 @@ async function runCalculations() {
 
     -- Function to calculate adjusted rolling market xG and xGA using 16 match rolling window
     CREATE OR REPLACE FUNCTION populate_adjusted_rolling_market_xg_batch(fixture_ids BIGINT[] DEFAULT NULL) RETURNS INTEGER AS $$
-    -- Updated to require at least 4 past fixtures for adjusted rolling calculations
+    -- Updated to require at least 5 past fixtures WITH league-specific filtering
+    -- For League matches: only same-country League matches count toward the 5-match threshold
+    -- For Cup matches: ALL matches count toward the 5-match threshold
     DECLARE
         updated_count INTEGER;
     BEGIN
         -- Single batch update using window functions for maximum performance
+        -- BOTH teams must individually have at least 5 past fixtures (with filtering) to get adjusted rolling calculations
         WITH fixture_data AS (
             -- Get all fixtures that need calculation
             SELECT
@@ -647,9 +856,34 @@ async function runCalculations() {
                   AND fs.league_elo IS NOT NULL AND fs.home_advantage IS NOT NULL
                   AND fs.avg_goals_league IS NOT NULL
         ),
+        team_match_counts AS (
+            -- Count past matches for each team WITH league-specific filtering for the 5-match threshold
+            -- For League matches: only count same-country League matches
+            -- For Cup matches: count ALL matches
+            SELECT
+                fd.fixture_id,
+                fd.home_team_id,
+                fd.away_team_id,
+                COUNT(DISTINCT CASE WHEN pf.home_team_id = fd.home_team_id OR pf.away_team_id = fd.home_team_id THEN pf.id END) as home_team_total_matches,
+                COUNT(DISTINCT CASE WHEN pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id THEN pf.id END) as away_team_total_matches
+            FROM fixture_data fd
+            CROSS JOIN LATERAL (
+                SELECT pf.id, pf.home_team_id, pf.away_team_id
+                FROM football_fixtures pf
+                LEFT JOIN football_leagues pl ON pf.league_id = pl.id
+                WHERE (pf.home_team_id = fd.home_team_id OR pf.away_team_id = fd.home_team_id
+                       OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
+                  AND pf.date < fd.fixture_date
+                  AND pf.date >= fd.fixture_date - INTERVAL '1 year'
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
+                  -- Apply league-specific filtering: Cup matches include all, League matches only same-country League
+                  AND (fd.league_type != 'League' OR (pl.country = fd.league_country AND pl.type = 'League'))
+            ) pf
+            GROUP BY fd.fixture_id, fd.home_team_id, fd.away_team_id
+        ),
         all_past_matches AS (
-            -- Get all past matches for all teams (pre-filtered for efficiency)
-            -- Only include teams with at least 4 past fixtures
+            -- Get past matches for XG calculations (with league-specific filtering)
+            -- Only include fixtures where both teams have at least 5 total past matches
             SELECT
                 fd.fixture_id,
                 fd.home_team_id,
@@ -675,24 +909,25 @@ async function runCalculations() {
                 pms.elo_away as past_elo_away,
                 pms.league_elo as past_league_elo,
                 pms.avg_goals_league as past_league_avg_goals,
-                pms.home_advantage as past_league_home_advantage,
-                -- Count total matches for this team in this fixture
-                COUNT(*) OVER (PARTITION BY fd.fixture_id, CASE WHEN pm.home_team_id = fd.home_team_id OR pm.away_team_id = fd.home_team_id THEN fd.home_team_id ELSE fd.away_team_id END) as team_match_count
+                pms.home_advantage as past_league_home_advantage
             FROM fixture_data fd
-            -- Cross join with all past matches for both home and away teams
+            JOIN team_match_counts tmc ON fd.fixture_id = tmc.fixture_id
+                                       AND tmc.home_team_total_matches >= 5
+                                       AND tmc.away_team_total_matches >= 5
+            -- Cross join with past matches using league-specific filtering
             CROSS JOIN LATERAL (
                 SELECT pf.id, pf.date, pf.league_id, pf.home_team_id, pf.away_team_id, pf.xg_home, pf.xg_away, pf.goals_home, pf.goals_away, pf.market_xg_home, pf.market_xg_away
                 FROM football_fixtures pf
+                LEFT JOIN football_leagues pl ON pf.league_id = pl.id
                 WHERE (pf.home_team_id = fd.home_team_id OR pf.away_team_id = fd.home_team_id
                        OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
                   AND pf.date < fd.fixture_date
                   AND pf.date >= fd.fixture_date - INTERVAL '1 year'
-                  AND pf.status_short = 'FT'
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
                   -- Conditional filtering based on league type
-                  AND (fd.league_type = 'Cup' OR EXISTS (
-                      SELECT 1 FROM football_leagues pl
-                      WHERE pl.id = pf.league_id AND pl.country = fd.league_country AND pl.type = 'League'
-                  ))
+                  -- For League matches: only include past League matches from same country
+                  -- For Cup/other matches: include ALL past matches
+                  AND (fd.league_type != 'League' OR (pl.country = fd.league_country AND pl.type = 'League'))
                 ORDER BY pf.date DESC
                 LIMIT 32
             ) pm
@@ -700,121 +935,117 @@ async function runCalculations() {
             WHERE pms.elo_home IS NOT NULL AND pms.elo_away IS NOT NULL AND pms.league_elo IS NOT NULL
                   AND pms.avg_goals_league IS NOT NULL
         ),
-        -- Filter to only include teams with at least 4 past fixtures
-        filtered_past_matches AS (
-            SELECT * FROM all_past_matches
-            WHERE team_match_count >= 4
-        ),
         calculated_adjustments AS (
             -- Calculate adjusted xG for each past match from both home and away perspectives
             SELECT
-                fpm.fixture_id,
-                fpm.past_match_id,
+                apm.fixture_id,
+                apm.past_match_id,
                 -- Home team perspective
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.home_team_id THEN
+                    WHEN apm.past_home_team_id = apm.home_team_id THEN
                         -- Home team was home in this past match - PENALIZE xG, BENEFIT xGA
-                        fpm.past_xg_home * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Home team was away in this past match - BENEFIT xG, PENALIZE xGA
-                        fpm.past_xg_away * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_away * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
+                        (apm.league_home_advantage / 2.0)
                 END as home_team_adjusted_xg,
 
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.home_team_id THEN
+                    WHEN apm.past_home_team_id = apm.home_team_id THEN
                         -- Home team's xGA when they were home - PENALIZE defense
-                        fpm.past_xg_away / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_away / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Home team's xGA when they were away - BENEFIT defense
-                        fpm.past_xg_home / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                 END as home_team_adjusted_xga,
 
                 -- Away team perspective
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.away_team_id THEN
+                    WHEN apm.past_home_team_id = apm.away_team_id THEN
                         -- Away team was home in this past match - PENALIZE xG, BENEFIT xGA
-                        fpm.past_xg_home * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Away team was away in this past match - BENEFIT xG, PENALIZE xGA
-                        fpm.past_xg_away * (
-                        POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                        (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000)) *
+                        apm.past_xg_away * (
+                        POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                        (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000)) *
                         CASE WHEN past_league_id != league_id THEN (current_league_avg_goals / GREATEST(past_league_avg_goals, 1.0)) ELSE 1.0 END 
                         ) +
                         (past_league_home_advantage / 2.0)
                 END as away_team_adjusted_xg,
 
                 CASE
-                    WHEN fpm.past_home_team_id = fpm.away_team_id THEN
+                    WHEN apm.past_home_team_id = apm.away_team_id THEN
                         -- Away team's xGA when they were home - PENALIZE defense
-                        fpm.past_xg_away / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_home, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_away / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_home, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END +
+                        (apm.league_home_advantage / 2.0)
                     ELSE
                         -- Away team's xGA when they were away - BENEFIT defense
-                        fpm.past_xg_home / (
-                            POWER((GREATEST(fpm.past_league_elo, 1000)::DECIMAL / GREATEST(fpm.current_league_elo, 1000)), 2) *
-                            (GREATEST(fpm.past_elo_away, 1000)::DECIMAL / GREATEST(fpm.past_league_elo, 1000))
-                        ) * CASE WHEN fpm.past_league_id != fpm.league_id THEN (fpm.current_league_avg_goals / GREATEST(fpm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
-                        (fpm.past_league_home_advantage / 2.0)
+                        apm.past_xg_home / (
+                            POWER((GREATEST(apm.past_league_elo, 1000)::DECIMAL / GREATEST(apm.current_league_elo, 1000)), 2) *
+                            (GREATEST(apm.past_elo_away, 1000)::DECIMAL / GREATEST(apm.past_league_elo, 1000))
+                        ) * CASE WHEN apm.past_league_id != apm.league_id THEN (apm.current_league_avg_goals / GREATEST(apm.past_league_avg_goals, 1.0)) ELSE 1.0 END -
+                        (apm.league_home_advantage / 2.0)
                 END as away_team_adjusted_xga,
 
                 -- Match recency ranking (1 = most recent for this team)
-                ROW_NUMBER() OVER (PARTITION BY fpm.fixture_id, CASE WHEN fpm.past_home_team_id = fpm.home_team_id OR fpm.past_away_team_id = fpm.home_team_id THEN fpm.home_team_id ELSE fpm.away_team_id END ORDER BY fpm.past_date DESC) as match_rank,
+                ROW_NUMBER() OVER (PARTITION BY apm.fixture_id, CASE WHEN apm.past_home_team_id = apm.home_team_id OR apm.past_away_team_id = apm.home_team_id THEN apm.home_team_id ELSE apm.away_team_id END ORDER BY apm.past_date DESC) as match_rank,
                 -- Which team this match belongs to
-                CASE WHEN fpm.past_home_team_id = fpm.home_team_id OR fpm.past_away_team_id = fpm.home_team_id THEN 'home' ELSE 'away' END as team_side
-            FROM filtered_past_matches fpm
+                CASE WHEN apm.past_home_team_id = apm.home_team_id OR apm.past_away_team_id = apm.home_team_id THEN 'home' ELSE 'away' END as team_side
+            FROM all_past_matches apm
         ),
         aggregated_xg AS (
             -- Calculate 16-match rolling window
+            -- NO default values - if insufficient data, HAVING clause filters out the entire fixture
             SELECT
                 fixture_id,
                 -- Home team 16-match rolling window (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND(
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0), 0), 2))) as home_xg,
+                    SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0), 2))) as home_xg,
 
                 -- Home team 16-match rolling window xGA (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND(
-                    COALESCE(SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0), 0), 2))) as home_xga,
+                    SUM(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN home_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'home' AND match_rank <= 16 THEN 1 END), 0), 2))) as home_xga,
 
                 -- Away team 16-match rolling window (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND(
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xg END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 0), 2))) as away_xg,
+                    SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xg END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 2))) as away_xg,
 
                 -- Away team 16-match rolling window xGA (capped 0.1 to 4.0)
                 GREATEST(0.1, LEAST(4.0, ROUND(
-                    COALESCE(SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xga END) /
-                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 0), 2))) as away_xga
+                    SUM(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN away_team_adjusted_xga END) /
+                             NULLIF(COUNT(CASE WHEN team_side = 'away' AND match_rank <= 16 THEN 1 END), 0), 2))) as away_xga
             FROM calculated_adjustments
             GROUP BY fixture_id
-            -- Only include fixtures where both teams have at least 4 past matches
-            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 4
-               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 4
+            -- Only include fixtures where both teams have at least 5 past matches
+            HAVING COUNT(CASE WHEN team_side = 'home' THEN 1 END) >= 5
+               AND COUNT(CASE WHEN team_side = 'away' THEN 1 END) >= 5
         )
         UPDATE football_stats
         SET
@@ -919,6 +1150,83 @@ async function runCalculations() {
     }
 
     if (createViews) {
+        // Create football_predictions table if it doesn't exist
+        console.log('📝 Creating football_predictions table if needed...');
+        try {
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS football_predictions (
+                    fixture_id              BIGINT PRIMARY KEY,
+                    home_pred               DECIMAL(5,4),
+                    away_pred               DECIMAL(5,4),
+                    home_adjustment         DECIMAL(5,4),
+                    draw_adjustment         DECIMAL(5,4),
+                    away_adjustment         DECIMAL(5,4),
+                    adjustment_reason       TEXT,
+                    created_at              TIMESTAMP DEFAULT NOW(),
+                    updated_at              TIMESTAMP DEFAULT NOW(),
+
+                    -- Constraints
+                    FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
+                );
+
+                -- Create indexes for football_predictions table
+                CREATE INDEX IF NOT EXISTS idx_football_predictions_fixture_id ON football_predictions (fixture_id);
+                CREATE INDEX IF NOT EXISTS idx_football_predictions_created_at ON football_predictions (created_at);
+            `);
+            console.log('✅ football_predictions table created/verified');
+        } catch (predictionsError) {
+            console.error('❌ Error creating football_predictions table:', predictionsError.message);
+            throw predictionsError;
+        }
+
+        // Create football_stats table if it doesn't exist
+        console.log('📝 Creating football_stats table if needed...');
+        try {
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS football_stats (
+                    fixture_id BIGINT PRIMARY KEY,
+
+                    -- Hours since last match
+                    hours_since_last_match_home INTEGER,
+                    hours_since_last_match_away INTEGER,
+
+                    -- League statistics
+                    avg_goals_league DECIMAL(4,2),
+                    home_advantage DECIMAL(3,2),
+
+                    -- ELO ratings
+                    elo_home INTEGER,
+                    elo_away INTEGER,
+                    league_elo INTEGER,
+
+                    -- Adjusted rolling xG and xGA columns (average of 8, 16, 32 match rolling windows)
+                    adjusted_rolling_xg_home DECIMAL(4,2),
+                    adjusted_rolling_xga_home DECIMAL(4,2),
+                    adjusted_rolling_xg_away DECIMAL(4,2),
+                    adjusted_rolling_xga_away DECIMAL(4,2),
+                    adjusted_rolling_market_xg_home DECIMAL(4,2),
+                    adjusted_rolling_market_xga_home DECIMAL(4,2),
+                    adjusted_rolling_market_xg_away DECIMAL(4,2),
+                    adjusted_rolling_market_xga_away DECIMAL(4,2),
+
+                    -- Metadata
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+
+                    FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
+                );
+
+                -- Create indexes for football_stats table
+                CREATE INDEX IF NOT EXISTS idx_football_stats_fixture_id ON football_stats (fixture_id);
+                CREATE INDEX IF NOT EXISTS idx_football_stats_elos ON football_stats (elo_home, elo_away, league_elo);
+                CREATE INDEX IF NOT EXISTS idx_football_stats_xg ON football_stats (adjusted_rolling_xg_home, adjusted_rolling_xga_home, adjusted_rolling_xg_away, adjusted_rolling_xga_away);
+            `);
+            console.log('✅ football_stats table created/verified');
+        } catch (createError) {
+            console.error('❌ Error creating football_stats table:', createError.message);
+            throw createError;
+        }
+
         // Check if columns exist, if not add them
         console.log('🔍 Checking table structure...');
         try {
@@ -1107,7 +1415,7 @@ async function runCalculations() {
 
                     FROM football_odds fo
                     WHERE fo.fixture_id = p_fixture_id
-                      AND fo.bookie NOT IN ('predictions')
+                      AND fo.bookie NOT IN ('Prediction')
                       AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
                     ON CONFLICT (fixture_id, bookie) DO UPDATE SET
                         payout_x12 = EXCLUDED.payout_x12,
@@ -1122,160 +1430,257 @@ async function runCalculations() {
                 END;
                 $$ LANGUAGE plpgsql;
 
-                -- Function to update fair odds for a fixture
+                -- Function to update fair odds for a fixture (only update when odds are available and valid)
                 CREATE OR REPLACE FUNCTION update_fair_odds_for_fixture(p_fixture_id BIGINT) RETURNS VOID AS $$
                 BEGIN
-                    -- Delete existing records for this fixture
-                    DELETE FROM football_fair_odds WHERE fixture_id = p_fixture_id;
-
-                    -- Insert new calculated fair odds for all bookies for this fixture
+                    -- Insert or update fair odds only when odds data is available and valid
+                    -- This preserves existing fair odds when bookmaker odds become empty/unavailable
                     INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines)
                     SELECT
                         fo.fixture_id,
                         fo.bookie,
                         fo.decimals,
 
-                        -- Fair X12 odds (Margin Proportional to Odds method)
+                        -- Fair X12 odds - uses most recent valid historical odds (looks past 3 odds)
                         CASE
                             WHEN fo.odds_x12 IS NOT NULL THEN
-                                jsonb_build_object(
-                                    'original_x12', (fo.odds_x12->-1->>'x12')::jsonb,
-                                    'fair_x12', (
-                                        SELECT jsonb_agg(
-                                            ROUND(
+                                -- Find most recent valid X12 odds (checking last 3 entries)
+                                (
+                                    SELECT
+                                        CASE
+                                            WHEN valid_odds.x12_array IS NOT NULL THEN
                                                 (
-                                                    3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
-                                                    (
-                                                        3.0 - (
+                                                    SELECT jsonb_agg(
+                                                        ROUND(
                                                             (
-                                                                SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                                                FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
-                                                            ) - 1.0
-                                                        ) * (x12_odds::numeric / POWER(10, fo.decimals))
+                                                                3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
+                                                                (
+                                                                    3.0 - (
+                                                                        (
+                                                                            SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                                            FROM jsonb_array_elements_text(valid_odds.x12_array) elem
+                                                                            WHERE elem::numeric > 0
+                                                                        ) - 1.0
+                                                                    ) * (x12_odds::numeric / POWER(10, fo.decimals))
+                                                                )
+                                                            ) * POWER(10, fo.decimals)
+                                                        )::integer
+                                                        ORDER BY x12_idx
                                                     )
-                                                ) * POWER(10, fo.decimals)
-                                            )::integer
-                                            ORDER BY x12_idx
-                                        )
-                                        FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
-                                        WHERE x12_idx <= 3
-                                    )
+                                                    FROM jsonb_array_elements_text(valid_odds.x12_array) WITH ORDINALITY x12(x12_odds, x12_idx)
+                                                    WHERE x12_idx <= 3 AND x12_odds::numeric > 0
+                                                )
+                                            ELSE NULL
+                                        END
+                                    FROM (
+                                        SELECT
+                                            CASE
+                                                WHEN jsonb_array_length((fo.odds_x12->-1)->'x12') > 0 AND
+                                                     EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem WHERE elem::numeric > 0)
+                                                THEN (fo.odds_x12->-1->>'x12')::jsonb
+                                                WHEN jsonb_array_length((fo.odds_x12->-2)->'x12') > 0 AND
+                                                     EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_x12->-2->>'x12')::jsonb) elem WHERE elem::numeric > 0)
+                                                THEN (fo.odds_x12->-2->>'x12')::jsonb
+                                                WHEN jsonb_array_length((fo.odds_x12->-3)->'x12') > 0 AND
+                                                     EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_x12->-3->>'x12')::jsonb) elem WHERE elem::numeric > 0)
+                                                THEN (fo.odds_x12->-3->>'x12')::jsonb
+                                                ELSE NULL
+                                            END as x12_array
+                                    ) valid_odds
                                 )
                             ELSE NULL
                         END as fair_odds_x12,
 
-                        -- Fair AH odds
+                        -- Fair AH odds - uses most recent valid historical odds (looks past 3 odds)
                         CASE
                             WHEN fo.odds_ah IS NOT NULL THEN
-                                jsonb_build_object(
-                                    'original_ah_h', (fo.odds_ah->-1->>'ah_h')::jsonb,
-                                    'original_ah_a', (fo.odds_ah->-1->>'ah_a')::jsonb,
-                                    'fair_ah_h', (
-                                        SELECT jsonb_agg(
-                                            CASE
-                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
-                                                    ROUND(
-                                                        (
-                                                            2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
-                                                            (
-                                                                2.0 - (
-                                                                    (
-                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                    ) - 1.0
-                                                                ) * (h_odds::numeric / POWER(10, fo.decimals))
-                                                            )
-                                                        ) * POWER(10, fo.decimals)
-                                                    )::integer
-                                                ELSE NULL
-                                            END ORDER BY h_idx
-                                        )
-                                        FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
-                                        JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
-                                        ON h_idx = a_idx
-                                    ),
-                                    'fair_ah_a', (
-                                        SELECT jsonb_agg(
-                                            CASE
-                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
-                                                    ROUND(
-                                                        (
-                                                            2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
-                                                            (
-                                                                2.0 - (
-                                                                    (
-                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                    ) - 1.0
-                                                                ) * (a_odds::numeric / POWER(10, fo.decimals))
-                                                            )
-                                                        ) * POWER(10, fo.decimals)
-                                                    )::integer
-                                                ELSE NULL
-                                            END ORDER BY h_idx
-                                        )
-                                        FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
-                                        JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
-                                        ON h_idx = a_idx
-                                    )
+                                -- Find most recent valid AH odds (checking last 3 entries)
+                                (
+                                    SELECT
+                                        CASE
+                                            WHEN valid_odds.ah_h_array IS NOT NULL AND valid_odds.ah_a_array IS NOT NULL THEN
+                                                jsonb_build_object(
+                                                    'fair_ah_h', (
+                                                        SELECT jsonb_agg(
+                                                            CASE
+                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                    ROUND(
+                                                                        (
+                                                                            2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
+                                                                            (
+                                                                                2.0 - (
+                                                                                    (
+                                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                                    ) - 1.0
+                                                                                ) * (h_odds::numeric / POWER(10, fo.decimals))
+                                                                            )
+                                                                        ) * POWER(10, fo.decimals)
+                                                                    )::integer
+                                                                ELSE NULL
+                                                            END ORDER BY h_idx
+                                                        )
+                                                        FROM jsonb_array_elements_text(valid_odds.ah_h_array) WITH ORDINALITY h(h_odds, h_idx)
+                                                        JOIN jsonb_array_elements_text(valid_odds.ah_a_array) WITH ORDINALITY a(a_odds, a_idx)
+                                                        ON h_idx = a_idx
+                                                    ),
+                                                    'fair_ah_a', (
+                                                        SELECT jsonb_agg(
+                                                            CASE
+                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                    ROUND(
+                                                                        (
+                                                                            2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
+                                                                            (
+                                                                                2.0 - (
+                                                                                    (
+                                                                                        (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                        (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                                    ) - 1.0
+                                                                                ) * (a_odds::numeric / POWER(10, fo.decimals))
+                                                                            )
+                                                                        ) * POWER(10, fo.decimals)
+                                                                    )::integer
+                                                                ELSE NULL
+                                                            END ORDER BY h_idx
+                                                        )
+                                                        FROM jsonb_array_elements_text(valid_odds.ah_h_array) WITH ORDINALITY h(h_odds, h_idx)
+                                                        JOIN jsonb_array_elements_text(valid_odds.ah_a_array) WITH ORDINALITY a(a_odds, a_idx)
+                                                        ON h_idx = a_idx
+                                                    )
+                                                )
+                                            ELSE NULL
+                                        END
+                                    FROM (
+                                            SELECT
+                                                CASE
+                                                    WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-1->>'ah_h')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-2->>'ah_h')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-3->>'ah_h')::jsonb
+                                                    ELSE NULL
+                                                END as ah_h_array,
+                                                CASE
+                                                    WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-1->>'ah_a')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-2->>'ah_a')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-3->>'ah_a')::jsonb
+                                                    ELSE NULL
+                                                END as ah_a_array
+                                    ) valid_odds
                                 )
                             ELSE NULL
                         END as fair_odds_ah,
 
-                        -- Fair OU odds
+                        -- Fair OU odds - uses most recent valid historical odds (looks past 3 odds)
                         CASE
                             WHEN fo.odds_ou IS NOT NULL THEN
-                                jsonb_build_object(
-                                    'original_ou_o', (fo.odds_ou->-1->>'ou_o')::jsonb,
-                                    'original_ou_u', (fo.odds_ou->-1->>'ou_u')::jsonb,
-                                    'fair_ou_o', (
-                                        SELECT jsonb_agg(
-                                            CASE
-                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
-                                                    ROUND(
-                                                        (
-                                                            2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
-                                                            (
-                                                                2.0 - (
-                                                                    (
-                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                    ) - 1.0
-                                                                ) * (o_odds::numeric / POWER(10, fo.decimals))
-                                                            )
-                                                        ) * POWER(10, fo.decimals)
-                                                    )::integer
-                                                ELSE NULL
-                                            END ORDER BY o_idx
-                                        )
-                                        FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
-                                        JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
-                                        ON o_idx = u_idx
-                                    ),
-                                    'fair_ou_u', (
-                                        SELECT jsonb_agg(
-                                            CASE
-                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
-                                                    ROUND(
-                                                        (
-                                                            2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
-                                                            (
-                                                                2.0 - (
-                                                                    (
-                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                    ) - 1.0
-                                                                ) * (u_odds::numeric / POWER(10, fo.decimals))
-                                                            )
-                                                        ) * POWER(10, fo.decimals)
-                                                    )::integer
-                                                ELSE NULL
-                                            END ORDER BY o_idx
-                                        )
-                                        FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
-                                        JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
-                                        ON o_idx = u_idx
-                                    )
+                                -- Find most recent valid OU odds (checking last 3 entries)
+                                (
+                                    SELECT
+                                        CASE
+                                            WHEN valid_odds.ou_o_array IS NOT NULL AND valid_odds.ou_u_array IS NOT NULL THEN
+                                                jsonb_build_object(
+                                                    'fair_ou_o', (
+                                                        SELECT jsonb_agg(
+                                                            CASE
+                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                    ROUND(
+                                                                        (
+                                                                            2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
+                                                                            (
+                                                                                2.0 - (
+                                                                                    (
+                                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                                    ) - 1.0
+                                                                                ) * (o_odds::numeric / POWER(10, fo.decimals))
+                                                                            )
+                                                                        ) * POWER(10, fo.decimals)
+                                                                    )::integer
+                                                                ELSE NULL
+                                                            END ORDER BY o_idx
+                                                        )
+                                                        FROM jsonb_array_elements_text(valid_odds.ou_o_array) WITH ORDINALITY o(o_odds, o_idx)
+                                                        JOIN jsonb_array_elements_text(valid_odds.ou_u_array) WITH ORDINALITY u(u_odds, u_idx)
+                                                        ON o_idx = u_idx
+                                                    ),
+                                                    'fair_ou_u', (
+                                                        SELECT jsonb_agg(
+                                                            CASE
+                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                    ROUND(
+                                                                        (
+                                                                            2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
+                                                                            (
+                                                                                2.0 - (
+                                                                                    (
+                                                                                        (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                        (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                                    ) - 1.0
+                                                                                ) * (u_odds::numeric / POWER(10, fo.decimals))
+                                                                            )
+                                                                        ) * POWER(10, fo.decimals)
+                                                                    )::integer
+                                                                ELSE NULL
+                                                            END ORDER BY o_idx
+                                                        )
+                                                        FROM jsonb_array_elements_text(valid_odds.ou_o_array) WITH ORDINALITY o(o_odds, o_idx)
+                                                        JOIN jsonb_array_elements_text(valid_odds.ou_u_array) WITH ORDINALITY u(u_odds, u_idx)
+                                                        ON o_idx = u_idx
+                                                    )
+                                                )
+                                            ELSE NULL
+                                        END
+                                    FROM (
+                                            SELECT
+                                                CASE
+                                                    WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-1->>'ou_o')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-2->>'ou_o')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-3->>'ou_o')::jsonb
+                                                    ELSE NULL
+                                                END as ou_o_array,
+                                                CASE
+                                                    WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-1->>'ou_u')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-2->>'ou_u')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-3->>'ou_u')::jsonb
+                                                    ELSE NULL
+                                                END as ou_u_array
+                                    ) valid_odds
                                 )
                             ELSE NULL
                         END as fair_odds_ou,
@@ -1285,8 +1690,18 @@ async function runCalculations() {
 
                     FROM football_odds fo
                     WHERE fo.fixture_id = p_fixture_id
-                      AND fo.bookie != 'predictions'
-                      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL);
+                      AND fo.bookie != 'Prediction'
+                      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+                    ON CONFLICT (fixture_id, bookie) DO UPDATE SET
+                        fair_odds_x12 = EXCLUDED.fair_odds_x12,
+                        fair_odds_ah = EXCLUDED.fair_odds_ah,
+                        fair_odds_ou = EXCLUDED.fair_odds_ou,
+                        latest_lines = EXCLUDED.latest_lines,
+                        updated_at = NOW()
+                    WHERE football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12
+                       OR football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah
+                       OR football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou
+                       OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines;
                 END;
                 $$ LANGUAGE plpgsql;
 
@@ -1307,7 +1722,7 @@ async function runCalculations() {
             SELECT DISTINCT f.id as fixture_id
             FROM football_fixtures f
             JOIN football_odds fo ON f.id = fo.fixture_id
-            WHERE fo.bookie != 'predictions'
+            WHERE fo.bookie != 'Prediction'
                     AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
         `);
 
@@ -1331,7 +1746,7 @@ async function runCalculations() {
                             fo.fixture_id,
                             fo.bookie,
                             fo.decimals,
-                                                -- Individual bookie payouts
+                            -- Individual bookie payouts
                             CASE
                                 WHEN fo.odds_x12 IS NOT NULL THEN
                                 ROUND(
@@ -1362,7 +1777,7 @@ async function runCalculations() {
                                                 )::numeric,
                                                 4
                                             )
-                                                                END ORDER BY ah_h.idx
+                                            END ORDER BY ah_h.idx
                                     )
                                         FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY ah_h(elem, idx)
                                         JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY ah_a(elem, idx)
@@ -1386,7 +1801,7 @@ async function runCalculations() {
                                                 )::numeric,
                                                 4
                                             )
-                                                                END ORDER BY ou_o.idx
+                                            END ORDER BY ou_o.idx
                                     )
                                         FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY ou_o(elem, idx)
                                         JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY ou_u(elem, idx)
@@ -1399,7 +1814,7 @@ async function runCalculations() {
                             (fo.lines->-1) as latest_lines
                         FROM football_odds fo
                         WHERE fo.fixture_id = ANY(ARRAY[${placeholders3}]::BIGINT[])
-                          AND fo.bookie != 'predictions'
+                          AND fo.bookie != 'Prediction'
                           AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
                         ON CONFLICT (fixture_id, bookie) DO UPDATE SET
                             payout_x12 = EXCLUDED.payout_x12,
@@ -1431,147 +1846,246 @@ async function runCalculations() {
                             fo.bookie,
                             fo.decimals,
 
-                            -- Fair X12 odds (Margin Proportional to Odds method)
+                            -- Fair X12 odds (Margin Proportional to Odds method) - uses most recent valid odds (looks past 3 odds)
                             CASE
                                 WHEN fo.odds_x12 IS NOT NULL THEN
-                                    jsonb_build_object(
-                                        'original_x12', (fo.odds_x12->-1->>'x12')::jsonb,
-                                        'fair_x12', (
-                                            SELECT jsonb_agg(
-                                                ROUND(
+                                    -- Find most recent valid X12 odds (checking last 3 entries)
+                                    (
+                                        SELECT
+                                            CASE
+                                                WHEN valid_odds.x12_array IS NOT NULL THEN
                                                     (
-                                                        3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
-                                                        (
-                                                            3.0 - (
+                                                        SELECT jsonb_agg(
+                                                            ROUND(
                                                                 (
-                                                                    SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                                                    FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem
-                                                                ) - 1.0
-                                                            ) * (x12_odds::numeric / POWER(10, fo.decimals))
+                                                                    3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
+                                                                    (
+                                                                        3.0 - (
+                                                                            (
+                                                                                SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                                                FROM jsonb_array_elements_text(valid_odds.x12_array) elem
+                                                                                WHERE elem::numeric > 0
+                                                                            ) - 1.0
+                                                                        ) * (x12_odds::numeric / POWER(10, fo.decimals))
+                                                                    )
+                                                                ) * POWER(10, fo.decimals)
+                                                            )::integer
+                                                            ORDER BY x12_idx
                                                         )
-                                                    ) * POWER(10, fo.decimals)
-                                                )::integer
-                                                ORDER BY x12_idx
-                                            )
-                                            FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) WITH ORDINALITY x12(x12_odds, x12_idx)
-                                            WHERE x12_idx <= 3
-                                        )
+                                                        FROM jsonb_array_elements_text(valid_odds.x12_array) WITH ORDINALITY x12(x12_odds, x12_idx)
+                                                        WHERE x12_idx <= 3 AND x12_odds::numeric > 0
+                                                    )
+                                                ELSE NULL
+                                            END
+                                        FROM (
+                                            SELECT
+                                                CASE
+                                                    WHEN jsonb_array_length((fo.odds_x12->-1)->'x12') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_x12->-1->>'x12')::jsonb) elem WHERE elem::numeric > 0)
+                                                    THEN (fo.odds_x12->-1->>'x12')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_x12->-2)->'x12') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_x12->-2->>'x12')::jsonb) elem WHERE elem::numeric > 0)
+                                                    THEN (fo.odds_x12->-2->>'x12')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_x12->-3)->'x12') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_x12->-3->>'x12')::jsonb) elem WHERE elem::numeric > 0)
+                                                    THEN (fo.odds_x12->-3->>'x12')::jsonb
+                                                    ELSE NULL
+                                                END as x12_array
+                                        ) valid_odds
                                     )
                                 ELSE NULL
                             END as fair_odds_x12,
 
-                            -- Fair AH odds
+                            -- Fair AH odds - uses most recent valid historical odds (looks past 3 odds)
                             CASE
                                 WHEN fo.odds_ah IS NOT NULL THEN
-                                    jsonb_build_object(
-                                        'original_ah_h', (fo.odds_ah->-1->>'ah_h')::jsonb,
-                                        'original_ah_a', (fo.odds_ah->-1->>'ah_a')::jsonb,
-                                        'fair_ah_h', (
-                                            SELECT jsonb_agg(
+                                    -- Find most recent valid AH odds (checking last 3 entries)
+                                    (
+                                        SELECT
+                                            CASE
+                                                WHEN valid_odds.ah_h_array IS NOT NULL AND valid_odds.ah_a_array IS NOT NULL THEN
+                                                    jsonb_build_object(
+                                                        'fair_ah_h', (
+                                                            SELECT jsonb_agg(
+                                                                CASE
+                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                        ROUND(
+                                                                            (
+                                                                                2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
+                                                                                (
+                                                                                    2.0 - (
+                                                                                        (
+                                                                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                                        ) - 1.0
+                                                                                    ) * (h_odds::numeric / POWER(10, fo.decimals))
+                                                                                )
+                                                                            ) * POWER(10, fo.decimals)
+                                                                        )::integer
+                                                                    ELSE NULL
+                                                                END ORDER BY h_idx
+                                                            )
+                                                            FROM jsonb_array_elements_text(valid_odds.ah_h_array) WITH ORDINALITY h(h_odds, h_idx)
+                                                            JOIN jsonb_array_elements_text(valid_odds.ah_a_array) WITH ORDINALITY a(a_odds, a_idx)
+                                                            ON h_idx = a_idx
+                                                        ),
+                                                        'fair_ah_a', (
+                                                            SELECT jsonb_agg(
+                                                                CASE
+                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                        ROUND(
+                                                                            (
+                                                                                2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
+                                                                                (
+                                                                                    2.0 - (
+                                                                                        (
+                                                                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
+                                                                                        ) - 1.0
+                                                                                    ) * (a_odds::numeric / POWER(10, fo.decimals))
+                                                                                )
+                                                                            ) * POWER(10, fo.decimals)
+                                                                        )::integer
+                                                                    ELSE NULL
+                                                                END ORDER BY h_idx
+                                                            )
+                                                            FROM jsonb_array_elements_text(valid_odds.ah_h_array) WITH ORDINALITY h(h_odds, h_idx)
+                                                            JOIN jsonb_array_elements_text(valid_odds.ah_a_array) WITH ORDINALITY a(a_odds, a_idx)
+                                                            ON h_idx = a_idx
+                                                        )
+                                                    )
+                                                ELSE NULL
+                                            END
+                                        FROM (
+                                            SELECT
                                                 CASE
-                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
-                                                        ROUND(
-                                                            (
-                                                                2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
-                                                                (
-                                                                    2.0 - (
-                                                                        (
-                                                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                        ) - 1.0
-                                                                    ) * (h_odds::numeric / POWER(10, fo.decimals))
-                                                                )
-                                                            ) * POWER(10, fo.decimals)
-                                                        )::integer
+                                                    WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-1->>'ah_h')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-2->>'ah_h')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-3->>'ah_h')::jsonb
                                                     ELSE NULL
-                                                END ORDER BY h_idx
-                                            )
-                                            FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
-                                            JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
-                                            ON h_idx = a_idx
-                                        ),
-                                        'fair_ah_a', (
-                                            SELECT jsonb_agg(
+                                                END as ah_h_array,
                                                 CASE
-                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
-                                                        ROUND(
-                                                            (
-                                                                2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
-                                                                (
-                                                                    2.0 - (
-                                                                        (
-                                                                            (1.0 / (h_odds::numeric / POWER(10, fo.decimals))) +
-                                                                            (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))
-                                                                        ) - 1.0
-                                                                    ) * (a_odds::numeric / POWER(10, fo.decimals))
-                                                                )
-                                                            ) * POWER(10, fo.decimals)
-                                                        )::integer
+                                                    WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-1->>'ah_a')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-2->>'ah_a')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                    THEN (fo.odds_ah->-3->>'ah_a')::jsonb
                                                     ELSE NULL
-                                                END ORDER BY h_idx
-                                            )
-                                            FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY h(h_odds, h_idx)
-                                            JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY a(a_odds, a_idx)
-                                            ON h_idx = a_idx
-                                        )
+                                                END as ah_a_array
+                                        ) valid_odds
                                     )
                                 ELSE NULL
                             END as fair_odds_ah,
 
-                            -- Fair OU odds
+                            -- Fair OU odds - uses most recent valid historical odds (looks past 3 odds)
                             CASE
                                 WHEN fo.odds_ou IS NOT NULL THEN
-                                    jsonb_build_object(
-                                        'original_ou_o', (fo.odds_ou->-1->>'ou_o')::jsonb,
-                                        'original_ou_u', (fo.odds_ou->-1->>'ou_u')::jsonb,
-                                        'fair_ou_o', (
-                                            SELECT jsonb_agg(
+                                    -- Find most recent valid OU odds (checking last 3 entries)
+                                    (
+                                        SELECT
+                                            CASE
+                                                WHEN valid_odds.ou_o_array IS NOT NULL AND valid_odds.ou_u_array IS NOT NULL THEN
+                                                    jsonb_build_object(
+                                                        'fair_ou_o', (
+                                                            SELECT jsonb_agg(
+                                                                CASE
+                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                        ROUND(
+                                                                            (
+                                                                                2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
+                                                                                (
+                                                                                    2.0 - (
+                                                                                        (
+                                                                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                                        ) - 1.0
+                                                                                    ) * (o_odds::numeric / POWER(10, fo.decimals))
+                                                                                )
+                                                                            ) * POWER(10, fo.decimals)
+                                                                        )::integer
+                                                                    ELSE NULL
+                                                                END ORDER BY o_idx
+                                                            )
+                                                            FROM jsonb_array_elements_text(valid_odds.ou_o_array) WITH ORDINALITY o(o_odds, o_idx)
+                                                            JOIN jsonb_array_elements_text(valid_odds.ou_u_array) WITH ORDINALITY u(u_odds, u_idx)
+                                                            ON o_idx = u_idx
+                                                        ),
+                                                        'fair_ou_u', (
+                                                            SELECT jsonb_agg(
+                                                                CASE
+                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                        ROUND(
+                                                                            (
+                                                                                2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
+                                                                                (
+                                                                                    2.0 - (
+                                                                                        (
+                                                                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
+                                                                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
+                                                                                        ) - 1.0
+                                                                                    ) * (u_odds::numeric / POWER(10, fo.decimals))
+                                                                                )
+                                                                            ) * POWER(10, fo.decimals)
+                                                                        )::integer
+                                                                    ELSE NULL
+                                                                END ORDER BY o_idx
+                                                            )
+                                                            FROM jsonb_array_elements_text(valid_odds.ou_o_array) WITH ORDINALITY o(o_odds, o_idx)
+                                                            JOIN jsonb_array_elements_text(valid_odds.ou_u_array) WITH ORDINALITY u(u_odds, u_idx)
+                                                            ON o_idx = u_idx
+                                                        )
+                                                    )
+                                                ELSE NULL
+                                            END
+                                        FROM (
+                                            SELECT
                                                 CASE
-                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
-                                                        ROUND(
-                                                            (
-                                                                2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
-                                                                (
-                                                                    2.0 - (
-                                                                        (
-                                                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                        ) - 1.0
-                                                                    ) * (o_odds::numeric / POWER(10, fo.decimals))
-                                                                )
-                                                            ) * POWER(10, fo.decimals)
-                                                        )::integer
+                                                    WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-1->>'ou_o')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-2->>'ou_o')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-3->>'ou_o')::jsonb
                                                     ELSE NULL
-                                                END ORDER BY o_idx
-                                            )
-                                            FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
-                                            JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
-                                            ON o_idx = u_idx
-                                        ),
-                                        'fair_ou_u', (
-                                            SELECT jsonb_agg(
+                                                END as ou_o_array,
                                                 CASE
-                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
-                                                        ROUND(
-                                                            (
-                                                                2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
-                                                                (
-                                                                    2.0 - (
-                                                                        (
-                                                                            (1.0 / (o_odds::numeric / POWER(10, fo.decimals))) +
-                                                                            (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))
-                                                                        ) - 1.0
-                                                                    ) * (u_odds::numeric / POWER(10, fo.decimals))
-                                                                )
-                                                            ) * POWER(10, fo.decimals)
-                                                        )::integer
+                                                    WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-1->>'ou_u')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-2->>'ou_u')::jsonb
+                                                    WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                    THEN (fo.odds_ou->-3->>'ou_u')::jsonb
                                                     ELSE NULL
-                                                END ORDER BY o_idx
-                                            )
-                                            FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY o(o_odds, o_idx)
-                                            JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY u(u_odds, u_idx)
-                                            ON o_idx = u_idx
-                                        )
+                                                END as ou_u_array
+                                        ) valid_odds
                                     )
                                 ELSE NULL
                             END as fair_odds_ou,
@@ -1581,7 +2095,7 @@ async function runCalculations() {
 
                         FROM football_odds fo
                         WHERE fo.fixture_id = ANY(ARRAY[${placeholders}]::BIGINT[])
-                          AND fo.bookie != 'predictions'
+                          AND fo.bookie != 'Prediction'
                           AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
                         ON CONFLICT (fixture_id, bookie) DO UPDATE SET
                             fair_odds_x12 = EXCLUDED.fair_odds_x12,
@@ -1594,7 +2108,7 @@ async function runCalculations() {
                            OR football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou
                            OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
                     `, batch);
-    } catch (error) {
+                } catch (error) {
                     console.error(`❌ Error populating fair_odds batch ${Math.floor(i/50) + 1}:`, error.message);
                 }
             }

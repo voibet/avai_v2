@@ -45,33 +45,3 @@ export function startTrainingWorker(
   console.log('[Main] Training process spawned. Check console for progress.');
 }
 
-/**
- * Starts prediction in a separate Node.js process (non-blocking)
- */
-export function startPredictionWorker(
-  predictionData: any[],
-  features: string[]
-): void {
-  console.log('[Main] Spawning separate process for predictions...');
-  spawnMLProcess('predict', { predictionData, features }, () => {
-    console.log('[Main] Prediction process completed');
-  });
-  console.log('[Main] Prediction process spawned. Check console for progress.');
-}
-
-/**
- * Starts test training in a separate Node.js process (non-blocking)
- */
-export function startTestWorker(
-  trainingData: any[],
-  predictionData: any[],
-  features: string[],
-  batchSize?: number,
-  epochs?: number
-): void {
-  console.log('[Main] Spawning separate process for test training...');
-  spawnMLProcess('test', { trainingData, predictionData, features, batchSize, epochs }, () => {
-    console.log('[Main] Test process completed');
-  });
-  console.log('[Main] Test process spawned. Check console for progress.');
-}

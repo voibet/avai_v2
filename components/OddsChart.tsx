@@ -211,7 +211,7 @@ export function OddsChart({
           {title}
         </div>
         <div className="text-xs text-gray-400 truncate">
-          {bookie === 'predictions' ? 'Prediction' : bookie}
+          {bookie === 'Prediction' ? 'Prediction' : bookie}
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-type AdminTab = 'fetch-fixtures' | 'add-leagues';
+type AdminTab = 'fetch-fixtures' | 'add-leagues' | 'test' | 'simulate';
 
 interface Tab {
   id: AdminTab;
@@ -13,7 +13,9 @@ interface TabNavigationProps {
 
 const tabs: Tab[] = [
   { id: 'fetch-fixtures', label: 'Fetch Fixtures', icon: '' },
-  { id: 'add-leagues', label: 'Add Leagues', icon: '' }
+  { id: 'add-leagues', label: 'Add Leagues', icon: '' },
+  { id: 'test', label: 'Test', icon: '' },
+  { id: 'simulate', label: 'Simulate', icon: '' }
 ];
 
 export default function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {

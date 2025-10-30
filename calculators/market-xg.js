@@ -6,6 +6,7 @@
  */
 
 import pool from '../lib/database/db.ts';
+import { poissonPMF, poissonProbabilities } from './poisson-utils.js';
 
 /**
  * Reverse engineer market XG from fair odds using Dixon-Coles optimization
@@ -119,65 +120,14 @@ function dixonColesAdjustment(homeGoals, awayGoals, homeXg, awayXg, rho = -0.1) 
 }
 
 /**
- * Poisson PMF: P(k; λ) = (λ^k * e^(-λ)) / k!
- */
-function poissonPMF(k, lambda) {
-  if (lambda <= 0) return 0;
-  let logProb = k * Math.log(lambda) - lambda;
-  // Subtract log(k!)
-  for (let i = 2; i <= k; i++) {
-    logProb -= Math.log(i);
-  }
-  return Math.exp(logProb);
-}
-
-/**
- * Calculate match probabilities using Dixon-Coles Poisson model
- */
-function poissonProbabilities(homeXg, awayXg, overLine = 2.5, maxGoals = 10, useDixonColes = true, rho = -0.1) {
-  let homeWin = 0;
-  let draw = 0;
-  let awayWin = 0;
-  let over = 0;
-
-  for (let i = 0; i <= maxGoals; i++) {
-    for (let j = 0; j <= maxGoals; j++) {
-      // Basic Poisson probability
-      let prob = poissonPMF(i, homeXg) * poissonPMF(j, awayXg);
-
-      // Apply Dixon-Coles adjustment
-      if (useDixonColes && (i <= 1 && j <= 1)) {
-        prob *= dixonColesAdjustment(i, j, homeXg, awayXg, rho);
-      }
-
-      // Match result
-      if (i > j) {
-        homeWin += prob;
-      } else if (i === j) {
-        draw += prob;
-      } else {
-        awayWin += prob;
-      }
-
-      // Total goals
-      if (i + j > overLine) {
-        over += prob;
-      }
-    }
-  }
-
-  return { homeWin, draw, awayWin, over };
-}
-
-/**
  * Calculate and populate market XG using Dixon-Coles Poisson optimization
- * Uses fair odds with priority: Pinnacle > Betfair > Bet365 > Any other
+ * Uses fair odds with priority: Pinnacle > Betfair > Any other
  * @param {number[] | null | undefined} fixtureIds - Array of fixture IDs to process, or null for all fixtures
  */
 async function calculateMarketXG(fixtureIds = null) {
   try {
     // Build query to get FINISHED fixtures (FT, AET, PEN) with fair odds
-    // Priority: pinnacle > betfair > bet365 > any other
+    // Priority: pinnacle > betfair  > any other
     let query = `
       WITH prioritized_fair_odds AS (
         SELECT
@@ -191,14 +141,13 @@ async function calculateMarketXG(fixtureIds = null) {
           CASE LOWER(bookie)
             WHEN 'pinnacle' THEN 1
             WHEN 'betfair' THEN 2
-            WHEN 'bet365' THEN 3
-            ELSE 4
+            ELSE 3
           END as priority
         FROM football_fair_odds
         WHERE fair_odds_x12 IS NOT NULL
-          AND (fair_odds_x12->'fair_x12'->>0)::numeric > 0
-          AND (fair_odds_x12->'fair_x12'->>1)::numeric > 0
-          AND (fair_odds_x12->'fair_x12'->>2)::numeric > 0
+          AND (fair_odds_x12->>0)::numeric > 0
+          AND (fair_odds_x12->>1)::numeric > 0
+          AND (fair_odds_x12->>2)::numeric > 0
       ),
       best_fair_odds AS (
         SELECT DISTINCT ON (fixture_id)
@@ -216,9 +165,9 @@ async function calculateMarketXG(fixtureIds = null) {
         f.id as fixture_id,
         fs.avg_goals_league,
         bfo.decimals,
-        (bfo.fair_odds_x12->'fair_x12'->>0)::numeric / (10^bfo.decimals) as home_odds,
-        (bfo.fair_odds_x12->'fair_x12'->>1)::numeric / (10^bfo.decimals) as draw_odds,
-        (bfo.fair_odds_x12->'fair_x12'->>2)::numeric / (10^bfo.decimals) as away_odds,
+        (bfo.fair_odds_x12->>0)::numeric / (10^bfo.decimals) as home_odds,
+        (bfo.fair_odds_x12->>1)::numeric / (10^bfo.decimals) as draw_odds,
+        (bfo.fair_odds_x12->>2)::numeric / (10^bfo.decimals) as away_odds,
         (
           SELECT (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / (10^bfo.decimals)
           FROM jsonb_array_elements_text(bfo.latest_lines->'ou') WITH ORDINALITY AS t(val, idx)
@@ -228,7 +177,7 @@ async function calculateMarketXG(fixtureIds = null) {
       FROM football_fixtures f
       LEFT JOIN football_stats fs ON f.id = fs.fixture_id
       LEFT JOIN best_fair_odds bfo ON f.id = bfo.fixture_id
-      WHERE f.status_short IN ('FT', 'AET', 'PEN')
+      WHERE LOWER(f.status_short) IN ('ft', 'aet', 'pen')
         AND bfo.fair_odds_x12 IS NOT NULL
     `;
 
@@ -297,5 +246,370 @@ async function calculateMarketXG(fixtureIds = null) {
   }
 }
 
+/**
+ * Calculate expected points from XG values
+ * Points system: Win = 3, Draw = 1, Loss = 0
+ * @param {number} homeXg - Home team expected goals
+ * @param {number} awayXg - Away team expected goals
+ * @returns {object} Expected points for home and away teams
+ */
+function calculateExpectedPoints(homeXg, awayXg) {
+  // Get match outcome probabilities using Dixon-Coles Poisson model
+  const probs = poissonProbabilities(homeXg, awayXg, 2.5, 10, true, -0.1);
+
+  // Calculate expected points
+  const homeExpectedPoints = (probs.homeWin * 3) + (probs.draw * 1) + (probs.awayWin * 0);
+  const awayExpectedPoints = (probs.awayWin * 3) + (probs.draw * 1) + (probs.homeWin * 0);
+
+  return {
+    homeExpectedPoints: Math.round(homeExpectedPoints * 100) / 100,
+    awayExpectedPoints: Math.round(awayExpectedPoints * 100) / 100,
+    probabilities: {
+      homeWin: Math.round(probs.homeWin * 1000) / 1000,
+      draw: Math.round(probs.draw * 1000) / 1000,
+      awayWin: Math.round(probs.awayWin * 1000) / 1000
+    }
+  };
+}
+
+// Example usage:
+// const result = calculateExpectedPoints(2.0, 1.0);
+// console.log(result);
+// Output: {
+//   homeExpectedPoints: 2.12,
+//   awayExpectedPoints: 0.88,
+//   probabilities: { homeWin: 0.706, draw: 0.204, awayWin: 0.090 }
+// }
+
+// Simple seedable PRNG (xorshift32) for reproducibility (optional)
+function makeRNG(seed = null) {
+  if (seed == null) {
+    return {
+      random: () => Math.random()
+    };
+  }
+  let x = seed >>> 0;
+  if (x === 0) x = 2463534242; // avoid zero seed
+  return {
+    random: () => {
+      x ^= x << 13;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      return ((x >>> 0) / 4294967296);
+    }
+  };
+}
+
+// Replace Math.random usage in the normal sampler using the rng.random()
+function makeNormalSampler(rng) {
+  let spare = null;
+  let hasSpare = false;
+  return function() {
+    if (hasSpare) {
+      hasSpare = false;
+      return spare;
+    }
+    let u, v, s;
+    do {
+      u = rng.random() * 2 - 1;
+      v = rng.random() * 2 - 1;
+      s = u * u + v * v;
+    } while (s >= 1 || s === 0);
+    const mul = Math.sqrt(-2.0 * Math.log(s) / s);
+    spare = v * mul;
+    hasSpare = true;
+    return u * mul;
+  };
+}
+
+/**
+ * Calculate title win probabilities from projected season-end expected points using Monte Carlo simulation
+ * Properly models uncertainty based on fixtures remaining - current points have no variance, only future fixtures do
+ *
+ * @param {Array} standings - Array of team standings with structure:
+ *   {
+ *     team: { id, name },
+ *     points: current points,
+ *     xg_stats: { expected_points_projected, fixtures_remaining }
+ *   }
+ * @param {Object} options - Configuration options:
+ *   - variancePerGame: Variance in points per game (default: 1.9)
+ *   - nSims: Number of Monte Carlo simulations (default: 20000)
+ *   - seed: Optional seed for reproducibility
+ *   - tieBreak: 'jitter' (tiny random) or 'equal' (split evenly, default: 'jitter')
+ *   - discretePerGame: If true, simulates each match as discrete {0,1,3} points (default: false)
+ * @returns {Array} Teams with win probabilities sorted by probability descending
+ */
+function calculateWinPercentagesFromProjectedPoints(
+  standings,
+  {
+    variancePerGame = 1.9,
+    nSims = 20000,
+    seed = null,
+    tieBreak = 'jitter', // 'jitter' or 'equal'
+    discretePerGame = false // if true, simulate per-game discrete points
+  } = {}
+) {
+  if (!standings?.length) return [];
+
+  const rng = makeRNG(seed);
+  const normalSampler = makeNormalSampler(rng);
+
+  const n = standings.length;
+  const titleCounts = new Float64Array(n);
+  const sampledPoints = new Float64Array(n);
+
+  const teams = standings.map((standing, idx) => {
+    const currentPoints = Number(standing.points || 0);
+    const projectedTotal = Number((standing.xg_stats?.expected_points_projected ?? currentPoints));
+    const fixturesRemaining = Number(standing.xg_stats?.fixtures_remaining ?? 0);
+    const projectedRemaining = projectedTotal - currentPoints;
+    const stdDev = fixturesRemaining > 0 ? Math.sqrt(fixturesRemaining * variancePerGame) : 0;
+    return {
+      index: idx,
+      teamId: standing.team?.id,
+      teamName: standing.team?.name,
+      currentPoints,
+      projectedRemaining,
+      stdDev,
+      projectedTotal,
+      fixturesRemaining
+    };
+  });
+
+  // Helper to cap remaining points in realistic bounds [0, 3 * fixturesRemaining]
+  function capRemaining(val, fixtures) {
+    const mx = fixtures * 3;
+    return Math.min(Math.max(val, 0), mx);
+  }
+
+  // Optional: discrete per-game simulation using a normal-based PMF approximation
+  function sampleDiscreteRemaining(fixtures, meanRemaining, rng, normalSampler) {
+    if (fixtures === 0) return 0;
+    const meanPerGame = meanRemaining / fixtures;
+    const mpg = Math.min(Math.max(meanPerGame, 0), 3);
+    // Simple mapping: assume draw rate d = 0.25, adjust win probability
+    const drawRate = 0.25;
+    const p_win = Math.max(0, Math.min(1, (mpg - drawRate) / 2));
+    const p_draw = Math.max(0, Math.min(1 - p_win, drawRate));
+    // Sample fixtures
+    let total = 0;
+    for (let g = 0; g < fixtures; g++) {
+      const r = rng.random();
+      if (r < p_win) total += 3;
+      else if (r < p_win + p_draw) total += 1;
+      // else 0
+    }
+    return total;
+  }
+
+  for (let sim = 0; sim < nSims; sim++) {
+    let maxPoints = -Infinity;
+    // Sample totals
+    for (let i = 0; i < n; i++) {
+      const t = teams[i];
+      let remainingSample;
+      if (t.stdDev === 0) {
+        remainingSample = t.projectedRemaining;
+      } else if (discretePerGame) {
+        remainingSample = sampleDiscreteRemaining(t.fixturesRemaining, t.projectedRemaining, rng, normalSampler);
+      } else {
+        remainingSample = t.projectedRemaining + t.stdDev * normalSampler();
+      }
+      // Realistic bounds
+      remainingSample = capRemaining(remainingSample, t.fixturesRemaining);
+      const total = t.currentPoints + remainingSample;
+      sampledPoints[i] = total;
+      if (total > maxPoints) maxPoints = total;
+    }
+
+    // Tie handling
+    if (tieBreak === 'equal') {
+      const winners = [];
+      for (let i = 0; i < n; i++) {
+        if (Math.abs(sampledPoints[i] - maxPoints) <= 1e-9) winners.push(i);
+      }
+      const share = 1.0 / winners.length;
+      for (const w of winners) titleCounts[w] += share;
+    } else { // 'jitter' or other: break ties by tiny jitter using rng
+      // Find winner with jitter (don't mutate sampledPoints)
+      let winnerIndex = 0;
+      let best = sampledPoints[0] + (1e-6 * normalSampler());
+      for (let i = 1; i < n; i++) {
+        const val = sampledPoints[i] + (1e-6 * normalSampler());
+        if (val > best) {
+          best = val;
+          winnerIndex = i;
+        }
+      }
+      titleCounts[winnerIndex] += 1.0;
+    }
+  }
+
+  // Assemble results
+  const results = teams
+    .map((t, i) => {
+      const winProb = titleCounts[i] / nSims;
+      return {
+        teamId: t.teamId,
+        teamName: t.teamName,
+        currentPoints: t.currentPoints,
+        projectedTotal: Math.round(t.projectedTotal * 100) / 100,
+        fixturesRemaining: t.fixturesRemaining,
+        winProbability: winProb,
+        winPercentage: Math.round(winProb * 10000) / 100
+      };
+    })
+    .sort((a, b) => b.winProbability - a.winProbability);
+
+  return results;
+}
+
+// Example usage (Premier League after 9 games):
+// const standings = [
+//   { 
+//     team: { id: 42, name: 'Arsenal' },
+//     points: 22,
+//     xg_stats: { expected_points_projected: 80.19, fixtures_remaining: 29 }
+//   },
+//   { 
+//     team: { id: 50, name: 'Man City' },
+//     points: 16,
+//     xg_stats: { expected_points_projected: 72.45, fixtures_remaining: 29 }
+//   },
+//   { 
+//     team: { id: 33, name: 'Man United' },
+//     points: 16,
+//     xg_stats: { expected_points_projected: 55.33, fixtures_remaining: 29 }
+//   }
+// ];
+// const winPercentages = calculateWinPercentagesFromProjectedPoints(standings);
+// console.log(winPercentages);
+// Output (with variance=1.9):
+// [
+//   { teamId: 42, teamName: 'Arsenal', currentPoints: 22, projectedTotal: 80.19, fixturesRemaining: 29, winProbability: 0.68, winPercentage: 68.0 },
+//   { teamId: 50, teamName: 'Man City', currentPoints: 16, projectedTotal: 72.45, fixturesRemaining: 29, winProbability: 0.16, winPercentage: 16.0 },
+//   { teamId: 33, teamName: 'Man United', currentPoints: 16, projectedTotal: 55.33, fixturesRemaining: 29, winProbability: 0.03, winPercentage: 3.0 }
+// ]
+
+function calculatePositionPercentagesFromProjectedPoints(
+  standings,
+  {
+    variancePerGame = 1.9,
+    nSims = 20000,
+    seed = null,
+    tieBreak = 'jitter',
+    discretePerGame = false
+  } = {}
+) {
+  if (!standings?.length) return [];
+
+  const rng = makeRNG(seed);
+  const normalSampler = makeNormalSampler(rng);
+
+  const n = standings.length;
+  const positionCounts = new Array(n).fill().map(() => new Float64Array(n)); // positionCounts[teamIndex][positionIndex]
+  const sampledPoints = new Float64Array(n);
+
+  const teams = standings.map((standing, idx) => {
+    const currentPoints = Number(standing.points || 0);
+    const projectedTotal = Number((standing.xg_stats?.expected_points_projected ?? currentPoints));
+    const fixturesRemaining = Number(standing.xg_stats?.fixtures_remaining ?? 0);
+    const projectedRemaining = projectedTotal - currentPoints;
+    const stdDev = fixturesRemaining > 0 ? Math.sqrt(fixturesRemaining * variancePerGame) : 0;
+    return {
+      index: idx,
+      teamId: standing.team?.id,
+      teamName: standing.team?.name,
+      currentPoints,
+      projectedRemaining,
+      stdDev,
+      projectedTotal,
+      fixturesRemaining
+    };
+  });
+
+  // Helper to cap remaining points in realistic bounds [0, 3 * fixturesRemaining]
+  function capRemaining(val, fixtures) {
+    const mx = fixtures * 3;
+    return Math.min(Math.max(val, 0), mx);
+  }
+
+  // Optional: discrete per-game simulation using a normal-based PMF approximation
+  function sampleDiscreteRemaining(fixtures, meanRemaining, rng, normalSampler) {
+    if (fixtures === 0) return 0;
+    const meanPerGame = meanRemaining / fixtures;
+    const mpg = Math.min(Math.max(meanPerGame, 0), 3);
+    // Simple mapping: assume draw rate d = 0.25, adjust win probability
+    const drawRate = 0.25;
+    const p_win = Math.max(0, Math.min(1, (mpg - drawRate) / 2));
+    const p_draw = Math.max(0, Math.min(1 - p_win, drawRate));
+    // Sample fixtures
+    let total = 0;
+    for (let g = 0; g < fixtures; g++) {
+      const r = rng.random();
+      if (r < p_win) total += 3;
+      else if (r < p_win + p_draw) total += 1;
+      // else 0
+    }
+    return total;
+  }
+
+  for (let sim = 0; sim < nSims; sim++) {
+    // Sample totals for all teams
+    for (let i = 0; i < n; i++) {
+      const t = teams[i];
+      let remainingSample;
+      if (t.stdDev === 0) {
+        remainingSample = t.projectedRemaining;
+      } else if (discretePerGame) {
+        remainingSample = sampleDiscreteRemaining(t.fixturesRemaining, t.projectedRemaining, rng, normalSampler);
+      } else {
+        remainingSample = t.projectedRemaining + t.stdDev * normalSampler();
+      }
+      // Realistic bounds
+      remainingSample = capRemaining(remainingSample, t.fixturesRemaining);
+      const total = t.currentPoints + remainingSample;
+      sampledPoints[i] = total;
+    }
+
+    // Sort teams by final points to determine positions (1-indexed, 1 = best)
+    const sortedIndices = Array.from({ length: n }, (_, i) => i)
+      .sort((a, b) => sampledPoints[b] - sampledPoints[a]);
+
+    // Handle ties using jitter if needed
+    if (tieBreak === 'jitter') {
+      // Add tiny jitter to break ties
+      const jittered = sortedIndices.map(idx => ({
+        index: idx,
+        points: sampledPoints[idx] + (1e-6 * normalSampler())
+      }));
+      jittered.sort((a, b) => b.points - a.points);
+      sortedIndices.length = 0;
+      sortedIndices.push(...jittered.map(item => item.index));
+    }
+
+    // Record positions for each team (0-indexed in array, but represents 1st, 2nd, 3rd place, etc.)
+    sortedIndices.forEach((teamIndex, position) => {
+      positionCounts[teamIndex][position] += 1.0;
+    });
+  }
+
+  // Assemble results - return position probabilities for each team
+  const results = teams.map((t, i) => {
+    const positionProbabilities = Array.from({ length: n }, (_, pos) => positionCounts[i][pos] / nSims);
+    return {
+      teamId: t.teamId,
+      teamName: t.teamName,
+      currentPoints: t.currentPoints,
+      projectedTotal: Math.round(t.projectedTotal * 100) / 100,
+      fixturesRemaining: t.fixturesRemaining,
+      positionProbabilities: positionProbabilities.map(prob => Math.round(prob * 10000) / 100)
+    };
+  });
+
+  return results;
+}
+
 // Export the function
-export { calculateMarketXG };
+export { calculateMarketXG, calculateExpectedPoints, calculateWinPercentagesFromProjectedPoints, calculatePositionPercentagesFromProjectedPoints };

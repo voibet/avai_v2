@@ -18,15 +18,9 @@ export function startAutoRefreshScheduler() {
   (global as any)[SCHEDULER_INSTANCE_KEY] = true;
   
   runAutoRefresh();
-  schedulerInterval = setInterval(runAutoRefresh,  6 * 60 * 60 * 1000);
+  schedulerInterval = setInterval(runAutoRefresh,  4 * 60 * 60 * 1000);
 }
 
-export function stopAutoRefreshScheduler() {
-  if (schedulerInterval) {
-    clearInterval(schedulerInterval);
-    schedulerInterval = null;
-  }
-}
 
 async function runAutoRefresh() {
   try {
@@ -34,12 +28,4 @@ async function runAutoRefresh() {
   } catch (error) {
     console.error('Auto-refresh error:', error);
   }
-}
-
-export function getSchedulerStatus() {
-  return {
-    isActive: schedulerInterval !== null,
-    isRunning: isAutoRefreshRunning(),
-    nextRun: schedulerInterval ? new Date(Date.now() + 6 * 60 * 60 * 1000) : null
-  };
 }

@@ -2,187 +2,13 @@
 
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useState, useCallback, useMemo, useEffect } from 'react'
-import { useFixtureLineups, useTeamInjuries, useFixtureStats } from '../../lib/hooks/use-football-data'
+import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches } from '../../lib/hooks/use-football-data'
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
-import DataTable, { Column, CustomFilterProps } from '../../components/ui/data-table'
+import DataTable, { Column } from '../../components/ui/data-table'
 import FixtureEditModal from '../../components/admin/FixtureEditModal'
+import PlayerStatsModal from '../../components/fixtures/PlayerStatsModal'
+import TeamStandingsModal from '../../components/fixtures/TeamStandingsModal'
 import { FixtureOdds } from '../../components/FixtureOdds'
-
-// Separate component for odds ratio filter to avoid hooks violation
-const OddsRatioFilterComponent = ({
-  currentFilters,
-  onFilterChange,
-  onClose,
-  oddsBookies,
-  fairOddsBookies,
-  oddsFilterLoading
-}: CustomFilterProps & {
-  oddsBookies: string[],
-  fairOddsBookies: string[],
-  oddsFilterLoading: boolean
-}) => {
-  const [selectedOddsBookie, setSelectedOddsBookie] = useState('')
-  const [selectedFairOddsBookie, setSelectedFairOddsBookie] = useState('')
-  const [threshold, setThreshold] = useState('')
-  const [maxOdds, setMaxOdds] = useState('')
-
-  // Initialize from current filters
-  useEffect(() => {
-    const oddsRatioFilter = currentFilters['odds_ratio']
-    if (oddsRatioFilter && oddsRatioFilter.size > 0) {
-      const filterValue = Array.from(oddsRatioFilter)[0]
-      const parts = filterValue.split('|')
-      parts.forEach(part => {
-        const [type, value] = part.split(':')
-        if (type === 'bookie') setSelectedOddsBookie(value)
-        else if (type === 'fair') setSelectedFairOddsBookie(value)
-        else if (type === 'threshold') setThreshold(value)
-        else if (type === 'maxOdds') setMaxOdds(value)
-      })
-    } else {
-      // Clear state when no filter is active
-      setSelectedOddsBookie('')
-      setSelectedFairOddsBookie('')
-      setThreshold('')
-      setMaxOdds('')
-    }
-  }, [currentFilters])
-
-  const applyFilter = () => {
-    if (selectedOddsBookie && selectedFairOddsBookie && threshold) {
-      let filterValue = `bookie:${selectedOddsBookie}|fair:${selectedFairOddsBookie}|threshold:${threshold}`
-      if (maxOdds) {
-        filterValue += `|maxOdds:${maxOdds}`
-      }
-      onFilterChange('odds_ratio', filterValue)
-    } else {
-      onFilterChange('odds_ratio', null)
-    }
-    onClose()
-  }
-
-  const clearFilter = () => {
-    setSelectedOddsBookie('')
-    setSelectedFairOddsBookie('')
-    setThreshold('')
-    setMaxOdds('')
-    onFilterChange('odds_ratio', null)
-    onClose()
-  }
-
-  return (
-    <div className="p-3 min-w-80">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-mono text-white font-bold">ODDS RATIO FILTER</span>
-        {currentFilters['odds_ratio']?.size > 0 && (
-          <button
-            onClick={clearFilter}
-            className="text-xs text-red-400 hover:text-red-300 font-mono"
-            style={{ pointerEvents: 'auto' }}
-          >
-            Clear
-          </button>
-        )}
-      </div>
-
-      {oddsFilterLoading ? (
-        <div className="text-center py-4">
-          <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
-          <span className="ml-2 text-gray-400 text-xs font-mono">Loading...</span>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {/* Odds Bookie Selection */}
-          <div>
-            <label className="block text-xs font-mono text-gray-300 mb-1">
-              Bookmaker Odds
-            </label>
-            <select
-              value={selectedOddsBookie}
-              onChange={(e) => setSelectedOddsBookie(e.target.value)}
-              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
-              style={{ pointerEvents: 'auto' }}
-            >
-              <option value="">Select bookmaker...</option>
-              {oddsBookies.map(bookie => (
-                <option key={bookie} value={bookie}>{bookie}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Fair Odds Bookie Selection */}
-          <div>
-            <label className="block text-xs font-mono text-gray-300 mb-1">
-              Fair Odds Source
-            </label>
-            <select
-              value={selectedFairOddsBookie}
-              onChange={(e) => setSelectedFairOddsBookie(e.target.value)}
-              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
-              style={{ pointerEvents: 'auto' }}
-            >
-              <option value="">Select fair odds source...</option>
-              {fairOddsBookies.map(bookie => (
-                <option key={bookie} value={bookie}>{bookie}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Threshold Input */}
-          <div>
-            <label className="block text-xs font-mono text-gray-300 mb-1">
-              Ratio Threshold (&gt; value)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-              placeholder="e.g., 1.01"
-              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
-              style={{ pointerEvents: 'auto' }}
-            />
-          </div>
-
-          {/* Max Odds Input */}
-          <div>
-            <label className="block text-xs font-mono text-gray-300 mb-1">
-              Max Odds (&lt; value, optional)
-            </label>
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={maxOdds}
-              onChange={(e) => setMaxOdds(e.target.value)}
-              placeholder="e.g., 5.0 (leave empty for no limit)"
-              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
-              style={{ pointerEvents: 'auto' }}
-            />
-          </div>
-
-          {/* Apply Button */}
-          <button
-            onClick={applyFilter}
-            disabled={!selectedOddsBookie || !selectedFairOddsBookie || !threshold}
-            className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 text-white text-xs font-mono rounded transition-colors disabled:cursor-not-allowed"
-            style={{ pointerEvents: 'auto' }}
-          >
-            Apply Filter
-          </button>
-
-          {/* Explanation */}
-          <div className="text-xs font-mono text-gray-400 mt-2">
-            Shows fixtures where (bookie odds / fair odds) &gt; threshold
-            {maxOdds && ` and odds &lt; ${maxOdds}`}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 
 export default function FixturesPage() {
   const searchParams = useSearchParams()
@@ -190,7 +16,16 @@ export default function FixturesPage() {
   const [expandedFixtureId, setExpandedFixtureId] = useState<string | null>(null)
   const [editingFixture, setEditingFixture] = useState<any>(null)
   const [lineupsExpanded, setLineupsExpanded] = useState(false)
+  const [standingsExpanded, setStandingsExpanded] = useState(false)
+  const [standingsSortColumn, setStandingsSortColumn] = useState<string>('rank')
+  const [standingsSortDirection, setStandingsSortDirection] = useState<'asc' | 'desc'>('asc')
   const [searchTerm, setSearchTerm] = useState('')
+  const [selectedPlayer, setSelectedPlayer] = useState<{ id: number; name: string; teamId?: string; leagueId?: string } | null>(null)
+  const [selectedTeamStandings, setSelectedTeamStandings] = useState<{
+    team: { id: number; name: string; logo: string };
+    descriptionPercentages: { [description: string]: number };
+    winPercentage: number | null;
+  } | null>(null)
 
   // Fetch teams and leagues data for search
   const { teams, leagues, loading: searchDataLoading } = useFootballSearchData()
@@ -216,23 +51,6 @@ export default function FixturesPage() {
       }
     })
 
-    // Odds/fair odds filter parameters
-    const oddsBookie = searchParams.get('odds_bookie')
-    const fairOddsBookie = searchParams.get('fair_odds_bookie')
-    const oddsRatioThreshold = searchParams.get('odds_ratio_threshold')
-    const maxOddsParam = searchParams.get('max_odds')
-
-    if (oddsBookie || fairOddsBookie || oddsRatioThreshold) {
-      // Create a special filter for odds ratio comparison
-      const oddsRatioFilter = []
-      if (oddsBookie) oddsRatioFilter.push(`bookie:${oddsBookie}`)
-      if (fairOddsBookie) oddsRatioFilter.push(`fair:${fairOddsBookie}`)
-      if (oddsRatioThreshold) oddsRatioFilter.push(`threshold:${oddsRatioThreshold}`)
-      if (maxOddsParam) oddsRatioFilter.push(`maxOdds:${maxOddsParam}`)
-      if (oddsRatioFilter.length > 0) {
-        filters['odds_ratio'] = new Set([oddsRatioFilter.join('|')])
-      }
-    }
 
     return filters
   }, [searchParams])
@@ -251,6 +69,9 @@ export default function FixturesPage() {
   // Only fetch lineups when the lineups section is expanded
   const { data: lineupsData, loading: lineupsLoading, error: lineupsError } = useFixtureLineups(lineupsExpanded ? expandedFixtureId : null)
 
+  // Fetch coaches when lineups are expanded
+  const { data: coachesData, loading: coachesLoading, error: coachesError } = useFixtureCoaches(lineupsExpanded ? expandedFixtureId : null)
+
   // Store current fixture data from expanded row
   const [currentFixtureData, setCurrentFixtureData] = useState<any>(null)
   const homeTeamId = currentFixtureData ? currentFixtureData.home_team_id?.toString() : null
@@ -262,6 +83,12 @@ export default function FixturesPage() {
 
   // Fetch stats for the fixture
   const { data: statsData, loading: statsLoading, error: statsError } = useFixtureStats(expandedFixtureId)
+
+  // Only fetch standings when the standings section is expanded and we have fixture data
+  const { data: standingsData, loading: standingsLoading, error: standingsError } = useLeagueStandings(
+    standingsExpanded && currentFixtureData ? currentFixtureData.league_id?.toString() : null,
+    standingsExpanded && currentFixtureData ? currentFixtureData.season?.toString() : null
+  )
 
   const formatDate = useCallback((dateString: string) => {
     const date = new Date(dateString);
@@ -299,49 +126,78 @@ export default function FixturesPage() {
       return 'text-orange-400';
     }
     if (status.startsWith('WAS')) {
-      return 'text-gray-400';
+      return 'text-gray-500';
     }
     return injury.isThisMatch ? 'text-red-400' : 'text-orange-400';
   }, [formatInjuryTiming])
 
-  const handleEditFixture = useCallback((fixture: any) => {
-    setEditingFixture(fixture)
-  }, [])
+  const getRankDividers = useCallback((descriptions: Record<string, Array<{ description: string; ranks: number[] }>>) => {
+    // Flatten all description data
+    const allDescriptions: Array<{ description: string; ranks: number[] }> = [];
+    Object.values(descriptions).forEach(group => {
+      allDescriptions.push(...group);
+    });
 
-  // State for odds filter dropdown values
-  const [oddsBookies, setOddsBookies] = useState<string[]>([])
-  const [fairOddsBookies, setFairOddsBookies] = useState<string[]>([])
-  const [oddsFilterLoading, setOddsFilterLoading] = useState(false)
+    // Find where description boundaries are (lines should be between different descriptions)
+    const allRanks = new Set<number>();
+    allDescriptions.forEach(desc => {
+      desc.ranks.forEach(rank => allRanks.add(rank));
+    });
 
-  // Load odds filter values
-  useEffect(() => {
-    const loadFilterValues = async () => {
-      setOddsFilterLoading(true)
-      try {
-        const [oddsResponse, fairOddsResponse] = await Promise.all([
-          fetch('/api/fixtures/filter-values?field=odds_bookies'),
-          fetch('/api/fixtures/filter-values?field=fair_odds_bookies')
-        ])
+    const sortedRanks = Array.from(allRanks).sort((a, b) => a - b);
+    const dividers = new Set<number>();
 
-        if (oddsResponse.ok) {
-          const oddsData = await oddsResponse.json()
-          setOddsBookies(oddsData.values || [])
-        }
+    // For each rank, check if the next rank has a different description
+    for (let i = 0; i < sortedRanks.length - 1; i++) {
+      const currentRank = sortedRanks[i];
+      const nextRank = sortedRanks[i + 1];
 
-        if (fairOddsResponse.ok) {
-          const fairOddsData = await fairOddsResponse.json()
-          setFairOddsBookies(fairOddsData.values || [])
-        }
-      } catch (error) {
-        console.error('Failed to load odds filter values:', error)
-      } finally {
-        setOddsFilterLoading(false)
+      // Find descriptions for current and next ranks
+      const currentDesc = allDescriptions.find(desc => desc.ranks.includes(currentRank))?.description;
+      const nextDesc = allDescriptions.find(desc => desc.ranks.includes(nextRank))?.description;
+
+      // If descriptions are different, add a divider after current rank
+      if (currentDesc && nextDesc && currentDesc !== nextDesc) {
+        dividers.add(currentRank);
       }
     }
 
-    loadFilterValues()
+    return dividers;
   }, [])
 
+  const getRankExplanations = useCallback((descriptions: Record<string, Array<{ description: string; ranks: number[] }>>) => {
+    // Flatten all description data
+    const allDescriptions: Array<{ description: string; ranks: number[] }> = [];
+    Object.values(descriptions).forEach(group => {
+      allDescriptions.push(...group);
+    });
+
+    const explanations: string[] = [];
+
+    // Group descriptions and collect all ranks for each
+    const descMap = new Map<string, number[]>();
+    allDescriptions.forEach(desc => {
+      const key = desc.description;
+      if (!descMap.has(key)) {
+        descMap.set(key, []);
+      }
+      descMap.get(key)!.push(...desc.ranks);
+    });
+
+    // Create explanations for each unique description
+    descMap.forEach((ranks, description) => {
+      const uniqueRanks = Array.from(new Set(ranks)).sort((a, b) => a - b);
+      if (uniqueRanks.length > 0) {
+        explanations.push(`Positions ${uniqueRanks.join(', ')}: ${description}`);
+      }
+    });
+
+    return explanations;
+  }, [])
+
+  const handleEditFixture = useCallback((fixture: any) => {
+    setEditingFixture(fixture)
+  }, [])
 
   // Column definitions for fixtures table
   const fixturesColumns = useMemo<Column<any>[]>(() => [
@@ -352,7 +208,7 @@ export default function FixturesPage() {
       sortType: 'string',
       sortKey: 'home_team_name',
       render: (fixture) => (
-        <div className="truncate text-white">
+        <div className="truncate text-white font-mono">
           {fixture.home_team_name}
         </div>
       )
@@ -364,7 +220,7 @@ export default function FixturesPage() {
       sortType: 'string',
       sortKey: 'away_team_name',
       render: (fixture) => (
-        <div className="truncate text-white">
+        <div className="truncate text-white font-mono">
           {fixture.away_team_name}
         </div>
       )
@@ -376,7 +232,7 @@ export default function FixturesPage() {
       sortType: 'string',
       sortKey: 'league_name',
       render: (fixture) => (
-        <div className="truncate text-gray-500 text-xs">
+        <div className="truncate text-gray-600 text-xs font-mono">
           {fixture.league_name} ({fixture.league_country})
         </div>
       )
@@ -388,7 +244,7 @@ export default function FixturesPage() {
       sortType: 'number',
       sortKey: 'season',
       render: (fixture) => (
-        <div className="text-gray-400 text-xs">
+        <div className="text-gray-500 text-xs font-mono">
           {fixture.season}
         </div>
       )
@@ -422,11 +278,11 @@ export default function FixturesPage() {
       render: (fixture) => (
         <div className="flex items-center">
           {fixture.goals_home !== null && fixture.goals_away !== null ? (
-            <span className="text-gray-300 font-bold">
+            <span className="text-gray-400 font-bold font-mono">
               {fixture.goals_home}-{fixture.goals_away}
             </span>
           ) : (
-            <span className="text-gray-500">-</span>
+            <span className="text-gray-600 font-mono">-</span>
           )}
         </div>
       )
@@ -449,11 +305,11 @@ export default function FixturesPage() {
         <div className="flex items-center">
           {fixture.xg_home !== null && fixture.xg_home !== undefined &&
             fixture.xg_away !== null && fixture.xg_away !== undefined ? (
-            <span className="text-gray-300 font-bold">
+            <span className="text-gray-300 font-bold font-mono">
               {parseFloat(fixture.xg_home.toString()).toFixed(2)}-{parseFloat(fixture.xg_away.toString()).toFixed(2)}
             </span>
           ) : (
-            <span className="text-gray-500">-</span>
+            <span className="text-gray-500 font-mono">-</span>
           )}
         </div>
       )
@@ -476,11 +332,11 @@ export default function FixturesPage() {
         <div className="flex items-center">
           {fixture.market_xg_home !== null && fixture.market_xg_home !== undefined &&
             fixture.market_xg_away !== null && fixture.market_xg_away !== undefined ? (
-            <span className="text-gray-300 font-bold">
+            <span className="text-gray-300 font-bold font-mono">
               {parseFloat(fixture.market_xg_home.toString()).toFixed(2)}-{parseFloat(fixture.market_xg_away.toString()).toFixed(2)}
             </span>
           ) : (
-            <span className="text-gray-500">-</span>
+            <span className="text-gray-500 font-mono">-</span>
           )}
         </div>
       )
@@ -494,10 +350,10 @@ export default function FixturesPage() {
       sortKey: 'status_short',
       render: (fixture) => (
         <span className={`px-1 py-0.5 text-xs font-mono rounded ${
-          fixture.status_short === 'FT' ? 'bg-green-900/50 text-green-400' :
-          fixture.status_short === 'LIVE' ? 'bg-red-900/50 text-red-400' :
-          fixture.status_short === 'HT' ? 'bg-blue-900/50 text-blue-400' :
-          'bg-gray-800 text-gray-500'
+          fixture.status_short === 'FT' ? 'bg-green-900/50 text-green-400 font-mono' :
+          fixture.status_short === 'LIVE' ? 'bg-red-900/50 text-red-400 font-mono' :
+          fixture.status_short === 'HT' ? 'bg-blue-900/50 text-blue-400 font-mono' :
+          'bg-gray-900 text-gray-600 font-mono'
         }`}>
           {fixture.status_short || 'SCH'}
         </span>
@@ -511,107 +367,9 @@ export default function FixturesPage() {
       sortType: 'date',
       sortKey: 'date',
       render: (fixture) => (
-        <div className="text-gray-400 text-xs">
+        <div className="text-gray-400 text-xs font-mono">
           {formatDate(fixture.date)}
         </div>
-      )
-    },
-    {
-      key: 'odds_ratio', // Special filter column for odds/fair odds ratio
-      header: 'ODDS RATIO',
-      span: 1.5,
-      sortable: false,
-      filterable: true,
-      render: (fixture) => {
-        // Display odds ratios if available (when odds ratio filter is active)
-        // Get filter values from search params
-        const maxOddsFilter = searchParams.get('max_odds');
-        const maxOddsLimit = maxOddsFilter ? parseFloat(maxOddsFilter) : null;
-        const thresholdFilter = searchParams.get('odds_ratio_threshold');
-        const thresholdLimit = thresholdFilter ? parseFloat(thresholdFilter) : null;
-
-        let maxRatio = 0;
-        let bestOpportunity = '';
-
-        // Collect X12 ratios
-        if (fixture.odds_ratios_x12 && Array.isArray(fixture.odds_ratios_x12)) {
-          const outcomes = ['H', 'D', 'A'];
-          fixture.odds_ratios_x12.forEach((ratioObj: any, index: number) => {
-            // Only consider this ratio if it's valid, above threshold (if set), and within max odds limit (if set)
-            if (ratioObj?.ratio > 0 && ratioObj.ratio > maxRatio) {
-              const aboveThreshold = thresholdLimit === null || ratioObj.ratio >= thresholdLimit;
-              const underMaxOdds = maxOddsLimit === null || ratioObj.odds <= maxOddsLimit;
-              if (aboveThreshold && underMaxOdds) {
-                maxRatio = ratioObj.ratio;
-                bestOpportunity = `${ratioObj.ratio.toFixed(3)} x12 ${outcomes[index]} @ ${ratioObj.odds}`;
-              }
-            }
-          });
-        }
-
-        // Collect OU ratios
-        if (fixture.odds_ratios_ou && Array.isArray(fixture.odds_ratios_ou)) {
-          fixture.odds_ratios_ou.forEach((lineRatio: any) => {
-            if (lineRatio?.over_ratio?.ratio > 0 && lineRatio.over_ratio.ratio > maxRatio) {
-              const aboveThreshold = thresholdLimit === null || lineRatio.over_ratio.ratio >= thresholdLimit;
-              const underMaxOdds = maxOddsLimit === null || lineRatio.over_ratio.odds <= maxOddsLimit;
-              if (aboveThreshold && underMaxOdds) {
-                maxRatio = lineRatio.over_ratio.ratio;
-                bestOpportunity = `${lineRatio.over_ratio.ratio.toFixed(3)} OU O ${lineRatio.line} @ ${lineRatio.over_ratio.odds}`;
-              }
-            }
-            if (lineRatio?.under_ratio?.ratio > 0 && lineRatio.under_ratio.ratio > maxRatio) {
-              const aboveThreshold = thresholdLimit === null || lineRatio.under_ratio.ratio >= thresholdLimit;
-              const underMaxOdds = maxOddsLimit === null || lineRatio.under_ratio.odds <= maxOddsLimit;
-              if (aboveThreshold && underMaxOdds) {
-                maxRatio = lineRatio.under_ratio.ratio;
-                bestOpportunity = `${lineRatio.under_ratio.ratio.toFixed(3)} OU U ${lineRatio.line} @ ${lineRatio.under_ratio.odds}`;
-              }
-            }
-          });
-        }
-
-        // Collect AH ratios
-        if (fixture.odds_ratios_ah && Array.isArray(fixture.odds_ratios_ah)) {
-          fixture.odds_ratios_ah.forEach((lineRatio: any) => {
-            if (lineRatio?.home_ratio?.ratio > 0 && lineRatio.home_ratio.ratio > maxRatio) {
-              const aboveThreshold = thresholdLimit === null || lineRatio.home_ratio.ratio >= thresholdLimit;
-              const underMaxOdds = maxOddsLimit === null || lineRatio.home_ratio.odds <= maxOddsLimit;
-              if (aboveThreshold && underMaxOdds) {
-                maxRatio = lineRatio.home_ratio.ratio;
-                const lineStr = lineRatio.line > 0 ? `+${lineRatio.line}` : lineRatio.line;
-                bestOpportunity = `${lineRatio.home_ratio.ratio.toFixed(3)} AH H ${lineStr} @ ${lineRatio.home_ratio.odds}`;
-              }
-            }
-            if (lineRatio?.away_ratio?.ratio > 0 && lineRatio.away_ratio.ratio > maxRatio) {
-              const aboveThreshold = thresholdLimit === null || lineRatio.away_ratio.ratio >= thresholdLimit;
-              const underMaxOdds = maxOddsLimit === null || lineRatio.away_ratio.odds <= maxOddsLimit;
-              if (aboveThreshold && underMaxOdds) {
-                maxRatio = lineRatio.away_ratio.ratio;
-                const lineStr = lineRatio.line > 0 ? `+${lineRatio.line}` : lineRatio.line;
-                bestOpportunity = `${lineRatio.away_ratio.ratio.toFixed(3)} AH A ${lineStr} @ ${lineRatio.away_ratio.odds}`;
-              }
-            }
-          });
-        }
-
-        if (maxRatio > 0) {
-          return (
-            <div className="text-gray-300 font-bold text-xs">
-              {bestOpportunity}
-            </div>
-          );
-        }
-
-        return <span className="text-gray-500">-</span>;
-      },
-      customFilterRenderer: (props: CustomFilterProps) => (
-        <OddsRatioFilterComponent
-          {...props}
-          oddsBookies={oddsBookies}
-          fairOddsBookies={fairOddsBookies}
-          oddsFilterLoading={oddsFilterLoading}
-        />
       )
     },
     {
@@ -626,7 +384,7 @@ export default function FixturesPage() {
             e.stopPropagation();
             handleEditFixture(fixture);
           }}
-          className="p-1 text-gray-400 hover:text-blue-400 hover:bg-gray-700 rounded transition-colors"
+          className="p-1 text-gray-500 hover:text-blue-400 hover:bg-gray-800 rounded transition-colors"
           title="Edit fixture"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -636,7 +394,7 @@ export default function FixturesPage() {
         </button>
       )
     }
-  ], [handleEditFixture, formatDate, oddsBookies, fairOddsBookies, oddsFilterLoading])
+  ], [handleEditFixture, formatDate])
 
   const handleCloseEditModal = () => {
     setEditingFixture(null)
@@ -658,34 +416,10 @@ export default function FixturesPage() {
   const handleFilterChange = useCallback((columnKey: string, value: string | null) => {
     const params = new URLSearchParams(searchParams.toString())
 
-    if (columnKey === 'odds_ratio') {
-      // Handle special odds ratio filter
-      if (value) {
-        const parts = value.split('|')
-        parts.forEach(part => {
-          const [type, val] = part.split(':')
-          if (type === 'bookie') {
-            params.set('odds_bookie', val)
-          } else if (type === 'fair') {
-            params.set('fair_odds_bookie', val)
-          } else if (type === 'threshold') {
-            params.set('odds_ratio_threshold', val)
-          } else if (type === 'maxOdds') {
-            params.set('max_odds', val)
-          }
-        })
-      } else {
-        params.delete('odds_bookie')
-        params.delete('fair_odds_bookie')
-        params.delete('odds_ratio_threshold')
-        params.delete('max_odds')
-      }
+    if (value) {
+      params.set(columnKey, value)
     } else {
-      if (value) {
-        params.set(columnKey, value)
-      } else {
-        params.delete(columnKey)
-      }
+      params.delete(columnKey)
     }
 
     // Reset to page 1 when filters change
@@ -752,6 +486,7 @@ export default function FixturesPage() {
   const handleClearSearch = useCallback(() => {
     setSearchTerm('')
     const params = new URLSearchParams(searchParams.toString())
+
     params.delete('search')
     params.set('page', '1')
     router.push(`/fixtures?${params.toString()}`)
@@ -759,22 +494,22 @@ export default function FixturesPage() {
 
 
   const renderLineupsSection = useCallback((fixture: any) => {
-    if (lineupsLoading) {
+    if (lineupsLoading || coachesLoading) {
       return (
         <div className="px-2 py-4">
           <div className="text-center py-4">
             <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-green-400"></div>
-            <span className="ml-2 text-gray-400 text-sm font-mono">Loading lineups...</span>
+            <span className="ml-2 text-gray-500 text-sm font-mono">Loading lineups...</span>
           </div>
         </div>
       );
     }
 
-    if (lineupsError) {
+    if (lineupsError || coachesError) {
       return (
         <div className="px-2 py-4">
           <div className="text-center py-4">
-            <span className="text-red-400 text-sm font-mono">Failed to load lineups: {lineupsError}</span>
+            <span className="text-red-400 text-sm font-mono">Failed to load lineups: {lineupsError || coachesError}</span>
           </div>
         </div>
       );
@@ -784,13 +519,14 @@ export default function FixturesPage() {
       return (
         <div className="px-2 py-4">
           <div className="text-center py-4">
-            <span className="text-gray-500 text-sm font-mono">No lineups available</span>
+            <span className="text-gray-600 text-sm font-mono">No lineups available</span>
           </div>
         </div>
       );
     }
 
     const { home, away } = lineupsData;
+    const { home: homeCoach, away: awayCoach } = coachesData || { home: null, away: null };
 
     return (
       <div className="px-2 py-2">
@@ -810,6 +546,80 @@ export default function FixturesPage() {
             </div>
           </div>
 
+        {/* Coaches Section */}
+        <div className="mb-2">
+          <h4 className="text-xs font-bold text-gray-400 font-mono mb-1">COACHES</h4>
+          <div className="flex gap-2">
+            {/* Home Coach */}
+            <div className="flex-1">
+              {homeCoach ? (
+                <div className="flex items-center gap-1.5 p-1.5 bg-gray-800 rounded border border-gray-700">
+                  <img
+                    src={homeCoach.photo}
+                    alt={homeCoach.name}
+                    className="w-6 h-6 rounded-full object-cover"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-gray-100 font-bold font-mono text-xs truncate">
+                      {homeCoach.name}
+                    </div>
+                    <div className="text-gray-400 text-xs font-mono">
+                      Nationality: {homeCoach.nationality}
+                      {homeCoach.careerStartDate && (
+                        <span className="ml-5">
+                          Since: {new Date(homeCoach.careerStartDate).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-1 text-gray-500 text-xs font-mono">
+                  No coach info available
+                </div>
+              )}
+            </div>
+
+            {/* Away Coach */}
+            <div className="flex-1">
+              {awayCoach ? (
+                <div className="flex items-center gap-1.5 p-1.5 bg-gray-800 rounded border border-gray-700">
+                  <img
+                    src={awayCoach.photo}
+                    alt={awayCoach.name}
+                    className="w-6 h-6 rounded-full object-cover"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-gray-100 font-bold font-mono text-xs truncate">
+                      {awayCoach.name}
+                    </div>
+                    <div className="text-gray-400 text-xs font-mono">
+                      Nationality: {awayCoach.nationality}
+                      {awayCoach.careerStartDate && (
+                        <span className="ml-5">
+                          Since: {new Date(awayCoach.careerStartDate).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-1 text-gray-500 text-xs font-mono">
+                  No coach info available
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Side by Side Tables */}
         <div className="flex gap-4">
           {/* Home Team Lineup */}
@@ -828,7 +638,12 @@ export default function FixturesPage() {
                 {home.startXI.map((player) => (
                   <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                    <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
+                    <div 
+                      className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                      onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                    >
+                      {player.name}
+                    </div>
                     <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
                     <div className="col-span-2 text-gray-500 text-center">{player.grid}</div>
                   </div>
@@ -846,7 +661,12 @@ export default function FixturesPage() {
                   {home.substitutes.map((player) => (
                     <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-700 text-xs font-mono">
                       <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                      <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
+                      <div 
+                        className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                        onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                      >
+                        {player.name}
+                      </div>
                       <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
                       <div className="col-span-2 text-gray-500 text-center">{player.grid}</div>
                     </div>
@@ -875,7 +695,12 @@ export default function FixturesPage() {
                 {away.startXI.map((player) => (
                   <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                    <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
+                    <div 
+                      className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                      onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                    >
+                      {player.name}
+                    </div>
                     <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
                     <div className="col-span-2 text-gray-500 text-center">{player.grid}</div>
                   </div>
@@ -893,7 +718,12 @@ export default function FixturesPage() {
                   {away.substitutes.map((player) => (
                     <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-700 text-xs font-mono">
                       <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                      <div className="col-span-4 text-gray-100 font-bold truncate">{player.name}</div>
+                      <div 
+                        className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                        onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                      >
+                        {player.name}
+                      </div>
                       <div className="col-span-2 text-gray-400 text-center">{player.position}</div>
                       <div className="col-span-2 text-gray-500 text-center">{player.grid}</div>
                     </div>
@@ -905,7 +735,7 @@ export default function FixturesPage() {
         </div>
       </div>
     );
-  }, [lineupsLoading, lineupsError, lineupsData]);
+  }, [lineupsLoading, lineupsError, lineupsData, coachesLoading, coachesError, coachesData]);
 
   const renderInjuriesSection = useCallback((fixture: any) => {
     return (
@@ -955,7 +785,12 @@ export default function FixturesPage() {
                   return !(status.startsWith('WAS') && injury.reason === 'Red Card');
                 }).map((injury) => (
                   <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div className="col-span-3 text-white font-bold truncate">{injury.player.name}</div>
+                    <div 
+                      className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                      onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                    >
+                      {injury.player.name}
+                    </div>
                     <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
                       {injury.reason}
                     </div>
@@ -1016,7 +851,12 @@ export default function FixturesPage() {
                   return !(status.startsWith('WAS') && injury.reason === 'Red Card');
                 }).map((injury) => (
                   <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div className="col-span-3 text-white font-bold truncate">{injury.player.name}</div>
+                    <div 
+                      className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                      onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                    >
+                      {injury.player.name}
+                    </div>
                     <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
                       {injury.reason}
                     </div>
@@ -1050,7 +890,7 @@ export default function FixturesPage() {
   }, [homeInjuriesLoading, homeInjuriesError, homeInjuriesData, awayInjuriesLoading, awayInjuriesError, awayInjuriesData, formatInjuryTiming]);
 
   const renderOddsSection = useCallback((fixture: any) => {
-    return <FixtureOdds fixtureId={fixture.id} fixture={fixture} />;
+    return <FixtureOdds key={`odds-${fixture.id}`} fixtureId={fixture.id} fixture={fixture} />;
   }, []);
 
   const renderStatsSection = useCallback((fixture: any) => {
@@ -1087,144 +927,564 @@ export default function FixturesPage() {
 
     const stats = statsData.stats;
 
-    return (
-      <div className="px-2 py-2">
-        {/* Stats Table */}
-        <div className="px-1 py-1">
-          {/* Header */}
-          <div className="grid grid-cols-13 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-            <div className="col-span-4 text-gray-400">STATISTICS</div>
-            <div className="col-span-3 text-gray-400 text-center">HOME</div>
-            <div className="col-span-3 text-gray-400 text-center">AWAY</div>
-            <div className="col-span-3 text-gray-400">INFO</div>
-          </div>
+    // First row stats
+    const firstRowStats = [
+      {
+        id: 'elo_rating',
+        label: 'Elo Rating',
+        home: stats.elo_home?.toString() || '-',
+        away: stats.elo_away?.toString() || '-',
+        info: '',
+        show: true
+      },
+      {
+        id: 'avg_goals_league',
+        label: 'Avg Goals',
+        home: '',
+        away: '',
+        info: stats.avg_goals_league?.toString() || '-',
+        show: true
+      },
+      {
+        id: 'adjusted_rolling_xg',
+        label: 'Rolling xG',
+        home: stats.adjusted_rolling_xg_home?.toString() || '-',
+        away: stats.adjusted_rolling_xg_away?.toString() || '-',
+        info: '',
+        show: true
+      },
+      {
+        id: 'adjusted_rolling_market_xg',
+        label: 'Rolling Market xG',
+        home: stats.adjusted_rolling_market_xg_home?.toString() || '-',
+        away: stats.adjusted_rolling_market_xg_away?.toString() || '-',
+        info: '',
+        show: true
+      },
+      {
+        id: 'predicted_xg',
+        label: 'Predicted xG',
+        home: stats.ai_home_pred ? parseFloat(stats.ai_home_pred.toString()).toFixed(2) : '-',
+        away: stats.ai_away_pred ? parseFloat(stats.ai_away_pred.toString()).toFixed(2) : '-',
+        info: stats.ai_home_pred && stats.ai_away_pred
+          ? (parseFloat(stats.ai_home_pred.toString()) + parseFloat(stats.ai_away_pred.toString())).toFixed(2)
+          : '-',
+        show: true
+      }
+    ];
 
-          {/* Data Rows */}
-          {[
-            {
-              id: 'hours_since_last_match',
-              label: 'HOURS SINCE LAST MATCH',
-              home: stats.hours_since_last_match_home?.toString() || '-',
-              away: stats.hours_since_last_match_away?.toString() || '-',
-              info: '',
-              show: true
-            },
-            {
-              id: 'elo_rating',
-              label: 'ELO RATING TEAMS/LEAGUE',
-              home: stats.elo_home?.toString() || '-',
-              away: stats.elo_away?.toString() || '-',
-              info: stats.league_elo?.toString() || '-',
-              show: true
-            },
-            {
-              id: 'avg_goals_league',
-              label: 'AVG GOALS LEAGUE',
-              home: '',
-              away: '',
-              info: stats.avg_goals_league?.toString() || '-',
-              show: true
-            },
-            {
-              id: 'home_advantage',
-              label: 'HOME ADVANTAGE',
-              home: '',
-              away: '',
-              info: stats.home_advantage?.toString() || '-',
-              show: true
-            },
-            {
-              id: 'adjusted_rolling_xg',
-              label: 'ADJUSTED ROLLING XG',
-              home: stats.adjusted_rolling_xg_home?.toString() || '-',
-              away: stats.adjusted_rolling_xg_away?.toString() || '-',
-              info: '',
-              show: true
-            },
-            {
-              id: 'adjusted_rolling_xga',
-              label: 'ADJUSTED ROLLING XGA',
-              home: stats.adjusted_rolling_xga_home?.toString() || '-',
-              away: stats.adjusted_rolling_xga_away?.toString() || '-',
-              info: '',
-              show: true
-            },
-            {
-              id: 'adjusted_rolling_market_xg',
-              label: 'ADJUSTED ROLLING MARKET XG',
-              home: stats.adjusted_rolling_market_xg_home?.toString() || '-',
-              away: stats.adjusted_rolling_market_xg_away?.toString() || '-',
-              info: '',
-              show: true
-            },
-            {
-              id: 'adjusted_rolling_market_xga',
-              label: 'ADJUSTED ROLLING MARKET XGA',
-              home: stats.adjusted_rolling_market_xga_home?.toString() || '-',
-              away: stats.adjusted_rolling_market_xga_away?.toString() || '-',
-              info: '',
-              show: true
-            },
-            {
-              id: 'predicted_xg',
-              label: 'PREDICTED XG',
-              home: stats.ai_home_pred ? parseFloat(stats.ai_home_pred.toString()).toFixed(2) : '-',
-              away: stats.ai_away_pred ? parseFloat(stats.ai_away_pred.toString()).toFixed(2) : '-',
-              info: stats.ai_home_pred && stats.ai_away_pred
-                ? (parseFloat(stats.ai_home_pred.toString()) + parseFloat(stats.ai_away_pred.toString())).toFixed(2)
-                : '-',
-              show: true
-            },
-            {
-              id: 'updated_at',
-              label: 'LAST UPDATED',
-              home: '',
-              away: '',
-              info: stats.updated_at ? new Date(stats.updated_at).toLocaleString() : '-',
-              show: true
-            }
-          ].map((item) => (
-            <div key={item.id} className="grid grid-cols-13 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900">
-              <div className="col-span-4 text-gray-300 font-bold">{item.label}</div>
-              <div className="col-span-3 text-gray-100 text-center">{item.home ?? '-'}</div>
-              <div className="col-span-3 text-gray-100 text-center">{item.away ?? '-'}</div>
-              <div className="col-span-3 text-gray-100">{item.info ?? '-'}</div>
-            </div>
-          ))}
+    // Second row stats
+    const secondRowStats = [
+      {
+        id: 'league_elo',
+        label: 'League Elo',
+        home: '',
+        away: '',
+        info: stats.league_elo?.toString() || '-',
+        show: true
+      },  
+      {
+        id: 'home_advantage',
+        label: 'Home Advantage',
+        home: '',
+        away: '',
+        info: stats.home_advantage?.toString() || '-',
+        show: true
+      },
+      {
+        id: 'adjusted_rolling_xga',
+        label: 'Rolling xGa',
+        home: stats.adjusted_rolling_xga_home?.toString() || '-',
+        away: stats.adjusted_rolling_xga_away?.toString() || '-',
+        info: '',
+        show: true
+      },
+      {
+        id: 'adjusted_rolling_market_xga',
+        label: 'Rolling Market xGa',
+        home: stats.adjusted_rolling_market_xga_home?.toString() || '-',
+        away: stats.adjusted_rolling_market_xga_away?.toString() || '-',
+        info: '',
+        show: true
+      },
+      {
+        id: 'hours_since_last_match',
+        label: 'Hours Since Last Match',
+        home: stats.hours_since_last_match_home?.toString() || '-',
+        away: stats.hours_since_last_match_away?.toString() || '-',
+        info: '',
+        show: true
+      }
+      
+    ];
+
+    return (
+      <div className="">
+        {/* First Row - Stats Table */}
+        <div className="">
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+            {/* Headers */}
+            {firstRowStats.map((item) => (
+              <div key={`header-${item.id}`} className="border-r border-gray-700 px-1 py-0.5 text-gray-300 font-bold text-[12px] bg-gray-900 font-mono truncate">
+                {item.label}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+            {/* Values */}
+            {firstRowStats.map((item) => (
+              <div key={`value-${item.id}`} className="border-r border-gray-700 px-1 py-1 text-gray-100 text-[11px] font-mono truncate">
+                {item.home && item.away ? `${item.home} - ${item.away}` : (item.home || item.away || item.info || '-')}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Second Row - Stats Table */}
+        <div className="">
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+            {/* Headers */}
+            {secondRowStats.map((item) => (
+              <div key={`header-${item.id}`} className="border-r border-gray-700 px-1 py-0.5 text-gray-300 font-bold text-[12px] bg-gray-900 font-mono truncate">
+                {item.label}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+            {/* Values */}
+            {secondRowStats.map((item) => (
+              <div key={`value-${item.id}`} className="border-r border-gray-700 px-1 py-1 text-gray-100 text-[11px] font-mono truncate">
+                {item.home && item.away ? `${item.home} - ${item.away}` : (item.home || item.away || item.info || '-')}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
   }, [statsLoading, statsError, statsData]);
 
+  // Handle column header click for sorting
+  const handleColumnSort = useCallback((column: string) => {
+    if (standingsSortColumn === column) {
+      setStandingsSortDirection(standingsSortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setStandingsSortColumn(column);
+      setStandingsSortDirection('asc');
+    }
+  }, [standingsSortColumn, standingsSortDirection]);
+
+  const renderStandingsSection = useCallback((fixture: any) => {
+    if (standingsLoading) {
+      return (
+        <div className="px-2 py-4">
+          <div className="text-center py-4">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-green-400"></div>
+            <span className="ml-2 text-gray-400 text-sm font-mono">Loading standings...</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (standingsError) {
+      return (
+        <div className="px-2 py-4">
+          <div className="text-center py-4">
+            <span className="text-red-400 text-sm font-mono">Failed to load standings: {standingsError}</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (!standingsData || !standingsData.standings?.standings?.length) {
+      return (
+        <div className="px-2 py-4">
+          <div className="text-center py-4">
+            <span className="text-gray-500 text-sm font-mono">No standings available</span>
+          </div>
+        </div>
+      );
+    }
+
+    const { standings } = standingsData.standings;
+
+    // Group standings by group (similar to leagues page logic)
+    const groupedStandings = standings.reduce((acc, standing) => {
+      const group = standing.group || 'Main Table'
+      if (!acc[group]) {
+        acc[group] = []
+      }
+      acc[group].push(standing)
+      return acc
+    }, {} as Record<string, typeof standings>)
+
+    // Determine which group the current fixture belongs to
+    // Find the group that contains both the home and away teams
+    let fixtureGroup = null
+    const homeTeamId = fixture.home_team_id?.toString()
+    const awayTeamId = fixture.away_team_id?.toString()
+
+    for (const [groupName, groupStandings] of Object.entries(groupedStandings)) {
+      const hasHomeTeam = groupStandings.some(s => s.team.id?.toString() === homeTeamId)
+      const hasAwayTeam = groupStandings.some(s => s.team.id?.toString() === awayTeamId)
+
+      if (hasHomeTeam && hasAwayTeam) {
+        fixtureGroup = groupName
+        break
+      }
+    }
+
+    // If teams are in different groups, don't show standings
+    if (!fixtureGroup) {
+      return (
+        <div className="px-2 py-4">
+          <div className="text-center py-4">
+            <span className="text-gray-500 text-sm font-mono">Teams are in different groups or playoffs - no standings available</span>
+          </div>
+        </div>
+      );
+    }
+
+    // Filter standings to only show the current fixture's group
+    let filteredStandings = [...groupedStandings[fixtureGroup]]
+
+    // Sort standings based on current sort settings
+    const sortStandings = (standings: typeof filteredStandings, column: string, direction: 'asc' | 'desc') => {
+      return [...standings].sort((a, b) => {
+        let aValue: any, bValue: any;
+
+        switch (column) {
+          case 'rank':
+            aValue = a.rank;
+            bValue = b.rank;
+            break;
+          case 'name':
+            aValue = a.team.name.toLowerCase();
+            bValue = b.team.name.toLowerCase();
+            break;
+          case 'played':
+            aValue = a.all.played;
+            bValue = b.all.played;
+            break;
+          case 'wins':
+            aValue = a.all.win;
+            bValue = b.all.win;
+            break;
+          case 'draws':
+            aValue = a.all.draw;
+            bValue = b.all.draw;
+            break;
+          case 'losses':
+            aValue = a.all.lose;
+            bValue = b.all.lose;
+            break;
+          case 'gf':
+            aValue = a.all.goals.for;
+            bValue = b.all.goals.for;
+            break;
+          case 'ga':
+            aValue = a.all.goals.against;
+            bValue = b.all.goals.against;
+            break;
+          case 'gd':
+            aValue = a.goalsDiff;
+            bValue = b.goalsDiff;
+            break;
+          case 'xg':
+            aValue = a.xg_stats.all.xg_for - a.xg_stats.all.xg_against;
+            bValue = b.xg_stats.all.xg_for - b.xg_stats.all.xg_against;
+            break;
+          case 'xpts':
+            aValue = a.xg_stats.expected_points_total;
+            bValue = b.xg_stats.expected_points_total;
+            break;
+          case 'points':
+            aValue = a.points;
+            bValue = b.points;
+            break;
+          case 'projected':
+            aValue = a.xg_stats.expected_points_projected;
+            bValue = b.xg_stats.expected_points_projected;
+            break;
+          case 'win_pct':
+            aValue = a.all.played > 0 ? (a.all.win / a.all.played) * 100 : 0;
+            bValue = b.all.played > 0 ? (b.all.win / b.all.played) * 100 : 0;
+            break;
+          default:
+            return 0;
+        }
+
+        if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    };
+
+    filteredStandings = sortStandings(filteredStandings, standingsSortColumn, standingsSortDirection);
+
+    return (
+      <div className="px-2 py-2">
+        {/* Standings Table */}
+        <div className="px-1 py-1">
+          {/* Header */}
+          <div className="grid grid-cols-17 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('rank')}
+            >
+              #
+              {standingsSortColumn === 'rank' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-3 text-gray-400 cursor-pointer hover:text-white transition-colors flex items-center gap-1"
+              onClick={() => handleColumnSort('name')}
+            >
+              TEAM
+              {standingsSortColumn === 'name' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('played')}
+            >
+              PL
+              {standingsSortColumn === 'played' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('wins')}
+            >
+              W
+              {standingsSortColumn === 'wins' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('draws')}
+            >
+              D
+              {standingsSortColumn === 'draws' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('losses')}
+            >
+              L
+              {standingsSortColumn === 'losses' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div className="col-span-1 text-gray-400 text-center">GF-GA</div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('gd')}
+            >
+              GD
+              {standingsSortColumn === 'gd' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div className="col-span-1 text-gray-400 text-center">FORM</div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('xg')}
+            >
+              xG
+              {standingsSortColumn === 'xg' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('xpts')}
+            >
+              xPTS
+              {standingsSortColumn === 'xpts' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('points')}
+            >
+              PTS
+              {standingsSortColumn === 'points' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div className="col-span-1 text-gray-400 text-center">xPTS-PTS</div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('projected')}
+            >
+              PROJ
+              {standingsSortColumn === 'projected' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('win_pct')}
+            >
+              WIN%
+              {standingsSortColumn === 'win_pct' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Data Rows */}
+          {filteredStandings.map((standing, index) => {
+            const isHomeTeam = fixture.home_team_id?.toString() === standing.team.id?.toString();
+            const isAwayTeam = fixture.away_team_id?.toString() === standing.team.id?.toString();
+            const isParticipatingTeam = isHomeTeam || isAwayTeam;
+
+            // Check if we need a divider after this standing
+            // For filtered standings, we need to recalculate dividers based on the current group's descriptions
+            const groupDescriptions = standingsData?.standings?.descriptions?.[fixtureGroup] || [];
+            const dividers = groupDescriptions.length > 0 ? getRankDividers({ [fixtureGroup]: groupDescriptions }) : new Set();
+            const hasDivider = dividers.has(standing.rank);
+
+            return (
+              <div key={standing.team.id}>
+                <div
+                  className={`grid grid-cols-17 gap-1 py-1 ${hasDivider ? 'border-b-2 border-gray-500' : 'border-b border-gray-800'} text-xs font-mono hover:bg-gray-900 ${
+                    isParticipatingTeam ? 'bg-gray-700' : ''
+                  }`}
+                >
+                <div className="col-span-1 text-gray-300 text-center font-bold">
+                  {standing.rank}
+                </div>
+                <div
+                  className="col-span-3 text-gray-100 font-bold truncate flex items-center gap-2 cursor-pointer hover:text-blue-400 transition-colors"
+                  onClick={() => {
+                    if (standing.description_percentages) {
+                      setSelectedTeamStandings({
+                        team: standing.team,
+                        descriptionPercentages: standing.description_percentages,
+                        winPercentage: standing.win_percentage || null
+                      });
+                    }
+                  }}
+                >
+                  {standing.team.logo && (
+                    <img
+                      src={standing.team.logo}
+                      alt={standing.team.name}
+                      className="w-4 h-4 object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        target.style.display = 'none';
+                      }}
+                    />
+                  )}
+                  {standing.team.name}
+                </div>
+                <div className="col-span-1 text-gray-400 text-center">{standing.all.played}</div>
+                <div className="col-span-1 text-green-400 text-center">{standing.all.win}</div>
+                <div className="col-span-1 text-yellow-400 text-center">{standing.all.draw}</div>
+                <div className="col-span-1 text-red-400 text-center">{standing.all.lose}</div>
+                <div className="col-span-1 text-gray-300 text-center">{standing.all.goals.for}-{standing.all.goals.against}</div>
+                <div className={`col-span-1 text-center font-bold ${
+                  standing.goalsDiff > 0 ? 'text-green-400' :
+                  standing.goalsDiff < 0 ? 'text-red-400' :
+                  'text-gray-400'
+                }`}>
+                  {standing.goalsDiff > 0 ? '+' : ''}{standing.goalsDiff}
+                </div>
+                <div className="col-span-1 flex gap-0.5 justify-center">
+                  {standing.form.split('').map((result, index) => (
+                    <span
+                      key={index}
+                      className={`w-3 h-3 rounded-full text-xs font-bold flex items-center justify-center ${
+                        result === 'W' ? 'bg-green-600 text-white' :
+                        result === 'D' ? 'bg-yellow-600 text-white' :
+                        result === 'L' ? 'bg-red-600 text-white' :
+                        'bg-gray-600 text-white'
+                      }`}
+                    >
+                      {result}
+                    </span>
+                  ))}
+                </div>
+                <div className="col-span-1 text-gray-300 text-center text-xs">
+                  {standing.xg_stats.all.xg_for.toFixed(1)}-{standing.xg_stats.all.xg_against.toFixed(1)}
+                </div>
+                <div className="col-span-1 text-blue-400 text-center text-xs">
+                  {standing.xg_stats.expected_points_total.toFixed(1)}
+                </div>
+                <div className="col-span-1 text-gray-200 text-center font-bold">{standing.points}</div>
+                <div className={`col-span-1 text-center text-xs font-bold ${
+                  (standing.xg_stats.expected_points_total - standing.points) > 0 ? 'text-green-400' :
+                  (standing.xg_stats.expected_points_total - standing.points) < 0 ? 'text-red-400' :
+                  'text-gray-400'
+                }`}>
+                  {(standing.xg_stats.expected_points_total - standing.points).toFixed(1)}
+                </div>
+                <div className="col-span-1 text-orange-400 text-center text-xs">
+                  {standing.xg_stats.expected_points_projected.toFixed(1)}
+                </div>
+                <div className="col-span-1 text-purple-400 text-center text-xs">
+                  {standing.win_percentage?.toFixed(1)}%
+                </div>
+                </div>
+            </div>
+            );
+          })}
+        </div>
+
+        {/* Rank Explanations */}
+        {standingsData?.standings?.descriptions?.[fixtureGroup] && getRankExplanations({ [fixtureGroup]: standingsData.standings.descriptions[fixtureGroup] }).length > 0 && (
+          <div className="px-1 mb-1">
+            <div className="text-[11px] text-gray-400 font-mono flex flex-wrap gap-4">
+              {getRankExplanations({ [fixtureGroup]: standingsData.standings.descriptions[fixtureGroup] }).map((explanation, index) => (
+                <div key={index} className="text-gray-400">
+                  {explanation}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }, [standingsLoading, standingsError, standingsData, getRankDividers, getRankExplanations, standingsSortColumn, standingsSortDirection, handleColumnSort]);
+
   const renderExpandedContent = useCallback((fixture: any) => {
     const extendedData = [
       {
-        id: 'halftime',
-        label: 'HALF TIME',
-        home: fixture.score_halftime_home ?? '-',
-        away: fixture.score_halftime_away ?? '-',
-        info: '',
-        show: fixture.score_halftime_home !== null || fixture.score_halftime_away !== null
-      },
-      {
-        id: 'extratime',
-        label: 'EXTRA TIME',
-        home: fixture.score_extratime_home ?? '-',
-        away: fixture.score_extratime_away ?? '-',
-        info: '',
-        show: fixture.score_extratime_home !== null || fixture.score_extratime_away !== null
-      },
-      {
-        id: 'penalties',
-        label: 'PENALTIES',
-        home: fixture.score_penalty_home ?? '-',
-        away: fixture.score_penalty_away ?? '-',
-        info: '',
-        show: fixture.score_penalty_home !== null || fixture.score_penalty_away !== null
-      },
-      {
         id: 'country',
-        label: 'COUNTRY',
+        label: 'Team Country',
         home: fixture.home_country || '-',
         away: fixture.away_country || '-',
         info: '',
@@ -1232,7 +1492,7 @@ export default function FixturesPage() {
       },
       {
         id: 'venue',
-        label: 'VENUE',
+        label: 'Venue',
         home: '',
         away: '',
         info: fixture.venue_name || '-',
@@ -1240,7 +1500,7 @@ export default function FixturesPage() {
       },
       {
         id: 'referee',
-        label: 'REFEREE',
+        label: 'Referee',
         home: '',
         away: '',
         info: fixture.referee || '-',
@@ -1248,7 +1508,7 @@ export default function FixturesPage() {
       },
       {
         id: 'round',
-        label: 'ROUND',
+        label: 'Round',
         home: '',
         away: '',
         info: fixture.round || '-',
@@ -1256,7 +1516,7 @@ export default function FixturesPage() {
       },
       {
         id: 'status',
-        label: 'STATUS',
+        label: 'Status',
         home: '',
         away: '',
         info: fixture.status_long || '-',
@@ -1265,28 +1525,30 @@ export default function FixturesPage() {
     ].filter(item => item.show);
 
     return (
-      <div className="space-y-4">
+      <div className="space-y-0">
         {/* INFO Section */}
-        <div>
-          <div className="px-1 py-1">
-            {/* Header */}
-            <div className="grid grid-cols-13 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-              <div className="col-span-4 text-gray-400">DETAIL</div>
-              <div className="col-span-3 text-gray-400 text-center">HOME</div>
-              <div className="col-span-3 text-gray-400 text-center">AWAY</div>
-              <div className="col-span-3 text-gray-400">INFO</div>
-            </div>
-
-            {/* Data Rows */}
+        <div className="mt-2">
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+            {/* Headers */}
             {extendedData.map((item) => (
-              <div key={item.id} className="grid grid-cols-13 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900">
-                <div className="col-span-4 text-gray-300 font-bold">{item.label}</div>
-                <div className="col-span-3 text-gray-100 text-center">{item.home ?? '-'}</div>
-                <div className="col-span-3 text-gray-100 text-center">{item.away ?? '-'}</div>
-                <div className="col-span-3 text-gray-100">{item.info ?? '-'}</div>
+              <div key={`header-${item.id}`} className="border-r border-gray-700 px-1 py-0.5 text-gray-300 font-bold text-[12px] bg-gray-900 font-mono truncate">
+                {item.label}
               </div>
             ))}
           </div>
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+            {/* Values */}
+            {extendedData.map((item) => (
+              <div key={`value-${item.id}`} className="border-r border-gray-700 px-1 py-1 text-gray-100 text-[11px] font-mono truncate">
+                {item.home && item.away ? `${item.home} - ${item.away}` : (item.home || item.away || item.info || '-')}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* STATS Section */}
+        <div className="">
+          {renderStatsSection(fixture)}
         </div>
 
         {/* ODDS Section */}
@@ -1296,11 +1558,34 @@ export default function FixturesPage() {
           </div>
         </div>
 
+        {/* STANDINGS Section */}
+        <div>
+          <button
+            onClick={() => setStandingsExpanded(!standingsExpanded)}
+            className="flex items-center gap-2 text-xs font-bold text-gray-200 font-mono mb-2 hover:text-white transition-colors w-full"
+          >
+            <svg
+              className={`w-4 h-4 transition-transform ${standingsExpanded ? '' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            STANDINGS
+          </button>
+          {standingsExpanded && (
+            <div className="px-0 py-0">
+              {renderStandingsSection(fixture)}
+            </div>
+          )}
+        </div>
+
         {/* LINEUP Section */}
         <div>
           <button
             onClick={() => setLineupsExpanded(!lineupsExpanded)}
-            className="flex items-center gap-2 text-xs font-bold text-gray-200 font-mono mb-2 hover:text-white transition-colors w-full"
+            className="flex items-center gap-1 text-xs font-bold text-gray-200 font-mono hover:text-white transition-colors w-full"
           >
             <svg
               className={`w-4 h-4 transition-transform ${lineupsExpanded ? '' : ''}`}
@@ -1325,16 +1610,9 @@ export default function FixturesPage() {
             {renderInjuriesSection(fixture)}
           </div>
         </div>
-
-        {/* STATS Section */}
-        <div>
-          <div className="px-0">
-            {renderStatsSection(fixture)}
-          </div>
-        </div>
       </div>
     );
-  }, [renderLineupsSection, renderInjuriesSection, renderOddsSection, renderStatsSection]);
+  }, [renderLineupsSection, renderStandingsSection, renderInjuriesSection, renderOddsSection, renderStatsSection]);
 
   return (
     <div className="fixed inset-0 top-[57px] left-0 right-0 bottom-0 bg-black overflow-auto">
@@ -1394,10 +1672,16 @@ export default function FixturesPage() {
             setExpandedFixtureId(fixtureId.toString());
             setCurrentFixtureData(item); // Store the fixture data for lineups/injuries
             setLineupsExpanded(false); // Reset lineups section when switching fixtures
+            setStandingsExpanded(false); // Reset standings section when switching fixtures
+            setStandingsSortColumn('rank'); // Reset sort to default
+            setStandingsSortDirection('asc');
           } else {
             setExpandedFixtureId(null);
             setCurrentFixtureData(null);
             setLineupsExpanded(false); // Reset lineups section when row is collapsed
+            setStandingsExpanded(false); // Reset standings section when row is collapsed
+            setStandingsSortColumn('rank'); // Reset sort to default
+            setStandingsSortDirection('asc');
           }
         }, [])}
         apiEndpoint="/api/fixtures"
@@ -1417,6 +1701,28 @@ export default function FixturesPage() {
               setEditingFixture(null)
               handleFixtureUpdated()
             }}
+          />
+        )}
+
+        {/* Player Stats Modal */}
+        {selectedPlayer && (
+          <PlayerStatsModal
+            playerId={selectedPlayer.id}
+            playerName={selectedPlayer.name}
+            season={currentFixtureData?.season?.toString() || null}
+            teamId={selectedPlayer.teamId}
+            leagueId={selectedPlayer.leagueId}
+            onClose={() => setSelectedPlayer(null)}
+          />
+        )}
+
+        {/* Team Standings Modal */}
+        {selectedTeamStandings && (
+          <TeamStandingsModal
+            team={selectedTeamStandings.team}
+            descriptionPercentages={selectedTeamStandings.descriptionPercentages}
+            winPercentage={selectedTeamStandings.winPercentage}
+            onClose={() => setSelectedTeamStandings(null)}
           />
         )}
       </div>

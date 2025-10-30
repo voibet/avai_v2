@@ -75,6 +75,7 @@ export interface Team {
   country?: string;
   venue?: string;
   mappings?: string[]; // JSONB array of alternative team names
+  elo?: number | null; // Latest ELO rating from most recent finished fixture
   created_at: string;
   updated_at: string;
 }

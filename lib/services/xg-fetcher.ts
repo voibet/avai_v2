@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { executeQuery } from '../database/db-utils';
 import { Fixture } from '../../types/database';
+import { IN_PAST } from '../constants';
 
 interface XGData {
   home: number;
@@ -275,7 +276,8 @@ export class XGFetcher {
     let query = `
       SELECT f.* FROM football_fixtures f
       JOIN football_leagues l ON f.league_id = l.id
-      WHERE f.status_short IN ('AET', 'FT', 'PEN') 
+      WHERE f.date < NOW() AND f.date > NOW() - INTERVAL '5 days'
+      AND LOWER(f.status_short) IN ('${IN_PAST.join("', '")}')
       AND (f.xg_home IS NULL OR f.xg_away IS NULL)
       AND l.seasons::jsonb ? f.season::text
       AND (l.seasons::jsonb -> f.season::text ->> 'current')::boolean = true
@@ -550,8 +552,6 @@ export class XGFetcher {
         
         // Cache the results
         this.sofascoreCache.set(cacheKey, allMatches);
-      } else {
-        console.log(`Using cached Sofascore data (${allMatches.length} matches)`);
       }
 
       // Get team mappings for more accurate matching
@@ -696,8 +696,6 @@ export class XGFetcher {
         
         // Cache the results
         this.flashliveCache.set(cacheKey, allEvents);
-      } else {
-        console.log(`Using cached Flashlive data (${allEvents.length} events)`);
       }
 
       // Get team mappings for more accurate matching

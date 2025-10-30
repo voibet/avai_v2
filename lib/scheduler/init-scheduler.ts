@@ -24,10 +24,10 @@ export function initializeSchedulers() {
   // Set global flag
   (global as any)[SCHEDULER_KEY] = true;
 
-  // Start scheduler after 6-hour delay
+  // Start scheduler after delay
   setTimeout(() => {
     startAutoRefreshScheduler();
-  }, 6 * 60 * 60 * 1000); // 6 hours in milliseconds
+  }, 4 * 60 * 60 * 1000); // 4 hours in milliseconds
 }
 
 if (typeof window === 'undefined') {

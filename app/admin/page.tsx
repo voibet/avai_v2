@@ -13,7 +13,7 @@ import {
 import { League } from '../../types/database';
 
 
-type AdminTab = 'fetch-fixtures' | 'add-leagues';
+type AdminTab = 'fetch-fixtures' | 'add-leagues' | 'test' | 'simulate';
 
 interface AvailableLeague {
   id: number;
@@ -57,6 +57,53 @@ export default function AdminPage() {
     isOpen: false,
     league: null
   });
+
+  // Test tab state
+  const [isTesting, setIsTesting] = useState(false);
+  const [testProgress, setTestProgress] = useState<string>('');
+  const [testConfig, setTestConfig] = useState<{
+    selectedFeatures: string[];
+    selectAll: boolean;
+    epochs: number;
+    batchSize: number;
+  }>({
+    selectedFeatures: [],
+    selectAll: true, // true means all features selected
+    epochs: 150,
+    batchSize: 1024
+  });
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    config?: {
+      features: string[];
+      epochs: number;
+      batchSize: number;
+    };
+    metrics?: any; // Comprehensive metrics from ml-evaluation
+    data?: {
+      totalFixtures: number;
+      trainFixtures: number;
+      testFixtures: number;
+      predictionsSaved: number;
+    };
+    modelStats?: any;
+  } | null>(null);
+
+  // Simulation tab state
+  const [simulationResult, setSimulationResult] = useState<{
+    success: boolean;
+    message: string;
+    summary?: {
+      totalBetsPlaced: number;
+      totalStake: number;
+      totalReturn: number;
+      profitLoss: number;
+      profitPercentage: number;
+      averageOdds: number;
+    };
+    bets?: any[];
+  } | null>(null);
 
   // Load leagues data
   useEffect(() => {
@@ -516,42 +563,138 @@ export default function AdminPage() {
     }
   };
 
-  const handleTestModel = async () => {
-    console.log('[Admin] Test button clicked');
+  const handleCalculatePredictionOdds = async () => {
+    console.log('[Admin] Odds button clicked');
     setIsLoading(true);
     setResult(null);
     setProgress(null);
 
     try {
-      console.log('[Admin] Sending request to /api/admin/mlp/test');
-      const response = await fetch('/api/admin/mlp/test', {
+      console.log('[Admin] Sending request to /api/admin/mlp/prediction-odds');
+      const response = await fetch('/api/admin/mlp/prediction-odds', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
 
-      console.log('[Admin] Response status:', response.status);
+      console.log('[Admin] Odds response status:', response.status);
       const data = await response.json();
-      console.log('[Admin] Response data:', data);
+      console.log('[Admin] Odds response data:', data);
 
       if (data.success !== false) {
         setResult({
           success: true,
-          message: data.message || 'Model tested successfully'
+          message: data.message || 'Prediction odds calculated successfully'
         });
       } else {
         setResult({
           success: false,
-          message: data.message || 'Failed to test model'
+          message: data.error || 'Failed to calculate prediction odds'
         });
       }
     } catch (error) {
-      console.error('[Admin] Test error:', error);
+      console.error('[Admin] Odds error:', error);
       setResult({
         success: false,
-        message: error instanceof Error ? error.message : 'Failed to test model'
+        message: error instanceof Error ? error.message : 'Failed to calculate prediction odds'
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSimulateBetting = async () => {
+    console.log('[Admin] Simulate betting clicked');
+    setIsLoading(true);
+    setResult(null);
+    setProgress(null);
+
+    try {
+      console.log('[Admin] Sending request to /api/admin/mlp/simulate-betting');
+      const response = await fetch('/api/admin/mlp/simulate-betting', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      console.log('[Admin] Simulate response status:', response.status);
+      const data = await response.json();
+      console.log('[Admin] Simulate response data:', data);
+
+      if (data.success !== false) {
+        setSimulationResult({
+          success: true,
+          message: data.message || 'Betting simulation completed successfully',
+          summary: data.summary,
+          bets: data.bets
+        });
+        setResult({
+          success: true,
+          message: data.message || 'Betting simulation completed successfully'
+        });
+      } else {
+        setSimulationResult({
+          success: false,
+          message: data.error || 'Failed to run betting simulation'
+        });
+        setResult({
+          success: false,
+          message: data.error || 'Failed to run betting simulation'
+        });
+      }
+    } catch (error) {
+      console.error('[Admin] Simulate error:', error);
+      setResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to run betting simulation'
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRunTest = async () => {
+    console.log('[Admin] Test button clicked');
+    setIsTesting(true);
+    setTestProgress('Starting model performance test...');
+    setTestResult(null);
+
+    try {
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (!testConfig.selectAll && testConfig.selectedFeatures.length > 0) {
+        params.append('selectedFeatures', testConfig.selectedFeatures.join(','));
+      }
+      params.append('epochs', testConfig.epochs.toString());
+      params.append('batchSize', testConfig.batchSize.toString());
+
+      const url = `/api/admin/mlp/test?${params.toString()}`;
+      console.log('[Admin] Sending request to:', url);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      console.log('[Admin] Test response status:', response.status);
+      const data = await response.json();
+      console.log('[Admin] Test response data:', data);
+
+      setTestProgress('Test completed');
+      setTestResult({
+        success: data.success !== false,
+        message: data.message || (data.success !== false ? 'Test completed successfully' : 'Test failed'),
+        metrics: data.metrics,
+        data: data.data,
+        modelStats: data.modelStats
+      });
+    } catch (error) {
+      console.error('[Admin] Test error:', error);
+      setTestProgress('Test failed');
+      setTestResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'Test failed'
+      });
+    } finally {
+      setIsTesting(false);
     }
   };
 
@@ -690,7 +833,7 @@ export default function AdminPage() {
       span: 1,
       sortType: 'number',
       render: (league) => (
-        <div className="text-gray-500 text-xs font-mono">
+        <div className="text-gray-600 text-xs font-mono">
           {league.id}
         </div>
       )
@@ -710,7 +853,7 @@ export default function AdminPage() {
       header: 'Country',
       span: 2,
       render: (league) => (
-        <div className="text-gray-400 truncate">
+        <div className="text-gray-500 truncate">
           {league.country}
         </div>
       )
@@ -762,7 +905,7 @@ export default function AdminPage() {
           <button
             onClick={() => runChainForLeague(league.id, league.name)}
             disabled={isLoading}
-            className="bg-green-800 hover:bg-green-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-1.5 py-0.5 text-xs font-mono"
+            className="bg-green-900 hover:bg-black disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-1.5 py-0.5 text-xs font-mono"
             title="Run full chain: fixtures → xG → calculations"
           >
             CHN
@@ -801,7 +944,7 @@ export default function AdminPage() {
       header: 'Country',
       span: 2,
       render: (league) => (
-        <div className="text-gray-400 truncate">
+        <div className="text-gray-500 truncate">
           {league.country}
         </div>
       )
@@ -836,14 +979,14 @@ export default function AdminPage() {
       return availableLeague.seasons.map((season) => (
         <div
           key={season}
-          className="grid grid-cols-12 gap-1 py-1 border-b border-gray-800 last:border-b-0 text-xs font-mono hover:bg-gray-800"
+          className="grid grid-cols-12 gap-1 py-1 border-b border-gray-800 last:border-b-0 text-xs font-mono hover:bg-gray-900"
         >
           <div className="col-span-1 flex items-center justify-center">
             <input
               type="checkbox"
               checked={selectedSeasons[league.id]?.has(season) || false}
               onChange={() => toggleSeasonSelection(league.id, season)}
-              className="rounded border-gray-600 bg-gray-700 text-red-600 focus:ring-red-600 scale-75"
+              className="rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-600 scale-75"
             />
           </div>
           <div className="col-span-4">
@@ -859,14 +1002,14 @@ export default function AdminPage() {
       return Object.entries(existingLeague.seasons).map(([season, seasonData]) => (
         <div
           key={season}
-          className="grid grid-cols-11 gap-1 py-1 border-b border-gray-800 last:border-b-0 text-xs font-mono hover:bg-gray-800"
+          className="grid grid-cols-11 gap-1 py-1 border-b border-gray-800 last:border-b-0 text-xs font-mono hover:bg-gray-900"
         >
           <div className="col-span-1 flex items-center justify-center">
             <input
               type="checkbox"
               checked={selectedSeasons[league.id]?.has(season) || false}
               onChange={() => toggleSeasonSelection(league.id, season)}
-              className="rounded border-gray-600 bg-gray-700 text-red-600 focus:ring-red-600 scale-75"
+              className="rounded border-gray-600 bg-gray-800 text-red-600 focus:ring-red-600 scale-75"
             />
           </div>
           <div className="col-span-1"></div> {/* Empty space for ID column */}
@@ -905,11 +1048,485 @@ export default function AdminPage() {
         {/* Tab Navigation */}
         <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
 
-        {/* Search */}
+        {/* Search - hide on test and simulate tabs */}
+        {activeTab !== 'test' && activeTab !== 'simulate' && (
         <SearchBar value={searchQuery} onChange={setSearchQuery} />
+        )}
 
         {/* Universal DataTable */}
-        {activeTab === 'fetch-fixtures' ? (
+        {activeTab === 'test' ? (
+          <div className="bg-gray-900 border border-gray-700 p-6">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-white mb-2">MLP Model Performance Test</h2>
+              <p className="text-gray-400 text-sm">
+                Test the MLP model's performance on historical data. Uses 80% of past fixtures for training and 20% for testing.
+              </p>
+            </div>
+
+            {/* Configuration Section */}
+            <div className="mb-6 p-4 bg-gray-800 border border-gray-600">
+              <h3 className="text-sm font-semibold text-white mb-3">Configuration</h3>
+
+              {/* MLP Parameters */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 mb-1">Epochs</label>
+                  <input
+                    type="number"
+                    value={testConfig.epochs}
+                    onChange={(e) => setTestConfig(prev => ({ ...prev, epochs: parseInt(e.target.value) || 150 }))}
+                    className="w-full bg-gray-700 border border-gray-600 text-white px-2 py-1 text-sm font-mono"
+                    min="10"
+                    max="500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 mb-1">Batch Size</label>
+                  <input
+                    type="number"
+                    value={testConfig.batchSize}
+                    onChange={(e) => setTestConfig(prev => ({ ...prev, batchSize: parseInt(e.target.value) || 1024 }))}
+                    className="w-full bg-gray-700 border border-gray-600 text-white px-2 py-1 text-sm font-mono"
+                    min="32"
+                    max="4096"
+                  />
+                </div>
+              </div>
+
+              {/* Feature Selection */}
+              <div className="mb-4">
+                <label className="block text-xs font-semibold text-gray-400 mb-2">Features (leave empty for all)</label>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                  {[
+                    'home_advantage',
+                    'adjusted_rolling_xg_home', 'adjusted_rolling_xga_home',
+                    'adjusted_rolling_xg_away', 'adjusted_rolling_xga_away',
+                    'adjusted_rolling_market_xg_home', 'adjusted_rolling_market_xga_home',
+                    'adjusted_rolling_market_xg_away', 'adjusted_rolling_market_xga_away',
+                    'avg_goals_league', 'hours_since_last_match_home', 'hours_since_last_match_away',
+                    'elo_home', 'elo_away', 'league_elo'
+                  ].map(feature => (
+                    <label key={feature} className="flex items-center space-x-1">
+                      <input
+                        type="checkbox"
+                        checked={testConfig.selectAll || testConfig.selectedFeatures.includes(feature)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            if (testConfig.selectAll) {
+                              // Switching from "all selected" to specific selection
+                              const allFeatures = [
+                                'home_advantage',
+                                'adjusted_rolling_xg_home', 'adjusted_rolling_xga_home',
+                                'adjusted_rolling_xg_away', 'adjusted_rolling_xga_away',
+                                'adjusted_rolling_market_xg_home', 'adjusted_rolling_market_xga_home',
+                                'adjusted_rolling_market_xg_away', 'adjusted_rolling_market_xga_away',
+                                'avg_goals_league', 'hours_since_last_match_home', 'hours_since_last_match_away',
+                                'elo_home', 'elo_away', 'league_elo'
+                              ];
+                              setTestConfig(prev => ({
+                                ...prev,
+                                selectAll: false,
+                                selectedFeatures: [feature]
+                              }));
+                            } else {
+                              setTestConfig(prev => ({
+                                ...prev,
+                                selectedFeatures: [...prev.selectedFeatures.filter(f => f !== feature), feature]
+                              }));
+                            }
+                          } else {
+                            if (testConfig.selectAll) {
+                              // Unchecking when all were selected - select all except this one
+                              const allFeatures = [
+                                'home_advantage',
+                                'adjusted_rolling_xg_home', 'adjusted_rolling_xga_home',
+                                'adjusted_rolling_xg_away', 'adjusted_rolling_xga_away',
+                                'adjusted_rolling_market_xg_home', 'adjusted_rolling_market_xga_home',
+                                'adjusted_rolling_market_xg_away', 'adjusted_rolling_market_xga_away',
+                                'avg_goals_league', 'hours_since_last_match_home', 'hours_since_last_match_away',
+                                'elo_home', 'elo_away', 'league_elo'
+                              ];
+                              setTestConfig(prev => ({
+                                ...prev,
+                                selectAll: false,
+                                selectedFeatures: allFeatures.filter(f => f !== feature)
+                              }));
+                            } else {
+                              setTestConfig(prev => ({
+                                ...prev,
+                                selectedFeatures: prev.selectedFeatures.filter(f => f !== feature)
+                              }));
+                            }
+                          }
+                        }}
+                        className="bg-gray-700 border-gray-600 text-green-500"
+                      />
+                      <span className="text-gray-300 font-mono text-xs">{feature}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => setTestConfig(prev => ({ ...prev, selectAll: true, selectedFeatures: [] }))}
+                    className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 font-mono"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={() => setTestConfig(prev => ({ ...prev, selectAll: false, selectedFeatures: [] }))}
+                    className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 font-mono"
+                  >
+                    Deselect All
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <button
+                onClick={handleRunTest}
+                disabled={isTesting}
+                className="bg-green-800 hover:bg-green-900 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-4 py-2 font-mono text-sm transition-colors"
+                title="Run MLP model performance test"
+              >
+                {isTesting ? 'Running Test...' : 'Run Test'}
+              </button>
+            </div>
+
+            {/* Progress */}
+            {isTesting && (
+              <div className="mb-6 p-4 bg-gray-800 border border-gray-600">
+                <h3 className="text-sm font-semibold text-white mb-2">Progress</h3>
+                <div className="text-gray-300 text-sm font-mono">
+                  {testProgress}
+                </div>
+              </div>
+            )}
+
+            {/* Results */}
+            {testResult && (
+              <div className="space-y-4">
+                <div className={`p-4 border ${testResult.success ? 'bg-green-900/20 border-green-700' : 'bg-red-900/20 border-red-700'}`}>
+                  <h3 className="text-sm font-semibold text-white mb-2">
+                    {testResult.success ? 'Test Completed Successfully' : 'Test Failed'}
+                  </h3>
+                  <div className="text-gray-300 text-sm">
+                    {testResult.message}
+                  </div>
+                </div>
+
+                {testResult.metrics && (
+                  <div className="space-y-4">
+                    {/* Configuration Used */}
+                    {testResult.config && (
+                      <div className="p-4 bg-gray-800 border border-gray-600 mb-4">
+                        <h3 className="text-sm font-semibold text-white mb-3">Configuration Used</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                          <div>
+                            <span className="text-gray-400">Epochs:</span>
+                            <span className="text-white font-mono ml-2">{testResult.config.epochs}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400">Batch Size:</span>
+                            <span className="text-white font-mono ml-2">{testResult.config.batchSize}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-400">Features:</span>
+                            <span className="text-white font-mono ml-2">{testResult.config.features.length} selected</span>
+                          </div>
+                        </div>
+                        <div className="mt-2">
+                          <span className="text-gray-400 text-xs">Features:</span>
+                          <div className="text-xs text-gray-300 font-mono mt-1 break-words">
+                            {testResult.config.features.join(', ')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Data Stats */}
+                    <div className="p-4 bg-gray-800 border border-gray-600">
+                      <h3 className="text-sm font-semibold text-white mb-3">Test Overview</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-300">Total Fixtures:</span>
+                            <span className="text-white font-mono">{testResult.data?.totalFixtures || 0}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-300">Train Fixtures:</span>
+                            <span className="text-white font-mono">{testResult.data?.trainFixtures || 0}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-300">Test Fixtures:</span>
+                            <span className="text-white font-mono">{testResult.data?.testFixtures || 0}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-300">Test Size:</span>
+                            <span className="text-white font-mono">{testResult.metrics.test_size || 0}</span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-300">Predictions Saved:</span>
+                            <span className="text-white font-mono">{testResult.data?.predictionsSaved || 0}</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <h4 className="text-xs font-semibold text-gray-400 mb-2">Average Scores</h4>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Predicted:</span>
+                              <span className="text-white font-mono">{testResult.metrics.avg_predicted_home?.toFixed(2)} - {testResult.metrics.avg_predicted_away?.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Actual:</span>
+                              <span className="text-white font-mono">{testResult.metrics.avg_actual_home?.toFixed(2)} - {testResult.metrics.avg_actual_away?.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">XG:</span>
+                              <span className="text-white font-mono">{testResult.metrics.avg_xg_home?.toFixed(2) || 'N/A'} - {testResult.metrics.avg_xg_away?.toFixed(2) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Market XG:</span>
+                              <span className="text-white font-mono">{testResult.metrics.avg_market_xg_home?.toFixed(2) || 'N/A'} - {testResult.metrics.avg_market_xg_away?.toFixed(2) || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* MLP Model Errors */}
+                    <div className="p-4 bg-gray-800 border border-gray-600">
+                      <h3 className="text-sm font-semibold text-white mb-3">MLP Model Performance (MAE)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <h4 className="text-xs font-semibold text-blue-400 mb-2">vs Actual Scores</h4>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Home:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_home_actual?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Away:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_away_actual?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Total:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_total_actual?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-semibold text-green-400 mb-2">vs XG</h4>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Home:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_home_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Away:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_away_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Total:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_total_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-semibold text-purple-400 mb-2">vs Market XG</h4>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Home:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_home_market_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Away:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_away_market_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Total:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_total_market_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Market XG Errors */}
+                    <div className="p-4 bg-gray-800 border border-gray-600">
+                      <h3 className="text-sm font-semibold text-white mb-3">Market XG Performance (MAE)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <h4 className="text-xs font-semibold text-orange-400 mb-2">vs Actual Scores</h4>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Home:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_market_xg_home_actual?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Away:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_market_xg_away_actual?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Total:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_market_xg_total_actual?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-semibold text-yellow-400 mb-2">vs XG</h4>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Home:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_market_xg_home_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Away:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_market_xg_away_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-300">Total:</span>
+                              <span className="text-white font-mono">{testResult.metrics.mae_market_xg_total_xg?.toFixed(3) || 'N/A'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {testResult.modelStats && (
+                  <div className="p-4 bg-gray-800 border border-gray-600">
+                    <h3 className="text-sm font-semibold text-white mb-2">Model Statistics</h3>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-300">Train Size:</span>
+                        <span className="text-white font-mono ml-2">{testResult.modelStats.trainSize}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-300">Final Loss:</span>
+                        <span className="text-white font-mono ml-2">{testResult.modelStats.finalLoss?.toFixed(4)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'simulate' ? (
+          <div className="bg-gray-900 border border-gray-700 p-6">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-white mb-2">Betting Simulation</h2>
+              <p className="text-gray-400 text-sm">
+                Simulate betting using Pinnacle vs Prediction odds. Compares X12 and OU 2.5 markets with 1 unit stakes.
+              </p>
+            </div>
+
+            <div className="mb-6 flex gap-4">
+              <button
+                onClick={handleCalculatePredictionOdds}
+                disabled={isLoading}
+                className="bg-green-800 hover:bg-green-900 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-4 py-2 font-mono text-sm transition-colors"
+                title="Calculate odds from saved predictions"
+              >
+                {isLoading ? 'Calculating Odds...' : 'Calculate Odds'}
+              </button>
+              <button
+                onClick={handleSimulateBetting}
+                disabled={isLoading}
+                className="bg-red-800 hover:bg-red-900 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-4 py-2 font-mono text-sm transition-colors"
+                title="Run betting simulation"
+              >
+                {isLoading ? 'Running Simulation...' : 'Run Simulation'}
+              </button>
+            </div>
+
+            {/* Simulation Results */}
+            {simulationResult && (
+              <div className="space-y-4">
+                <div className={`p-4 border ${simulationResult.success ? 'bg-green-900/20 border-green-700' : 'bg-red-900/20 border-red-700'}`}>
+                  <h3 className="text-sm font-semibold text-white mb-2">
+                    {simulationResult.success ? 'Simulation Completed' : 'Simulation Failed'}
+                  </h3>
+                  <div className="text-gray-300 text-sm">
+                    {simulationResult.message}
+                  </div>
+                </div>
+
+                {simulationResult.summary && (
+                  <div className="p-4 bg-gray-800 border border-gray-600">
+                    <h3 className="text-sm font-semibold text-white mb-3">Simulation Summary</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-300">Bets Placed:</span>
+                          <span className="text-white font-mono">{simulationResult.summary.totalBetsPlaced}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-300">Total Stake:</span>
+                          <span className="text-white font-mono">{simulationResult.summary.totalStake.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-300">Total Return:</span>
+                          <span className="text-white font-mono">{simulationResult.summary.totalReturn.toFixed(2)}</span>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-300">Profit/Loss:</span>
+                          <span className={`font-mono ${simulationResult.summary.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {simulationResult.summary.profitLoss >= 0 ? '+' : ''}{simulationResult.summary.profitLoss.toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-300">Profit %:</span>
+                          <span className={`font-mono ${simulationResult.summary.profitPercentage >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {simulationResult.summary.profitPercentage >= 0 ? '+' : ''}{simulationResult.summary.profitPercentage.toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-300">Avg Odds:</span>
+                          <span className="text-white font-mono">{simulationResult.summary.averageOdds.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {simulationResult.bets && simulationResult.bets.length > 0 && (
+                  <div className="p-4 bg-gray-800 border border-gray-600">
+                    <h3 className="text-sm font-semibold text-white mb-3">Recent Bets (Last 50)</h3>
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {simulationResult.bets.map((bet, index) => (
+                        <div key={index} className="flex items-center justify-between p-2 bg-gray-700 border border-gray-600 text-xs">
+                          <div className="flex-1">
+                            <span className="text-gray-300">
+                              {bet.home_team} vs {bet.away_team}
+                            </span>
+                            <span className="text-gray-500 ml-2">
+                              {new Date(bet.fixture_date).toLocaleDateString()}
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-blue-400 font-mono">
+                              {bet.bet.type} {bet.bet.outcome}
+                            </span>
+                            <span className="text-yellow-400 font-mono">
+                              {bet.bet.pinnacleOdds.toFixed(2)}
+                            </span>
+                            <span className={`font-mono ${bet.won ? 'text-green-400' : 'text-red-400'}`}>
+                              {bet.won ? '+' : '-'}{bet.return.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'fetch-fixtures' ? (
           <DataTable<League>
             title="Existing Leagues"
             subtitle={`${filteredLeagues.length} leagues`}
@@ -933,7 +1550,7 @@ export default function AdminPage() {
                   <button
                     onClick={handleTrainModel}
                     disabled={isLoading}
-                    className="bg-blue-800 hover:bg-blue-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
+                    className="bg-blue-800 hover:bg-blue-900 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
                     title="Train MLP model"
                   >
                     Train
@@ -941,18 +1558,10 @@ export default function AdminPage() {
                   <button
                     onClick={handleGeneratePredictions}
                     disabled={isLoading}
-                    className="bg-purple-800 hover:bg-purple-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
+                    className="bg-purple-800 hover:bg-purple-900 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
                     title="Generate predictions using saved MLP model"
                   >
                     Predict
-                  </button>
-                  <button
-                    onClick={handleTestModel}
-                    disabled={isLoading}
-                    className="bg-yellow-800 hover:bg-yellow-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-2 py-1 font-mono text-xs transition-colors"
-                    title="Test model performance"
-                  >
-                    Test
                   </button>
                 </div>
               </div>
@@ -980,7 +1589,7 @@ export default function AdminPage() {
                 <button
                   onClick={executeAction}
                   disabled={isLoading || selectedCount === 0}
-                  className="bg-red-800 hover:bg-red-900 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-3 py-1.5 font-mono text-xs transition-colors"
+                  className="bg-red-800 hover:bg-red-900 disabled:bg-gray-800 disabled:cursor-not-allowed text-white px-3 py-1.5 font-mono text-xs transition-colors"
                 >
                   {isLoading ? 'Processing...' : 'Execute Add'}
                 </button>

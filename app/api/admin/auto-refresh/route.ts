@@ -1,5 +1,6 @@
 import pool from '@/lib/database/db';
 import { executeChain } from '@/lib/services/chain-processor';
+import { IN_PAST, IN_PLAY, IN_FUTURE } from '@/lib/constants';
 
 let isExecuting = false;
 
@@ -34,10 +35,11 @@ async function runAutoRefreshInternal() {
       COUNT(f.id) as fixture_count
     FROM football_fixtures f
     JOIN football_leagues l ON f.league_id = l.id
-    WHERE (
-      (f.status_short != 'FT' AND f.date < NOW() - INTERVAL '2 hours' AND f.date > NOW() - INTERVAL '5 days')
+    WHERE f.date < NOW() AND f.date > NOW() - INTERVAL '5 days'
+    AND (
+      LOWER(f.status_short) IN ('${[...IN_PLAY, ...IN_FUTURE].join("', '")}')
       OR
-      (f.status_short = 'FT' AND (f.xg_home IS NULL OR f.xg_away IS NULL) AND f.date > NOW() - INTERVAL '5 days')
+      (LOWER(f.status_short) IN ('${IN_PAST.join("', '")}') AND (f.xg_home IS NULL OR f.xg_away IS NULL))
     )
     GROUP BY f.league_id, l.name
     ORDER BY fixture_count DESC

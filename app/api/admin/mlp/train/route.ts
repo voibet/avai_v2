@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import pool from '../../../../../lib/database/db';
 import { isCurrentlyTraining, setTrainingFlag } from '../../../../../lib/ml/ml-cache';
 import { startTrainingWorker } from '../../../../../lib/ml/ml-worker';
+import { IN_FUTURE } from '../../../../../lib/constants';
 
 
 export const dynamic = 'force-dynamic';
@@ -44,7 +45,7 @@ export async function POST() {
         s.league_elo
       FROM football_fixtures f
       INNER JOIN football_stats s ON f.id = s.fixture_id
-      WHERE f.status_short = 'FT'
+      WHERE LOWER(f.status_short) IN ('ft', 'aet', 'pen')
         AND f.goals_home IS NOT NULL
         AND f.goals_away IS NOT NULL
         AND f.season >= 2022
@@ -75,14 +76,14 @@ export async function POST() {
         s.league_elo
       FROM football_fixtures f
       INNER JOIN football_stats s ON f.id = s.fixture_id
-      WHERE f.status_short = 'NS'
+      WHERE LOWER(f.status_short) = ANY($1)
       ORDER BY f.id, f.date ASC
       LIMIT 100000
     `;
 
     const [trainingResult, predictionResult] = await Promise.all([
       pool.query(trainingQuery),
-      pool.query(predictionQuery)
+      pool.query(predictionQuery, [IN_FUTURE])
     ]);
 
     console.log(`[Train] Fetched ${trainingResult.rows.length} training fixtures`)

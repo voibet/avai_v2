@@ -6,79 +6,13 @@
  */
 
 import pool from '../lib/database/db.ts';
-
-/**
- * Dixon-Coles correlation adjustment for low-scoring games
- */
-function dixonColesAdjustment(homeGoals, awayGoals, homeXg, awayXg, rho = -0.1) {
-  if (homeGoals === 0 && awayGoals === 0) {
-    return 1 - homeXg * awayXg * rho;
-  } else if (homeGoals === 0 && awayGoals === 1) {
-    return 1 + homeXg * rho;
-  } else if (homeGoals === 1 && awayGoals === 0) {
-    return 1 + awayXg * rho;
-  } else if (homeGoals === 1 && awayGoals === 1) {
-    return 1 - rho;
-  }
-  return 1.0;
-}
-
-/**
- * Poisson PMF: P(k; λ) = (λ^k * e^(-λ)) / k!
- */
-function poissonPMF(k, lambda) {
-  if (lambda <= 0) return 0;
-  let logProb = k * Math.log(lambda) - lambda;
-  // Subtract log(k!)
-  for (let i = 2; i <= k; i++) {
-    logProb -= Math.log(i);
-  }
-  return Math.exp(logProb);
-}
-
-/**
- * Calculate match probabilities using Dixon-Coles Poisson model
- */
-function poissonProbabilities(homeXg, awayXg, overLine = 2.5, maxGoals = 10, useDixonColes = true, rho = -0.1) {
-  let homeWin = 0;
-  let draw = 0;
-  let awayWin = 0;
-  let over = 0;
-
-  for (let i = 0; i <= maxGoals; i++) {
-    for (let j = 0; j <= maxGoals; j++) {
-      // Basic Poisson probability
-      let prob = poissonPMF(i, homeXg) * poissonPMF(j, awayXg);
-
-      // Apply Dixon-Coles adjustment
-      if (useDixonColes && (i <= 1 && j <= 1)) {
-        prob *= dixonColesAdjustment(i, j, homeXg, awayXg, rho);
-      }
-
-      // Match result
-      if (i > j) {
-        homeWin += prob;
-      } else if (i === j) {
-        draw += prob;
-      } else {
-        awayWin += prob;
-      }
-
-      // Total goals
-      if (i + j > overLine) {
-        over += prob;
-      }
-    }
-  }
-
-  return { homeWin, draw, awayWin, over };
-}
+import { poissonPMF, poissonProbabilities, dixonColesAdjustment } from './poisson-utils.js';
 
 /**
  * Calculate Asian Handicap probabilities using Dixon-Coles Poisson
  * Handles quarter handicaps by splitting between adjacent half/whole lines
  */
-function calculateAsianHandicap(homeXg, awayXg, handicap, maxGoals = 10, useDixonColes = true, rho = -0.1) {
+function calculateAsianHandicap(homeXg, awayXg, handicap, maxGoals = 10, useDixonColes = true, rho = -0.1, homeAdjustment = 1, awayAdjustment = 1, userRho = 0) {
   // Check if this is a quarter handicap (e.g., 0.25, 0.75, 1.25, -0.25, etc.)
   // Use rounding to avoid floating point precision issues
   const handicapTimes4 = Math.round(handicap * 4);
@@ -99,8 +33,8 @@ function calculateAsianHandicap(homeXg, awayXg, handicap, maxGoals = 10, useDixo
       upperLine = (handicapTimes4 + 1) / 4;
     }
 
-    const lower = calculateAsianHandicap(homeXg, awayXg, lowerLine, maxGoals, useDixonColes, rho);
-    const upper = calculateAsianHandicap(homeXg, awayXg, upperLine, maxGoals, useDixonColes, rho);
+    const lower = calculateAsianHandicap(homeXg, awayXg, lowerLine, maxGoals, useDixonColes, rho, homeAdjustment, awayAdjustment, userRho);
+    const upper = calculateAsianHandicap(homeXg, awayXg, upperLine, maxGoals, useDixonColes, rho, homeAdjustment, awayAdjustment, userRho);
 
     // Average the probabilities (each line gets 50% of the bet)
     return {
@@ -121,6 +55,13 @@ function calculateAsianHandicap(homeXg, awayXg, handicap, maxGoals = 10, useDixo
       // Apply Dixon-Coles adjustment
       if (useDixonColes && (i <= 1 && j <= 1)) {
         prob *= dixonColesAdjustment(i, j, homeXg, awayXg, rho);
+      }
+
+      // Apply home/away adjustments based on who's leading
+      if (i > j) {
+        prob *= homeAdjustment;
+      } else if (j > i) {
+        prob *= awayAdjustment;
       }
 
       // Apply handicap to home team score
@@ -149,7 +90,7 @@ function calculateAsianHandicap(homeXg, awayXg, handicap, maxGoals = 10, useDixo
  * Calculate Over/Under probabilities for a specific line
  * Handles quarter lines by splitting between adjacent half/whole lines
  */
-function calculateOverUnder(homeXg, awayXg, line, maxGoals = 10, useDixonColes = true, rho = -0.1) {
+function calculateOverUnder(homeXg, awayXg, line, maxGoals = 10, useDixonColes = true, rho = -0.1, homeAdjustment = 1, awayAdjustment = 1, userRho = 0) {
   // Check if this is a quarter line (e.g., 2.25, 2.75, 3.25, etc.)
   // Use rounding to avoid floating point precision issues
   const lineTimes4 = Math.round(line * 4);
@@ -163,8 +104,8 @@ function calculateOverUnder(homeXg, awayXg, line, maxGoals = 10, useDixonColes =
     const lowerLine = (lineTimes4 - 1) / 4;
     const upperLine = (lineTimes4 + 1) / 4;
 
-    const lower = calculateOverUnder(homeXg, awayXg, lowerLine, maxGoals, useDixonColes, rho);
-    const upper = calculateOverUnder(homeXg, awayXg, upperLine, maxGoals, useDixonColes, rho);
+    const lower = calculateOverUnder(homeXg, awayXg, lowerLine, maxGoals, useDixonColes, rho, homeAdjustment, awayAdjustment, userRho);
+    const upper = calculateOverUnder(homeXg, awayXg, upperLine, maxGoals, useDixonColes, rho, homeAdjustment, awayAdjustment, userRho);
 
     // Average the probabilities (each line gets 50% of the bet)
     return {
@@ -185,6 +126,13 @@ function calculateOverUnder(homeXg, awayXg, line, maxGoals = 10, useDixonColes =
       // Apply Dixon-Coles adjustment
       if (useDixonColes && (i <= 1 && j <= 1)) {
         prob *= dixonColesAdjustment(i, j, homeXg, awayXg, rho);
+      }
+
+      // Apply home/away adjustments based on who's leading
+      if (i > j) {
+        prob *= homeAdjustment;
+      } else if (j > i) {
+        prob *= awayAdjustment;
       }
 
       const totalGoals = i + j;
@@ -211,16 +159,20 @@ function calculateOverUnder(homeXg, awayXg, line, maxGoals = 10, useDixonColes =
 /**
  * Calculate odds from predictions using Dixon-Coles Poisson model
  * Converts home_pred and away_pred to betting odds and inserts into football_odds
+ * Applies stored adjustments (home_adjustment, draw_adjustment, away_adjustment) if available
  * @param {number[] | null | undefined} fixtureIds - Array of fixture IDs to process, or null for all fixtures
  */
 async function calculateOddsFromPredictions(fixtureIds = null) {
   try {
-    // Build query to get fixtures with predictions
+    // Build query to get fixtures with predictions AND adjustments
     let query = `
       SELECT
         fp.fixture_id,
         fp.home_pred,
         fp.away_pred,
+        fp.home_adjustment,
+        fp.draw_adjustment,
+        fp.away_adjustment,
         f.date
       FROM football_predictions fp
       JOIN football_fixtures f ON fp.fixture_id = f.id
@@ -252,9 +204,14 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
       try {
         const homeXg = parseFloat(prediction.home_pred);
         const awayXg = parseFloat(prediction.away_pred);
+        
+        // Apply adjustments if they exist
+        const homeAdjustment = prediction.home_adjustment ? parseFloat(prediction.home_adjustment) : 1;
+        const awayAdjustment = prediction.away_adjustment ? parseFloat(prediction.away_adjustment) : 1;
+        const userRho = prediction.draw_adjustment ? parseFloat(prediction.draw_adjustment) : 0;
 
-        // Calculate X12 probabilities using Dixon-Coles Poisson
-        const probs = poissonProbabilities(homeXg, awayXg, 2.5, 10, true, -0.1);
+        // Calculate X12 probabilities using Dixon-Coles Poisson with adjustments
+        const probs = poissonProbabilities(homeXg, awayXg, 2.5, 10, true, -0.1, homeAdjustment, awayAdjustment, userRho);
 
         // Convert X12 probabilities to odds (odds = 1 / probability)
         // Store in basis points (multiply by 1000 for 3 decimals)
@@ -270,7 +227,7 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
         // Generate lines carefully to avoid floating point issues
         for (let i = 4; i <= 22; i++) {
           const line = i * 0.25;
-          const ouProbs = calculateOverUnder(homeXg, awayXg, line, 10, true, -0.1);
+          const ouProbs = calculateOverUnder(homeXg, awayXg, line, 10, true, -0.1, homeAdjustment, awayAdjustment, userRho);
 
           // Calculate odds
           const totalProb = ouProbs.overProb + ouProbs.underProb;
@@ -295,7 +252,7 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
         // Generate lines carefully to avoid floating point issues
         for (let i = -18; i <= 18; i++) {
           const line = i * 0.25;
-          const ahProbs = calculateAsianHandicap(homeXg, awayXg, line, 10, true, -0.1);
+          const ahProbs = calculateAsianHandicap(homeXg, awayXg, line, 10, true, -0.1, homeAdjustment, awayAdjustment, userRho);
 
           // Calculate odds
           const totalProb = ahProbs.homeWinProb + ahProbs.awayWinProb;
@@ -370,8 +327,8 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
             updated_at = NOW()`,
           [
             prediction.fixture_id,
-            999999, // Special bookie_id for predictions
-            'predictions',
+            1, // Prediction model 1
+            'Prediction',
             oddsX12,
             oddsOU,
             oddsAH,
@@ -405,7 +362,7 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
       FROM football_odds fo
       JOIN football_fixtures f ON fo.fixture_id = f.id
       JOIN football_predictions fp ON fo.fixture_id = fp.fixture_id
-      WHERE fo.bookie = 'predictions'
+      WHERE fo.bookie = 'Prediction'
       ORDER BY f.date DESC
       LIMIT 3
     `);
