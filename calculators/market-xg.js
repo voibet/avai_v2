@@ -2,7 +2,8 @@
  * Market XG Calculator
  *
  * This module calculates market XG from betting odds using Dixon-Coles Poisson optimization.
- * Market XG is calculated for finished fixtures only (status_short IN ('FT', 'AET', 'PEN')).
+ * Market XG is calculated only for fixtures that have started (IN_PLAY) or finished (IN_PAST).
+ * Never calculated for IN_FUTURE fixtures (NS, TBD).
  */
 
 import pool from '../lib/database/db.ts';
@@ -122,11 +123,12 @@ function dixonColesAdjustment(homeGoals, awayGoals, homeXg, awayXg, rho = -0.1) 
 /**
  * Calculate and populate market XG using Dixon-Coles Poisson optimization
  * Uses fair odds with priority: Pinnacle > Betfair > Any other
+ * Only processes fixtures that have started (excludes NS, TBD)
  * @param {number[] | null | undefined} fixtureIds - Array of fixture IDs to process, or null for all fixtures
  */
 async function calculateMarketXG(fixtureIds = null) {
   try {
-    // Build query to get FINISHED fixtures (FT, AET, PEN) with fair odds
+    // Build query to get fixtures with fair odds (excludes IN_FUTURE: NS, TBD)
     // Priority: pinnacle > betfair  > any other
     let query = `
       WITH prioritized_fair_odds AS (
@@ -177,7 +179,7 @@ async function calculateMarketXG(fixtureIds = null) {
       FROM football_fixtures f
       LEFT JOIN football_stats fs ON f.id = fs.fixture_id
       LEFT JOIN best_fair_odds bfo ON f.id = bfo.fixture_id
-      WHERE LOWER(f.status_short) IN ('ft', 'aet', 'pen')
+      WHERE LOWER(f.status_short) NOT IN ('ns', 'tbd')
         AND bfo.fair_odds_x12 IS NOT NULL
     `;
 

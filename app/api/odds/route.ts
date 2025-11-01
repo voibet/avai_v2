@@ -124,6 +124,7 @@ async function getFixtureOdds(request: Request) {
         ff.league_name,
         COALESCE(fo.bookie, ffo.bookie) as bookie,
         COALESCE(fo.decimals, ffo.decimals) as decimals,
+        EXTRACT(epoch FROM COALESCE(fo.updated_at, ffo.updated_at))::integer as updated_at,
         -- Regular odds from football_odds table
         fo.odds_x12,
         fo.odds_ah,
@@ -156,6 +157,7 @@ async function getFixtureOdds(request: Request) {
         ff.league_name,
         fo.bookie,
         fo.decimals,
+        EXTRACT(epoch FROM fo.updated_at)::integer as updated_at,
         -- Return full X12 odds array
         fo.odds_x12,
         -- Return full AH odds array
@@ -273,6 +275,7 @@ async function getFixtureOdds(request: Request) {
       const oddsObj: any = {
         bookie: row.bookie,
         decimals: row.decimals,
+        updated_at: row.updated_at,
         odds_x12: oddsX12,
         odds_ah: oddsAh,
         odds_ou: oddsOu,

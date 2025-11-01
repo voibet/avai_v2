@@ -18,7 +18,7 @@ export function startAutoRefreshScheduler() {
   (global as any)[SCHEDULER_INSTANCE_KEY] = true;
   
   runAutoRefresh();
-  schedulerInterval = setInterval(runAutoRefresh,  4 * 60 * 60 * 1000);
+  schedulerInterval = setInterval(runAutoRefresh, 5 * 60 * 1000); // 5 minutes in milliseconds
 }
 
 

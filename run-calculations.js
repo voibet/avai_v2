@@ -600,7 +600,7 @@ async function runCalculations() {
                        OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
                   AND pf.date < fd.fixture_date
                   AND pf.date >= fd.fixture_date - INTERVAL '1 year'
-                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen', 'live', '1h', 'ht', '2h', 'et', 'bt', 'p', 'susp', 'int')
                   -- Apply league-specific filtering: Cup matches include all, League matches only same-country League
                   AND (fd.league_type != 'League' OR (pl.country = fd.league_country AND pl.type = 'League'))
             ) pf
@@ -649,7 +649,7 @@ async function runCalculations() {
                        OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
                   AND pf.date < fd.fixture_date
                   AND pf.date >= fd.fixture_date - INTERVAL '1 year'
-                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen', 'live', '1h', 'ht', '2h', 'et', 'bt', 'p', 'susp', 'int')
                   -- Conditional filtering based on league type
                   -- For League matches: only include past League matches from same country
                   -- For Cup/other matches: include ALL past matches
@@ -875,7 +875,7 @@ async function runCalculations() {
                        OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
                   AND pf.date < fd.fixture_date
                   AND pf.date >= fd.fixture_date - INTERVAL '1 year'
-                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen', 'live', '1h', 'ht', '2h', 'et', 'bt', 'p', 'susp', 'int')
                   -- Apply league-specific filtering: Cup matches include all, League matches only same-country League
                   AND (fd.league_type != 'League' OR (pl.country = fd.league_country AND pl.type = 'League'))
             ) pf
@@ -923,7 +923,7 @@ async function runCalculations() {
                        OR pf.home_team_id = fd.away_team_id OR pf.away_team_id = fd.away_team_id)
                   AND pf.date < fd.fixture_date
                   AND pf.date >= fd.fixture_date - INTERVAL '1 year'
-                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen')
+                  AND LOWER(pf.status_short) IN ('ft', 'aet', 'pen', 'live', '1h', 'ht', '2h', 'et', 'bt', 'p', 'susp', 'int')
                   -- Conditional filtering based on league type
                   -- For League matches: only include past League matches from same country
                   -- For Cup/other matches: include ALL past matches

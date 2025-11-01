@@ -32,7 +32,7 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
         ff.league_name,
         COALESCE(fo.bookie, ffo.bookie) as bookie,
         COALESCE(fo.decimals, ffo.decimals) as decimals,
-        COALESCE(fo.updated_at, ffo.updated_at) as updated_at,
+        EXTRACT(epoch FROM COALESCE(fo.updated_at, ffo.updated_at))::integer as updated_at,
         -- Regular odds from football_odds table
         fo.odds_x12->-1 as odds_x12,
         fo.odds_ah->-1 as odds_ah,
@@ -64,7 +64,7 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
         ff.league_name,
         fo.bookie,
         fo.decimals,
-        fo.updated_at,
+        EXTRACT(epoch FROM fo.updated_at)::integer as updated_at,
         -- Extract latest X12 odds (last element of array using -> -1)
         fo.odds_x12->-1 as odds_x12,
         -- Extract latest AH odds (last element of array using -> -1)
@@ -222,6 +222,7 @@ export async function GET(request: Request) {
                       const oddsObj: any = {
                         bookie: row.bookie,
                         decimals: row.decimals,
+                        updated_at: row.updated_at,
                         odds_x12: row.odds_x12 || null,
                         odds_ah: row.odds_ah || null,
                         odds_ou: row.odds_ou || null,
@@ -255,10 +256,11 @@ export async function GET(request: Request) {
                   const fixtures = Array.from(fixturesMap.values());
 
                   if (fixtures.length > 0) {
-                    // For single fixture streams, return just the odds array directly
+                    // For single fixture streams, return fixture with odds
                     const data = JSON.stringify({
                       type: 'odds_update',
                       timestamp: Date.now(),
+                      fixture_id: fixtures[0].fixture_id,
                       odds: fixtures[0].odds
                     });
                     controller.enqueue(encoder.encode(`data: ${data}\n\n`));

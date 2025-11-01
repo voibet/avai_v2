@@ -2,6 +2,7 @@ import axios from 'axios';
 import { executeQuery } from '../database/db-utils';
 import { Fixture } from '../../types/database';
 import { IN_PAST } from '../constants';
+import { shouldSkipXGFetch, recordXGFetchAttempt, getXGCacheExpiry } from './xg-fetch-cache';
 
 interface XGData {
   home: number;
@@ -147,7 +148,6 @@ export class XGFetcher {
       });
       
       if (fixtures.length === 0) {
-        console.log(`Found ${fixtures.length} fixtures needing XG data`);
         return {
           success: true,
           message: 'No fixtures found that need XG data',
@@ -155,8 +155,6 @@ export class XGFetcher {
           updatedFixtureIds: []
         };
       }
-
-      console.log(`Found ${fixtures.length} fixtures needing XG data`);
 
       // Get league's XG source configuration
       const leagueConfig = await this.getLeagueXGConfig(leagueId);
@@ -385,21 +383,31 @@ export class XGFetcher {
 
       if (!xgSourceConfig || !xgSourceConfig.rounds) {
         console.log(`No xG source configuration for fixture ${fixture.id} (Season: ${seasonStr})`);
+        recordXGFetchAttempt(fixture.id, false);
         return null;
       }
 
       // Extract base round name by cutting off everything after " - "
       const baseRoundName = fixture.round ? fixture.round.split(' - ')[0] : '';
-      
+
       // Check if fixture's base round or ALL rounds have XG source
       const roundConfig = xgSourceConfig.rounds[baseRoundName] || xgSourceConfig.rounds['ALL'];
-      
+
       if (!roundConfig) {
         console.log(`No xG source for fixture ${fixture.id} (Round: ${baseRoundName})`);
+        recordXGFetchAttempt(fixture.id, false);
         return null;
       }
 
       const xgSourceUrl = roundConfig.url;
+
+      // Get cache expiry time for this source
+      const cacheExpiryMs = getXGCacheExpiry(xgSourceUrl);
+
+      // Check cache to prevent repeated attempts within the appropriate time window
+      if (shouldSkipXGFetch(fixture.id, cacheExpiryMs)) {
+        return null;
+      }
 
       // Determine source type for logging
       let sourceType = 'Unknown';
@@ -411,17 +419,24 @@ export class XGFetcher {
         sourceType = `Flashlive (${xgSourceUrl})`;
       }
 
-      console.log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name} - xG Source: ${sourceType}`);
+      console.log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name} - xG Source: ${sourceType} (Cache: ${Math.round(cacheExpiryMs / 1000 / 60)}min)`);
+
+      let result: XGData | null = null;
 
       if (xgSourceUrl === 'NATIVE') {
-        return await this.fetchNativeXG(fixture);
+        result = await this.fetchNativeXG(fixture);
       } else if (xgSourceUrl.includes('-')) {
-        return await this.fetchSofascoreXG(fixture, xgSourceUrl, allFixturesForSource);
+        result = await this.fetchSofascoreXG(fixture, xgSourceUrl, allFixturesForSource);
       } else {
-        return await this.fetchFlashliveXG(fixture, xgSourceUrl, allFixturesForSource);
+        result = await this.fetchFlashliveXG(fixture, xgSourceUrl, allFixturesForSource);
       }
+
+      // Record the attempt result
+      recordXGFetchAttempt(fixture.id, result !== null);
+      return result;
     } catch (error) {
       console.error(`Error fetching XG for fixture ${fixture.id}:`);
+      recordXGFetchAttempt(fixture.id, false);
       return null;
     }
   }

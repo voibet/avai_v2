@@ -1,49 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-
-interface Fixture {
-  fixture_id: string
-  home_team: string
-  away_team: string
-  date: string
-  league: string
-  odds: BookieOdds[]
-}
-
-interface BookieOdds {
-  bookie: string
-  decimals: number
-  odds_x12?: Array<{ t: number; x12: number[] }>
-  odds_ah?: Array<{ t: number; ah_a: number[]; ah_h: number[] }>
-  odds_ou?: Array<{ t: number; ou_o: number[]; ou_u: number[] }>
-  lines?: Array<{ t: number; ah: number[]; ou: number[] }>
-  fair_odds_x12?: number[]
-  fair_odds_ah?: {
-    fair_ah_a?: number[]
-    fair_ah_h?: number[]
-  }
-  fair_odds_ou?: {
-    fair_ou_o?: number[]
-    fair_ou_u?: number[]
-  }
-  fair_latest_lines?: {
-    ah?: number[]
-    ou?: number[]
-  }
-}
-
-interface ValueOpportunity {
-  fixture: Fixture
-  bookie: string
-  type: 'x12' | 'ah' | 'ou'
-  lineIndex?: number
-  oddsIndex?: number
-  veikkausOdds: number
-  pinnacleFairOdds: number
-  ratio: number
-  line?: number
-}
+import { useState, useEffect, useRef } from 'react'
+import { analyzeValueOpportunities, type Fixture, type ValueOpportunity, type ValueAnalysisConfig } from '@/lib/utils/value-analysis'
 
 export default function ValuesPage() {
   const [fixtures, setFixtures] = useState<Fixture[]>([])
@@ -51,6 +9,37 @@ export default function ValuesPage() {
   const [analyzedFixtures, setAnalyzedFixtures] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [streaming, setStreaming] = useState(false)
+  const eventSourceRef = useRef<EventSource | null>(null)
+
+  // Filter states
+  const [fairOddsBookie, setFairOddsBookie] = useState('Pinnacle')
+  const [oddsRatioBookies, setOddsRatioBookies] = useState<string[]>(['Veikkaus'])
+  const [minRatio, setMinRatio] = useState(1.03)
+  const [maxOdds, setMaxOdds] = useState<number | undefined>(undefined)
+
+  // Sorting state
+  const [sortBy, setSortBy] = useState<'ratio' | 'date' | 'updated'>('ratio')
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
+
+  // Get available bookies from fixtures
+  const availableBookies = fixtures.length > 0
+    ? Array.from(new Set(fixtures.flatMap(f => f.odds.map(o => o.bookie))))
+    : []
+
+  const fairOddsBookies = availableBookies.filter(bookie =>
+    fixtures.some(f => f.odds.some(o => o.bookie === bookie && (
+      o.fair_odds_x12 || o.fair_odds_ah || o.fair_odds_ou
+    )))
+  )
+
+  // Create config from current filter state
+  const config: ValueAnalysisConfig = {
+    fairOddsBookie,
+    oddsRatioBookies: oddsRatioBookies.length === 1 ? oddsRatioBookies[0] : oddsRatioBookies,
+    minRatio,
+    maxOdds
+  }
 
   useEffect(() => {
     fetchValues()
@@ -65,9 +54,12 @@ export default function ValuesPage() {
       }
       const data = await response.json()
       setFixtures(data.fixtures || [])
-      const result = analyzeOpportunities(data.fixtures || [])
-      setOpportunities(result.opportunities)
-      setAnalyzedFixtures(result.analyzedFixtures)
+      analyzeCurrentFixtures(data.fixtures || [])
+
+      // Start streaming after successful load
+      if (data.fixtures && data.fixtures.length > 0) {
+        startStreaming()
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -75,191 +67,154 @@ export default function ValuesPage() {
     }
   }
 
-  const analyzeOpportunities = (fixtures: Fixture[]) => {
-    // Compares odds using exact line matching - only lines that exist in both bookies are compared!
-    // This ensures we're comparing equivalent handicap/over-under values between bookies.
-    const opportunities: ValueOpportunity[] = []
-    let analyzedFixtures = 0
-
-    fixtures.forEach(fixture => {
-      // Only analyze fixtures that haven't started yet
-      const fixtureDate = new Date(fixture.date)
-      const now = new Date()
-      if (fixtureDate <= now) return
-
-      // Find Veikkaus and Pinnacle bookies
-      const veikkausOdds = fixture.odds.find(o => o.bookie === 'Veikkaus')
-      const pinnacleOdds = fixture.odds.find(o => o.bookie === 'Pinnacle')
-
-      if (!veikkausOdds || !pinnacleOdds) return
-
-      analyzedFixtures++
-
-      // Analyze X12 odds (always 3 outcomes: Home, Draw, Away - no line matching needed)
-      if (veikkausOdds.odds_x12 && pinnacleOdds.fair_odds_x12 && veikkausOdds.odds_x12.length > 0) {
-        const veikkausX12 = veikkausOdds.odds_x12[0].x12
-        const pinnacleX12 = pinnacleOdds.fair_odds_x12
-
-        veikkausX12.forEach((odds, index) => {
-          if (pinnacleX12[index] && odds > 0 && pinnacleX12[index] > 0) {
-            const vDecimal = odds / Math.pow(10, veikkausOdds.decimals)
-            const pDecimal = pinnacleX12[index] / Math.pow(10, pinnacleOdds.decimals)
-            const ratio = vDecimal / pDecimal
-            if (ratio > 1.03) {
-              console.log(`X12 Opportunity found: ${fixture.home_team} vs ${fixture.away_team}, outcome: ${['Home', 'Draw', 'Away'][index]}, ratio: ${ratio.toFixed(3)}, vDecimal: ${vDecimal}, pDecimal: ${pDecimal}`)
-              opportunities.push({
-                fixture,
-                bookie: 'Veikkaus',
-                type: 'x12',
-                oddsIndex: index,
-                veikkausOdds: odds,
-                pinnacleFairOdds: pinnacleX12[index],
-                ratio
-              })
-            }
-          }
-        })
-      }
-
-      // Only use lines that exist in both bookies (exact matches only)
-      const findMatchingLineIndex = (veikkausLines: number[], pinnacleLines: number[], targetLine: number): number | null => {
-        // Find exact match only
-        const pinnacleIndex = pinnacleLines.indexOf(targetLine)
-        return pinnacleIndex !== -1 ? pinnacleIndex : null
-      }
-
-      // Analyze AH odds with line matching
-      if (veikkausOdds.odds_ah && pinnacleOdds.fair_odds_ah && veikkausOdds.odds_ah.length > 0) {
-        const veikkausAH = veikkausOdds.odds_ah[0]
-        const pinnacleAH = pinnacleOdds.fair_odds_ah
-        const veikkausLines = veikkausOdds.lines?.[0]?.ah || []
-        const pinnacleLines = pinnacleOdds.fair_latest_lines?.ah || []
-
-        // AH Away - match by lines
-        if (veikkausAH.ah_a && pinnacleAH?.fair_ah_a && veikkausLines.length > 0 && pinnacleLines.length > 0) {
-          veikkausAH.ah_a.forEach((odds, veikkausIndex) => {
-            const veikkausLine = veikkausLines[veikkausIndex]
-            if (veikkausLine !== undefined && odds > 0) {
-              const pinnacleIndex = findMatchingLineIndex(veikkausLines, pinnacleLines, veikkausLine)
-              if (pinnacleIndex !== null && pinnacleAH.fair_ah_a?.[pinnacleIndex] && pinnacleAH.fair_ah_a[pinnacleIndex] > 0) {
-                const vDecimal = odds / Math.pow(10, veikkausOdds.decimals)
-                const pDecimal = pinnacleAH.fair_ah_a[pinnacleIndex] / Math.pow(10, pinnacleOdds.decimals)
-                const ratio = vDecimal / pDecimal
-                if (ratio > 1.03) {
-                  console.log(`AH Away Opportunity found: ${fixture.home_team} vs ${fixture.away_team}, line: ${veikkausLine}, ratio: ${ratio.toFixed(3)}, vDecimal: ${vDecimal}, pDecimal: ${pDecimal}`)
-                  opportunities.push({
-                    fixture,
-                    bookie: 'Veikkaus',
-                    type: 'ah',
-                    lineIndex: veikkausIndex,
-                    oddsIndex: 0, // away
-                    veikkausOdds: odds,
-                    pinnacleFairOdds: pinnacleAH.fair_ah_a[pinnacleIndex],
-                    ratio,
-                    line: veikkausLine
-                  })
-                }
-              }
-            }
-          })
-        }
-
-        // AH Home - match by lines
-        if (veikkausAH.ah_h && pinnacleAH?.fair_ah_h && veikkausLines.length > 0 && pinnacleLines.length > 0) {
-          veikkausAH.ah_h.forEach((odds, veikkausIndex) => {
-            const veikkausLine = veikkausLines[veikkausIndex]
-            if (veikkausLine !== undefined && odds > 0) {
-              const pinnacleIndex = findMatchingLineIndex(veikkausLines, pinnacleLines, veikkausLine)
-              if (pinnacleIndex !== null && pinnacleAH.fair_ah_h?.[pinnacleIndex] && pinnacleAH.fair_ah_h[pinnacleIndex] > 0) {
-                const vDecimal = odds / Math.pow(10, veikkausOdds.decimals)
-                const pDecimal = pinnacleAH.fair_ah_h[pinnacleIndex] / Math.pow(10, pinnacleOdds.decimals)
-                const ratio = vDecimal / pDecimal
-                if (ratio > 1.03) {
-                  opportunities.push({
-                    fixture,
-                    bookie: 'Veikkaus',
-                    type: 'ah',
-                    lineIndex: veikkausIndex,
-                    oddsIndex: 1, // home
-                    veikkausOdds: odds,
-                    pinnacleFairOdds: pinnacleAH.fair_ah_h[pinnacleIndex],
-                    ratio,
-                    line: veikkausLine
-                  })
-                }
-              }
-            }
-          })
-        }
-      }
-
-      // Analyze OU odds with line matching
-      if (veikkausOdds.odds_ou && pinnacleOdds.fair_odds_ou && veikkausOdds.odds_ou.length > 0) {
-        const veikkausOU = veikkausOdds.odds_ou[0]
-        const pinnacleOU = pinnacleOdds.fair_odds_ou
-        const veikkausLines = veikkausOdds.lines?.[0]?.ou || []
-        const pinnacleLines = pinnacleOdds.fair_latest_lines?.ou || []
-
-        // OU Over - match by lines
-        if (veikkausOU.ou_o && pinnacleOU?.fair_ou_o && veikkausLines.length > 0 && pinnacleLines.length > 0) {
-          veikkausOU.ou_o.forEach((odds, veikkausIndex) => {
-            const veikkausLine = veikkausLines[veikkausIndex]
-            if (veikkausLine !== undefined && odds > 0) {
-              const pinnacleIndex = findMatchingLineIndex(veikkausLines, pinnacleLines, veikkausLine)
-              if (pinnacleIndex !== null && pinnacleOU.fair_ou_o?.[pinnacleIndex] && pinnacleOU.fair_ou_o[pinnacleIndex] > 0) {
-                const vDecimal = odds / Math.pow(10, veikkausOdds.decimals)
-                const pDecimal = pinnacleOU.fair_ou_o[pinnacleIndex] / Math.pow(10, pinnacleOdds.decimals)
-                const ratio = vDecimal / pDecimal
-                if (ratio > 1.03) {
-                  opportunities.push({
-                    fixture,
-                    bookie: 'Veikkaus',
-                    type: 'ou',
-                    lineIndex: veikkausIndex,
-                    oddsIndex: 0, // over
-                    veikkausOdds: odds,
-                    pinnacleFairOdds: pinnacleOU.fair_ou_o[pinnacleIndex],
-                    ratio,
-                    line: veikkausLine
-                  })
-                }
-              }
-            }
-          })
-        }
-
-        // OU Under - match by lines
-        if (veikkausOU.ou_u && pinnacleOU?.fair_ou_u && veikkausLines.length > 0 && pinnacleLines.length > 0) {
-          veikkausOU.ou_u.forEach((odds, veikkausIndex) => {
-            const veikkausLine = veikkausLines[veikkausIndex]
-            if (veikkausLine !== undefined && odds > 0) {
-              const pinnacleIndex = findMatchingLineIndex(veikkausLines, pinnacleLines, veikkausLine)
-              if (pinnacleIndex !== null && pinnacleOU.fair_ou_u?.[pinnacleIndex] && pinnacleOU.fair_ou_u[pinnacleIndex] > 0) {
-                const vDecimal = odds / Math.pow(10, veikkausOdds.decimals)
-                const pDecimal = pinnacleOU.fair_ou_u[pinnacleIndex] / Math.pow(10, pinnacleOdds.decimals)
-                const ratio = vDecimal / pDecimal
-                if (ratio > 1.03) {
-                  opportunities.push({
-                    fixture,
-                    bookie: 'Veikkaus',
-                    type: 'ou',
-                    lineIndex: veikkausIndex,
-                    oddsIndex: 1, // under
-                    veikkausOdds: odds,
-                    pinnacleFairOdds: pinnacleOU.fair_ou_u[pinnacleIndex],
-                    ratio,
-                    line: veikkausLine
-                  })
-                }
-              }
-            }
-          })
-        }
-      }
-    })
-
-    return { opportunities, analyzedFixtures }
+  const analyzeCurrentFixtures = (fixtureData: Fixture[]) => {
+    const result = analyzeValueOpportunities(fixtureData, config)
+    setOpportunities(result.opportunities)
+    setAnalyzedFixtures(result.analyzedFixtures)
   }
+
+  // Get sorted opportunities
+  const sortedOpportunities = [...opportunities].sort((a, b) => {
+    if (sortBy === 'ratio') {
+      return sortOrder === 'desc' ? b.ratio - a.ratio : a.ratio - b.ratio
+    } else if (sortBy === 'date') {
+      // Sort by fixture date
+      const dateA = new Date(a.fixture.date).getTime()
+      const dateB = new Date(b.fixture.date).getTime()
+      return sortOrder === 'desc' ? dateB - dateA : dateA - dateB
+    } else {
+      // Sort by updated_at - use the bookie's updated_at for this opportunity
+      const bookieOdds = a.fixture.odds.find(o => o.bookie === a.bookie)
+      const updatedA = bookieOdds?.updated_at || 0
+
+      const bookieOddsB = b.fixture.odds.find(o => o.bookie === b.bookie)
+      const updatedB = bookieOddsB?.updated_at || 0
+
+      return sortOrder === 'desc' ? updatedB - updatedA : updatedA - updatedB
+    }
+  })
+
+  const toggleSort = (newSortBy: 'ratio' | 'date' | 'updated') => {
+    if (sortBy === newSortBy) {
+      // Toggle order if same sort type
+      setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')
+    } else {
+      // New sort type, default to descending for ratio, ascending for date, descending for updated
+      setSortBy(newSortBy)
+      setSortOrder(newSortBy === 'ratio' ? 'desc' : newSortBy === 'updated' ? 'desc' : 'asc')
+    }
+  }
+
+  const updateFixtureOdds = (fixtureId: string, updatedOdds: any[]) => {
+    // updatedOdds is an array of bookie odds for a specific fixture
+    setFixtures(currentFixtures => {
+      return currentFixtures.map(fixture => {
+        if (fixture.fixture_id === fixtureId) {
+          // This is the fixture that needs updating
+          const updatedFixture = { ...fixture }
+
+          updatedOdds.forEach(updatedBookieOdds => {
+            const existingBookieIndex = updatedFixture.odds.findIndex(o => o.bookie === updatedBookieOdds.bookie)
+
+            if (existingBookieIndex >= 0) {
+              // Update existing bookie odds
+              updatedFixture.odds[existingBookieIndex] = {
+                ...updatedFixture.odds[existingBookieIndex],
+                ...updatedBookieOdds
+              }
+            } else {
+              // Add new bookie odds
+              updatedFixture.odds.push(updatedBookieOdds)
+            }
+          })
+
+          return updatedFixture
+        }
+        return fixture
+      })
+    })
+  }
+
+  const startStreaming = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+    }
+
+    // Get all fixture IDs from current fixtures
+    const fixtureIds = fixtures.map(f => f.fixture_id).join(',')
+
+    const url = new URL('/api/odds/stream', window.location.origin)
+    url.searchParams.set('fair_odds', 'true')
+    if (fixtureIds) {
+      url.searchParams.set('fixtureId', fixtureIds)
+    }
+
+    const eventSource = new EventSource(url.toString())
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.type === 'odds_update' && data.fixture_id && data.odds) {
+          updateFixtureOdds(data.fixture_id, data.odds)
+        }
+      } catch (error) {
+        console.error('Error parsing streaming data:', error)
+      }
+    }
+
+    eventSource.onerror = (error) => {
+      console.error('EventSource error:', error)
+      setStreaming(false)
+    }
+
+    eventSource.onopen = () => {
+      setStreaming(true)
+    }
+
+    eventSourceRef.current = eventSource
+  }
+
+  const stopStreaming = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+      setStreaming(false)
+    }
+  }
+
+  // Re-run analysis when fixtures change (including streaming updates)
+  useEffect(() => {
+    if (fixtures.length > 0) {
+      analyzeCurrentFixtures(fixtures)
+    }
+  }, [fixtures])
+
+  // Re-run analysis when filters change
+  useEffect(() => {
+    if (fixtures.length > 0) {
+      analyzeCurrentFixtures(fixtures)
+    }
+  }, [fairOddsBookie, oddsRatioBookies, minRatio, maxOdds])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopStreaming()
+    }
+  }, [])
+
+  const handleBookieToggle = (bookie: string) => {
+    setOddsRatioBookies(prev => {
+      const newSelection = prev.includes(bookie)
+        ? prev.filter(b => b !== bookie)
+        : [...prev, bookie]
+
+      // Ensure at least one bookie is selected
+      return newSelection.length === 0 ? [bookie] : newSelection
+    })
+  }
+
 
   const formatOdds = (odds: number, decimals: number) => {
     return (odds / Math.pow(10, decimals)).toFixed(decimals === 2 ? 2 : 3)
@@ -297,178 +252,137 @@ export default function ValuesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="text-xl font-bold mb-4">VALUES - Veikkaus vs Pinnacle Fair Odds (Ratio &gt; 1.03)</div>
+      {/* Filter Controls */}
+      <div className="bg-gray-800 p-4 rounded border border-gray-700">
+        <div className="text-lg font-semibold mb-4">Value Analysis Filters</div>
 
-      <div className="text-sm text-gray-400 mb-4">
-        Found {opportunities.length} value opportunities from {analyzedFixtures} analyzed fixtures ({fixtures.length} total fixtures)
-      </div>
-
-      {/* Debug section - show 5 random fixtures with all odds ratios */}
-      {fixtures.length > 0 && (
-        <div className="bg-yellow-900 p-4 rounded border border-yellow-700 mb-6">
-          <div className="text-yellow-400 font-bold mb-2">DEBUG - 5 Random Fixtures (All Odds Ratios - Including Past Fixtures):</div>
-          <div className="space-y-4 text-sm">
-            {[...fixtures].sort(() => 0.5 - Math.random()).slice(0, Math.min(5, fixtures.length)).map((fixture, fixtureIndex) => {
-              const veikkausOdds = fixture.odds.find(o => o.bookie === 'Veikkaus')
-              const pinnacleOdds = fixture.odds.find(o => o.bookie === 'Pinnacle')
-
-              if (!veikkausOdds || !pinnacleOdds) {
-                return (
-                  <div key={fixtureIndex} className="text-yellow-300">
-                    {fixtureIndex + 1}. {fixture.home_team} vs {fixture.away_team} - Missing Veikkaus or Pinnacle data
-                  </div>
-                )
-              }
-
-              return (
-                <div key={fixtureIndex} className="border border-yellow-700 p-2 rounded">
-                  <div className="text-yellow-300 font-semibold mb-2">
-                    {fixtureIndex + 1}. {fixture.home_team} vs {fixture.away_team} ({fixture.league})
-                  </div>
-
-                  {/* X12 Odds */}
-                  {veikkausOdds.odds_x12 && pinnacleOdds.fair_odds_x12 && (
-                    <div className="mb-2">
-                      <div className="text-yellow-400 text-xs">X12 Odds:</div>
-                      {['Home', 'Draw', 'Away'].map((outcome, idx) => {
-                        const vOdds = veikkausOdds.odds_x12?.[0]?.x12?.[idx]
-                        const pOdds = pinnacleOdds.fair_odds_x12?.[idx]
-                        const vDecimal = vOdds ? vOdds / Math.pow(10, veikkausOdds.decimals) : null
-                        const pDecimal = pOdds ? pOdds / Math.pow(10, pinnacleOdds.decimals) : null
-                        const ratio = vDecimal && pDecimal ? (vDecimal / pDecimal).toFixed(3) : 'N/A'
-                        return (
-                          <div key={idx} className="text-yellow-200 text-xs ml-2">
-                            {outcome}: V={vDecimal ? vDecimal.toFixed(veikkausOdds.decimals === 2 ? 2 : 3) : 'N/A'} P={pDecimal ? pDecimal.toFixed(pinnacleOdds.decimals === 2 ? 2 : 3) : 'N/A'} Ratio={ratio}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* AH Odds */}
-                  {veikkausOdds.odds_ah && pinnacleOdds.fair_odds_ah && (
-                    <div className="mb-2">
-                      <div className="text-yellow-400 text-xs">AH Odds (Away/Home):</div>
-                      <div className="text-yellow-500 text-xs ml-2 mb-1">
-                        Lines - V: [{veikkausOdds.lines?.[0]?.ah?.join(',')}] P: [{pinnacleOdds.fair_latest_lines?.ah?.join(',')}]
-                      </div>
-                      {(() => {
-                        const debugItems: JSX.Element[] = []
-                        const veikkausLines = veikkausOdds.lines?.[0]?.ah || []
-                        const pinnacleLines = pinnacleOdds.fair_latest_lines?.ah || []
-
-                        // Find lines that exist in both bookies
-                        const commonLines = veikkausLines.filter(line => pinnacleLines.includes(line))
-
-                        // Show only AH odds for lines that exist in both bookies
-                        commonLines.forEach(line => {
-                          const veikkausAwayIndex = veikkausLines.indexOf(line)
-                          const veikkausHomeIndex = veikkausLines.indexOf(line)
-                          const pinnacleIndex = pinnacleLines.indexOf(line)
-
-                          // Away odds
-                          const vAwayOdds = veikkausOdds.odds_ah?.[0]?.ah_a?.[veikkausAwayIndex]
-                          const pAwayOdds = pinnacleOdds.fair_odds_ah?.fair_ah_a?.[pinnacleIndex]
-                          if (vAwayOdds && pAwayOdds) {
-                            const vDecimal = vAwayOdds / Math.pow(10, veikkausOdds.decimals)
-                            const pDecimal = pAwayOdds / Math.pow(10, pinnacleOdds.decimals)
-                            const ratio = (vDecimal / pDecimal).toFixed(3)
-                            debugItems.push(
-                              <div key={`away-${line}`} className="text-yellow-200 text-xs ml-2">
-                                AH Away {line}: V={vDecimal.toFixed(veikkausOdds.decimals === 2 ? 2 : 3)} P={pDecimal.toFixed(pinnacleOdds.decimals === 2 ? 2 : 3)} Ratio={ratio}
-                              </div>
-                            )
-                          }
-
-                          // Home odds
-                          const vHomeOdds = veikkausOdds.odds_ah?.[0]?.ah_h?.[veikkausHomeIndex]
-                          const pHomeOdds = pinnacleOdds.fair_odds_ah?.fair_ah_h?.[pinnacleIndex]
-                          if (vHomeOdds && pHomeOdds) {
-                            const vDecimal = vHomeOdds / Math.pow(10, veikkausOdds.decimals)
-                            const pDecimal = pHomeOdds / Math.pow(10, pinnacleOdds.decimals)
-                            const ratio = (vDecimal / pDecimal).toFixed(3)
-                            debugItems.push(
-                              <div key={`home-${line}`} className="text-yellow-200 text-xs ml-2">
-                                AH Home {line}: V={vDecimal.toFixed(veikkausOdds.decimals === 2 ? 2 : 3)} P={pDecimal.toFixed(pinnacleOdds.decimals === 2 ? 2 : 3)} Ratio={ratio}
-                              </div>
-                            )
-                          }
-                        })
-
-                        return debugItems
-                      })()}
-                    </div>
-                  )}
-
-                  {/* OU Odds */}
-                  {veikkausOdds.odds_ou && pinnacleOdds.fair_odds_ou && (
-                    <div className="mb-2">
-                      <div className="text-yellow-400 text-xs">OU Odds (Over/Under):</div>
-                      <div className="text-yellow-500 text-xs ml-2 mb-1">
-                        Lines - V: [{veikkausOdds.lines?.[0]?.ou?.join(',')}] P: [{pinnacleOdds.fair_latest_lines?.ou?.join(',')}]
-                      </div>
-                      {(() => {
-                        const debugItems: JSX.Element[] = []
-                        const veikkausLines = veikkausOdds.lines?.[0]?.ou || []
-                        const pinnacleLines = pinnacleOdds.fair_latest_lines?.ou || []
-
-                        // Find lines that exist in both bookies
-                        const commonLines = veikkausLines.filter(line => pinnacleLines.includes(line))
-
-                        // Show only OU odds for lines that exist in both bookies
-                        commonLines.forEach(line => {
-                          const veikkausIndex = veikkausLines.indexOf(line)
-                          const pinnacleIndex = pinnacleLines.indexOf(line)
-
-                          // Over odds
-                          const vOverOdds = veikkausOdds.odds_ou?.[0]?.ou_o?.[veikkausIndex]
-                          const pOverOdds = pinnacleOdds.fair_odds_ou?.fair_ou_o?.[pinnacleIndex]
-                          if (vOverOdds && pOverOdds) {
-                            const vDecimal = vOverOdds / Math.pow(10, veikkausOdds.decimals)
-                            const pDecimal = pOverOdds / Math.pow(10, pinnacleOdds.decimals)
-                            const ratio = (vDecimal / pDecimal).toFixed(3)
-                            debugItems.push(
-                              <div key={`over-${line}`} className="text-yellow-200 text-xs ml-2">
-                                OU Over {line}: V={vDecimal.toFixed(veikkausOdds.decimals === 2 ? 2 : 3)} P={pDecimal.toFixed(pinnacleOdds.decimals === 2 ? 2 : 3)} Ratio={ratio}
-                              </div>
-                            )
-                          }
-
-                          // Under odds
-                          const vUnderOdds = veikkausOdds.odds_ou?.[0]?.ou_u?.[veikkausIndex]
-                          const pUnderOdds = pinnacleOdds.fair_odds_ou?.fair_ou_u?.[pinnacleIndex]
-                          if (vUnderOdds && pUnderOdds) {
-                            const vDecimal = vUnderOdds / Math.pow(10, veikkausOdds.decimals)
-                            const pDecimal = pUnderOdds / Math.pow(10, pinnacleOdds.decimals)
-                            const ratio = (vDecimal / pDecimal).toFixed(3)
-                            debugItems.push(
-                              <div key={`under-${line}`} className="text-yellow-200 text-xs ml-2">
-                                OU Under {line}: V={vDecimal.toFixed(veikkausOdds.decimals === 2 ? 2 : 3)} P={pDecimal.toFixed(pinnacleOdds.decimals === 2 ? 2 : 3)} Ratio={ratio}
-                              </div>
-                            )
-                          }
-                        })
-
-                        return debugItems
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Fair Odds Bookie */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Fair Odds Bookie
+            </label>
+            <select
+              value={fairOddsBookie}
+              onChange={(e) => setFairOddsBookie(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
+            >
+              {fairOddsBookies.map(bookie => (
+                <option key={bookie} value={bookie}>{bookie}</option>
+              ))}
+            </select>
           </div>
-          <div className="text-yellow-500 text-xs mt-2">
-            ✅ Using exact line matching - only comparing lines that exist in both bookies!
+
+          {/* Odds Ratio Bookies */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Odds Ratio Bookies
+            </label>
+            <div className="space-y-2 max-h-32 overflow-y-auto">
+              {availableBookies.filter(b => b !== fairOddsBookie).map(bookie => (
+                <label key={bookie} className="flex items-center space-x-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={oddsRatioBookies.includes(bookie)}
+                    onChange={() => handleBookieToggle(bookie)}
+                    className="rounded border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>{bookie}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Min Ratio */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Min Ratio
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="1.00"
+              value={minRatio}
+              onChange={(e) => setMinRatio(parseFloat(e.target.value) || 1.00)}
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Max Odds */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Max Odds (optional)
+            </label>
+            <input
+              type="number"
+              step="0.1"
+              min="1.0"
+              value={maxOdds || ''}
+              onChange={(e) => setMaxOdds(e.target.value ? parseFloat(e.target.value) : undefined)}
+              placeholder="No limit"
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500"
+            />
           </div>
         </div>
-      )}
+      </div>
+
+      <div className="flex items-center gap-2 mb-4">
+        <div className="text-xl font-bold">VALUES - {Array.isArray(config.oddsRatioBookies) ? config.oddsRatioBookies.join(', ') : config.oddsRatioBookies} vs {config.fairOddsBookie} Fair Odds (Ratio &gt; {config.minRatio}{maxOdds ? `, Max Odds: ${maxOdds}` : ''})</div>
+        {streaming && (
+          <div className="flex items-center gap-1 text-sm text-green-400">
+            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            Live
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-sm text-gray-400">
+          Found {opportunities.length} value opportunities from {analyzedFixtures} analyzed fixtures ({fixtures.length} total fixtures)
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => toggleSort('ratio')}
+            className={`px-3 py-1 text-xs rounded transition-colors ${
+              sortBy === 'ratio'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            Highest Value {sortBy === 'ratio' && (sortOrder === 'desc' ? '↓' : '↑')}
+          </button>
+          <button
+            onClick={() => toggleSort('date')}
+            className={`px-3 py-1 text-xs rounded transition-colors ${
+              sortBy === 'date'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            {sortBy === 'date' && (sortOrder === 'desc' ? 'Newest' : 'Oldest')}
+            {sortBy !== 'date' && 'Date'}
+          </button>
+          <button
+            onClick={() => toggleSort('updated')}
+            className={`px-3 py-1 text-xs rounded transition-colors ${
+              sortBy === 'updated'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            {sortBy === 'updated' && (sortOrder === 'desc' ? 'Recent' : 'Oldest')}
+            {sortBy !== 'updated' && 'Updated'}
+          </button>
+        </div>
+      </div>
 
       <div className="space-y-4">
-        {opportunities.map((opp, index) => {
+        {sortedOpportunities.map((opp, index) => {
           const veikkausBookie = opp.fixture.odds.find(o => o.bookie === 'Veikkaus')
           const pinnacleBookie = opp.fixture.odds.find(o => o.bookie === 'Pinnacle')
           return (
-            <div key={index} className="bg-gray-900 p-4 rounded border border-gray-700">
+            <div key={`${opp.fixture.fixture_id}-${opp.bookie}-${opp.type}-${opp.oddsIndex}-${opp.line}`} className="bg-gray-900 p-4 rounded border border-gray-700">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="md:col-span-1">
                   <div className="text-sm text-gray-400">Fixture</div>
@@ -492,14 +406,14 @@ export default function ValuesPage() {
                   <div className="text-sm text-gray-400">Odds & Ratio</div>
                   <div className="space-y-1">
                     <div className="flex justify-between">
-                      <span>Veikkaus:</span>
+                      <span>{opp.bookie}:</span>
                       <span className="font-semibold">
-                        {veikkausBookie ? formatOdds(opp.veikkausOdds, veikkausBookie.decimals) : opp.veikkausOdds}
+                        {veikkausBookie ? formatOdds(opp.oddsBookieOdds, veikkausBookie.decimals) : opp.oddsBookieOdds}
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Pinnacle Fair:</span>
-                      <span>{(opp.pinnacleFairOdds / Math.pow(10, pinnacleBookie?.decimals || 3)).toFixed(pinnacleBookie?.decimals === 2 ? 2 : 3)}</span>
+                      <span>{config.fairOddsBookie} Fair:</span>
+                      <span>{(opp.fairOddsBookieOdds / Math.pow(10, pinnacleBookie?.decimals || 3)).toFixed(pinnacleBookie?.decimals === 2 ? 2 : 3)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Ratio:</span>
@@ -512,12 +426,13 @@ export default function ValuesPage() {
           )
         })}
 
-        {opportunities.length === 0 && (
+        {sortedOpportunities.length === 0 && (
           <div className="text-center py-8 text-gray-400">
             No value opportunities found with ratio &gt; 1.03
           </div>
         )}
       </div>
+
     </div>
   )
 }

@@ -211,6 +211,19 @@ CREATE TRIGGER trg_notify_odds_update
 AFTER INSERT OR UPDATE ON football_odds
 FOR EACH ROW EXECUTE FUNCTION notify_odds_update();
 
+-- Notify SSE listeners when fixtures are updated
+CREATE OR REPLACE FUNCTION notify_fixture_update() RETURNS trigger AS $$
+BEGIN
+  PERFORM pg_notify('fixture_update_' || NEW.id::text, '');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notify_fixture_update ON football_fixtures;
+CREATE TRIGGER trg_notify_fixture_update
+AFTER INSERT OR UPDATE ON football_fixtures
+FOR EACH ROW EXECUTE FUNCTION notify_fixture_update();
+
 -- Payouts table - stores bookmaker payout calculations per fixture/bookie combination
 CREATE TABLE IF NOT EXISTS football_payouts (
     fixture_id BIGINT,

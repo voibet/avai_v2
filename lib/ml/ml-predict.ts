@@ -3,6 +3,7 @@ import pool from '../database/db';
 import { getCachedModel, hasCachedModel } from './ml-cache';
 import { makePredictions } from './ml-trainer';
 import { savePredictions } from '../database/db-utils';
+import { IN_FUTURE } from '../constants';
 
 
 export interface PredictOptions {
@@ -70,7 +71,7 @@ export async function predictFixtures(options: PredictOptions = {}): Promise<Pre
       s.league_elo
     FROM football_fixtures f
     INNER JOIN football_stats s ON f.id = s.fixture_id
-    WHERE f.status_short = 'NS'
+    WHERE LOWER(f.status_short) IN ('${IN_FUTURE.join("', '")}')
   `;
 
   const params: any[] = [];

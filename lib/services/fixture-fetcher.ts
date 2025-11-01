@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { executeQuery, executeTransaction } from '../database/db-utils';
 import { League } from '../../types/database';
-import { CANCELLED } from '../constants';
+import { CANCELLED, IN_PAST } from '../constants';
 
 
 interface SeasonData {
@@ -112,9 +112,9 @@ export class FixtureFetcher {
   }
 
   async fetchAndUpdateFixtures(
-    onProgress?: (league: string, index: number, total: number) => void,
+    onProgress?: (info: string) => void,
     selectedSeasons?: Record<string, string[]>
-  ): Promise<{ success: boolean; message: string; updatedCount?: number }> {
+  ): Promise<{ success: boolean; message: string; updatedCount?: number; statusChangedToPastCount?: number }> {
     try {
 
       let leaguesToProcess: Array<{id: number, name: string, season: number}> = [];
@@ -158,23 +158,25 @@ export class FixtureFetcher {
 
       // Fetch fixtures for each league
       let totalUpdated = 0;
+      let totalStatusChangedToPast = 0;
       const totalLeagues = leaguesToProcess.length;
 
       for (let i = 0; i < leaguesToProcess.length; i++) {
         const leagueInfo = leaguesToProcess[i];
 
-        // Report progress if callback provided
-        if (onProgress) {
-          onProgress(leagueInfo.name, i + 1, totalLeagues);
-        }
 
         try {
           const apiFixtures = await this.fetchFixturesFromAPI(leagueInfo.id, leagueInfo.season);
-          console.log(`Fetched ${apiFixtures.length} fixtures from API for ${leagueInfo.name}`);
 
-          const updated = await this.updateDatabaseWithFixtures(apiFixtures);
+          const result = await this.updateDatabaseWithFixtures(apiFixtures);
 
-          totalUpdated += updated;
+          totalUpdated += result.updatedCount;
+          totalStatusChangedToPast += result.statusChangedToPastCount;
+
+          // Call progress callback with fetched count info
+          if (onProgress) {
+            onProgress(`${apiFixtures.length} fixtures from API for ${leagueInfo.name}`);
+          }
         } catch (error) {
           const errorMessage = `Failed to process league ${leagueInfo.name}: ${error instanceof Error ? error.message : 'Unknown error'}`;
           console.error(errorMessage);
@@ -187,7 +189,8 @@ export class FixtureFetcher {
       return {
         success: true,
         message: `Updated ${totalUpdated} fixtures`,
-        updatedCount: totalUpdated
+        updatedCount: totalUpdated,
+        statusChangedToPastCount: totalStatusChangedToPast
       };
     } catch (error) {
       console.error('Fixture fetch process failed:', error instanceof Error ? error.message : error);
@@ -385,12 +388,13 @@ export class FixtureFetcher {
     }
   }
 
-  private async updateDatabaseWithFixtures(apiFixtures: ApiFootballFixture[]): Promise<number> {
+  private async updateDatabaseWithFixtures(apiFixtures: ApiFootballFixture[]): Promise<{ updatedCount: number; statusChangedToPastCount: number }> {
     let updatedCount = 0;
+    let statusChangedToPastCount = 0;
 
-    if (apiFixtures.length === 0) return 0;
+    if (apiFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0 };
 
-    // Filter out fixtures from excluded leagues during July-August
+    // Filter out fixtures from excluded leagues during July-August. These are european competition qualifiers.
     const nonSummerFixtures = apiFixtures.filter(fixture =>
       !this.EXCLUDED_LEAGUES_SUMMER.includes(fixture.league.id) ||
       !this.isJulyAugust(fixture.fixture.timestamp)
@@ -420,7 +424,7 @@ export class FixtureFetcher {
       }
     }
 
-    if (validFixtures.length === 0) return 0;
+    if (validFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0 };
 
     // Get all unique team IDs from valid fixtures
     const allTeamIds = Array.from(new Set([
@@ -431,19 +435,29 @@ export class FixtureFetcher {
     // Fetch team countries for all teams in these fixtures
     const teamCountryMap = await this.fetchMissingTeamCountries(allTeamIds);
 
-    // Build transaction queries
+    // Build transaction queries and track status changes
+    const fixtureStatusChanges: boolean[] = [];
     const queries = await Promise.all(validFixtures.map(async (fixture) => {
-      // Get existing fixture to preserve xg_home, xg_away (but get xg_source from league)
+      // Get existing fixture to preserve xg_home, xg_away and check for status change to past
       let existingXG = null;
+      let existingStatus = null;
       try {
         const existingResult = await executeQuery(`
-          SELECT xg_home, xg_away FROM football_fixtures WHERE id = $1
+          SELECT xg_home, xg_away, status_short FROM football_fixtures WHERE id = $1
         `, [fixture.fixture.id]);
 
         existingXG = existingResult.rows[0];
+        existingStatus = existingResult.rows[0]?.status_short;
       } catch (error) {
         console.log(`No existing fixture found for ID ${fixture.fixture.id}, will create new`);
       }
+
+      // Check if status changed to "in past"
+      const newStatus = fixture.fixture.status.short;
+      const isNewlyInPast = existingStatus &&
+                           !IN_PAST.includes(existingStatus.toLowerCase()) &&
+                           IN_PAST.includes(newStatus.toLowerCase());
+      fixtureStatusChanges.push(isNewlyInPast);
 
       const query = `
         INSERT INTO football_fixtures (
@@ -491,6 +505,17 @@ export class FixtureFetcher {
           xg_home = COALESCE(EXCLUDED.xg_home, football_fixtures.xg_home),
           xg_away = COALESCE(EXCLUDED.xg_away, football_fixtures.xg_away),
           updated_at = NOW()
+        WHERE (
+          football_fixtures.status_short IS DISTINCT FROM EXCLUDED.status_short OR
+          football_fixtures.goals_home IS DISTINCT FROM EXCLUDED.goals_home OR
+          football_fixtures.goals_away IS DISTINCT FROM EXCLUDED.goals_away OR
+          football_fixtures.score_halftime_home IS DISTINCT FROM EXCLUDED.score_halftime_home OR
+          football_fixtures.score_halftime_away IS DISTINCT FROM EXCLUDED.score_halftime_away OR
+          football_fixtures.score_fulltime_home IS DISTINCT FROM EXCLUDED.score_fulltime_home OR
+          football_fixtures.score_fulltime_away IS DISTINCT FROM EXCLUDED.score_fulltime_away OR
+          football_fixtures.referee IS DISTINCT FROM EXCLUDED.referee OR
+          football_fixtures.venue_name IS DISTINCT FROM EXCLUDED.venue_name
+        )
       `;
 
       const params = [
@@ -529,16 +554,23 @@ export class FixtureFetcher {
       return { query, params };
     }));
 
-    // Execute all queries in a transaction
+    // Execute all queries in a transaction and track status changes
     const results = await executeTransaction(queries);
 
-    // Count updated rows
-    for (const result of results) {
+    // Count updated rows and status changes to past
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+
       if (result.rowCount && result.rowCount > 0) {
         updatedCount++;
+
+        // Check if this fixture changed status to "in past"
+        if (fixtureStatusChanges[i]) {
+          statusChangedToPastCount++;
+        }
       }
     }
 
-    return updatedCount;
+    return { updatedCount, statusChangedToPastCount };
   }
 }

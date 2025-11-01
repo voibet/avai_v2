@@ -1,7 +1,7 @@
 'use client'
 
 import { useSearchParams, useRouter } from 'next/navigation'
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches } from '../../lib/hooks/use-football-data'
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
 import DataTable, { Column } from '../../components/ui/data-table'
@@ -9,6 +9,7 @@ import FixtureEditModal from '../../components/admin/FixtureEditModal'
 import PlayerStatsModal from '../../components/fixtures/PlayerStatsModal'
 import TeamStandingsModal from '../../components/fixtures/TeamStandingsModal'
 import { FixtureOdds } from '../../components/FixtureOdds'
+import { IN_PAST, CANCELLED, IN_PLAY, IN_FUTURE } from '../../lib/constants'
 
 export default function FixturesPage() {
   const searchParams = useSearchParams()
@@ -26,6 +27,11 @@ export default function FixturesPage() {
     descriptionPercentages: { [description: string]: number };
     winPercentage: number | null;
   } | null>(null)
+
+  // Streaming state
+  const [streaming, setStreaming] = useState(false)
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const [streamedFixtures, setStreamedFixtures] = useState<Map<number, any>>(new Map())
 
   // Fetch teams and leagues data for search
   const { teams, leagues, loading: searchDataLoading } = useFootballSearchData()
@@ -130,6 +136,24 @@ export default function FixturesPage() {
     }
     return injury.isThisMatch ? 'text-red-400' : 'text-orange-400';
   }, [formatInjuryTiming])
+
+  const getStatusColor = useCallback((statusShort: string) => {
+    const status = statusShort?.toLowerCase();
+    if (IN_PAST.includes(status)) {
+      return 'bg-green-900/50 text-green-400';
+    }
+    if (CANCELLED.includes(status)) {
+      return 'bg-blue-900/50 text-blue-400';
+    }
+    if (IN_PLAY.includes(status)) {
+      return 'bg-red-900/50 text-red-400 animate-pulse';
+    }
+    if (IN_FUTURE.includes(status)) {
+      return 'bg-gray-900 text-gray-600';
+    }
+    // Default fallback
+    return 'bg-gray-900 text-gray-600';
+  }, [])
 
   const getRankDividers = useCallback((descriptions: Record<string, Array<{ description: string; ranks: number[] }>>) => {
     // Flatten all description data
@@ -349,12 +373,7 @@ export default function FixturesPage() {
       sortType: 'string',
       sortKey: 'status_short',
       render: (fixture) => (
-        <span className={`px-1 py-0.5 text-xs font-mono rounded ${
-          fixture.status_short === 'FT' ? 'bg-green-900/50 text-green-400 font-mono' :
-          fixture.status_short === 'LIVE' ? 'bg-red-900/50 text-red-400 font-mono' :
-          fixture.status_short === 'HT' ? 'bg-blue-900/50 text-blue-400 font-mono' :
-          'bg-gray-900 text-gray-600 font-mono'
-        }`}>
+        <span className={`px-1 py-0.5 text-xs font-mono rounded ${getStatusColor(fixture.status_short)}`}>
           {fixture.status_short || 'SCH'}
         </span>
       )
@@ -394,7 +413,7 @@ export default function FixturesPage() {
         </button>
       )
     }
-  ], [handleEditFixture, formatDate])
+  ], [handleEditFixture, formatDate, getStatusColor])
 
   const handleCloseEditModal = () => {
     setEditingFixture(null)
@@ -405,6 +424,62 @@ export default function FixturesPage() {
     // For now, we'll keep the current approach but this could be improved
     window.location.reload()
   }, [])
+
+  // Function to update fixture data when received from stream
+  const updateFixtureData = useCallback((fixtureId: number, fixtureData: any) => {
+    // Store the updated fixture data in state - create new Map to trigger re-render
+    setStreamedFixtures(prev => {
+      const updated = new Map(prev)
+      updated.set(fixtureData.id, fixtureData)
+      return updated
+    })
+  }, [])
+
+  const startStreaming = useCallback(() => {
+    // Prevent starting multiple streams
+    if (streaming) {
+      return
+    }
+
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+    }
+
+    // Simple: stream all non-finished fixtures
+    const streamUrl = new URL('/api/fixtures/stream', window.location.origin)
+    const eventSource = new EventSource(streamUrl.toString())
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+
+        if (data.type === 'fixture_update' && data.fixture_id && data.fixture) {
+          updateFixtureData(data.fixture_id, data.fixture)
+        }
+      } catch (error) {
+        console.error('Error parsing streaming data:', error)
+      }
+    }
+
+    eventSource.onerror = (error) => {
+      console.error('EventSource error:', error)
+      setStreaming(false)
+    }
+
+    eventSource.onopen = () => {
+      setStreaming(true)
+    }
+
+    eventSourceRef.current = eventSource
+  }, [updateFixtureData, streaming])
+
+  const stopStreaming = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+    setStreaming(false)
+  }
 
   const handlePageChange = useCallback((page: number) => {
     const params = new URLSearchParams(searchParams.toString())
@@ -491,6 +566,12 @@ export default function FixturesPage() {
     params.set('page', '1')
     router.push(`/fixtures?${params.toString()}`)
   }, [searchParams, router])
+
+  // Start streaming automatically when component mounts
+  useEffect(() => {
+    startStreaming()
+    return () => stopStreaming()
+  }, [])
 
 
   const renderLineupsSection = useCallback((fixture: any) => {
@@ -1653,6 +1734,17 @@ export default function FixturesPage() {
 
         <DataTable
         title="FIXTURES"
+        dataTransformer={useMemo(() => (fixtures: any[]) => {
+          // Merge streamed updates with fetched data
+          return fixtures.map(fixture => {
+            // Use fixture ID to match streamed updates
+            const streamedUpdate = streamedFixtures.get(fixture.id)
+            if (streamedUpdate) {
+              return { ...fixture, ...streamedUpdate }
+            }
+            return fixture
+          })
+        }, [streamedFixtures])}
         columns={fixturesColumns}
         getItemId={(fixture) => fixture.id || `${fixture.home_team_name}-${fixture.away_team_name}-${fixture.date}`}
         emptyMessage="No fixtures found with current filters"

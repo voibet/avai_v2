@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 
 
@@ -62,6 +62,7 @@ export interface DataTableProps<T> {
   searchParams?: URLSearchParams; // Additional search parameters to include in API request
   currentPage?: number; // Required if using server-side
   onPageChange?: (page: number) => void; // Required if using server-side
+  dataTransformer?: (data: T[]) => T[]; // Optional function to transform data before rendering
 }
 
 // Helper function to generate proper flex basis from span
@@ -119,6 +120,7 @@ export default function DataTable<T>({
   searchParams,
   currentPage = 1,
   onPageChange,
+  dataTransformer,
 }: DataTableProps<T>) {
   // Data state
   const [serverData, setServerData] = useState<T[]>([]);
@@ -128,7 +130,11 @@ export default function DataTable<T>({
   const [totalPages, setTotalPages] = useState(1);
 
   // Use client data if provided, otherwise use server data
-  const displayData = data || serverData;
+  // Apply data transformer if provided
+  const rawData = data || serverData;
+  const displayData = useMemo(() => {
+    return dataTransformer ? dataTransformer(rawData) : rawData;
+  }, [rawData, dataTransformer]);
   const isUsingClientData = !!data;
   
   // UI state
