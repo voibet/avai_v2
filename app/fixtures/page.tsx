@@ -1,7 +1,7 @@
 'use client'
 
 import { useSearchParams, useRouter } from 'next/navigation'
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef, Suspense } from 'react'
 import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches } from '../../lib/hooks/use-football-data'
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
 import DataTable, { Column } from '../../components/ui/data-table'
@@ -11,7 +11,7 @@ import TeamStandingsModal from '../../components/fixtures/TeamStandingsModal'
 import { FixtureOdds } from '../../components/FixtureOdds'
 import { IN_PAST, CANCELLED, IN_PLAY, IN_FUTURE } from '../../lib/constants'
 
-export default function FixturesPage() {
+function FixturesPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [expandedFixtureId, setExpandedFixtureId] = useState<string | null>(null)
@@ -37,6 +37,13 @@ export default function FixturesPage() {
   const { teams, leagues, loading: searchDataLoading } = useFootballSearchData()
 
   const currentPage = parseInt(searchParams.get('page') || '1')
+
+  // Client-side data state
+  const [fixturesData, setFixturesData] = useState<any[]>([])
+  const [fixturesLoading, setFixturesLoading] = useState(false)
+  const [fixturesError, setFixturesError] = useState<string | null>(null)
+  const [totalFixturesCount, setTotalFixturesCount] = useState(0)
+  const [totalFixturesPages, setTotalFixturesPages] = useState(1)
 
   // Initialize search term from URL
   useEffect(() => {
@@ -566,6 +573,75 @@ export default function FixturesPage() {
     params.set('page', '1')
     router.push(`/fixtures?${params.toString()}`)
   }, [searchParams, router])
+
+  // Client-side data fetching
+  const fetchFixturesData = useCallback(async () => {
+    setFixturesLoading(true)
+    setFixturesError(null)
+
+    try {
+      const queryParams = new URLSearchParams()
+
+      // Add pagination
+      queryParams.append('page', currentPage.toString())
+      queryParams.append('limit', '50')
+
+      // Add sorting
+      if (currentSort) {
+        queryParams.append('sortColumn', currentSort.key)
+        queryParams.append('sortDirection', currentSort.direction)
+      }
+
+      // Add filters
+      let filterIndex = 0
+      Object.entries(currentFilters).forEach(([columnKey, filterValues]) => {
+        if (filterValues.size > 0) {
+          const value = Array.from(filterValues)[0]
+
+          // Handle date specially as a direct query parameter
+          if (columnKey === 'date') {
+            queryParams.append('date', value)
+          } else {
+            // Standard filter format for other columns
+            queryParams.append(`filters[${filterIndex}][column]`, columnKey)
+            queryParams.append(`filters[${filterIndex}][value]`, value)
+            queryParams.append(`filters[${filterIndex}][operator]`, 'eq')
+            filterIndex++
+          }
+        }
+      })
+
+      // Add search parameter
+      if (searchTerm.trim()) {
+        queryParams.append('search', searchTerm.trim())
+      }
+
+      const response = await fetch(`/api/fixtures?${queryParams}`)
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      setFixturesData(result.data || [])
+      setTotalFixturesCount(result.total || 0)
+      setTotalFixturesPages(result.totalPages || 1)
+
+    } catch (err) {
+      setFixturesError(err instanceof Error ? err.message : 'Failed to fetch fixtures')
+      setFixturesData([])
+      setTotalFixturesCount(0)
+      setTotalFixturesPages(1)
+    } finally {
+      setFixturesLoading(false)
+    }
+  }, [currentPage, currentSort, currentFilters, searchTerm])
+
+  // Fetch data when dependencies change
+  useEffect(() => {
+    fetchFixturesData()
+  }, [fetchFixturesData])
 
   // Start streaming automatically when component mounts
   useEffect(() => {
@@ -1734,9 +1810,9 @@ export default function FixturesPage() {
 
         <DataTable
         title="FIXTURES"
-        dataTransformer={useMemo(() => (fixtures: any[]) => {
+        data={useMemo(() => {
           // Merge streamed updates with fetched data
-          return fixtures.map(fixture => {
+          return fixturesData.map(fixture => {
             // Use fixture ID to match streamed updates
             const streamedUpdate = streamedFixtures.get(fixture.id)
             if (streamedUpdate) {
@@ -1744,7 +1820,7 @@ export default function FixturesPage() {
             }
             return fixture
           })
-        }, [streamedFixtures])}
+        }, [fixturesData, streamedFixtures])}
         columns={fixturesColumns}
         getItemId={(fixture) => fixture.id || `${fixture.home_team_name}-${fixture.away_team_name}-${fixture.date}`}
         emptyMessage="No fixtures found with current filters"
@@ -1776,10 +1852,6 @@ export default function FixturesPage() {
             setStandingsSortDirection('asc');
           }
         }, [])}
-        apiEndpoint="/api/fixtures"
-        searchParams={searchParams}
-        currentPage={currentPage}
-        onPageChange={handlePageChange}
         />
 
         {/* Edit Modal */}
@@ -1808,6 +1880,80 @@ export default function FixturesPage() {
           />
         )}
 
+        {/* Manual Pagination Controls */}
+        {totalFixturesPages > 1 && (
+          <div className="flex items-center justify-between py-2 border-gray-600">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage <= 1 || fixturesLoading}
+                className="px-3 py-1 text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white rounded transition-colors"
+              >
+                ← Previous
+              </button>
+
+              <span className="text-xs font-mono text-gray-400">
+                Page {currentPage} of {totalFixturesPages} ({totalFixturesCount} total)
+              </span>
+
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage >= totalFixturesPages || fixturesLoading}
+                className="px-3 py-1 text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white rounded transition-colors"
+              >
+                Next →
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1">
+              {/* Page number buttons */}
+              {(() => {
+                const pages = []
+                const maxVisiblePages = 5
+                let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2))
+                let endPage = Math.min(totalFixturesPages, startPage + maxVisiblePages - 1)
+
+                // Adjust start page if we're near the end
+                if (endPage - startPage + 1 < maxVisiblePages) {
+                  startPage = Math.max(1, endPage - maxVisiblePages + 1)
+                }
+
+                for (let i = startPage; i <= endPage; i++) {
+                  pages.push(
+                    <button
+                      key={i}
+                      onClick={() => handlePageChange(i)}
+                      disabled={fixturesLoading}
+                      className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
+                        i === currentPage
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:bg-gray-800 disabled:text-gray-500'
+                      }`}
+                    >
+                      {i}
+                    </button>
+                  )
+                }
+                return pages
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* Loading/Error States */}
+        {fixturesLoading && (
+          <div className="py-4 text-center">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-green-400"></div>
+            <span className="ml-2 text-gray-400 text-sm font-mono">Loading fixtures...</span>
+          </div>
+        )}
+
+        {fixturesError && (
+          <div className="py-4 border-b border-gray-600">
+            <span className="text-red-400 text-sm font-mono">Error loading fixtures: {fixturesError}</span>
+          </div>
+        )}
+
         {/* Team Standings Modal */}
         {selectedTeamStandings && (
           <TeamStandingsModal
@@ -1819,5 +1965,22 @@ export default function FixturesPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function FixturesPage() {
+  return (
+    <Suspense fallback={
+      <div className="fixed inset-0 top-[57px] left-0 right-0 bottom-0 bg-black overflow-auto">
+        <div className="w-full px-4">
+          <div className="py-8 text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-400"></div>
+            <span className="ml-2 text-gray-400 text-sm font-mono">Loading fixtures...</span>
+          </div>
+        </div>
+      </div>
+    }>
+      <FixturesPageContent />
+    </Suspense>
   )
 }

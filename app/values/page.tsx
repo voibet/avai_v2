@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { analyzeValueOpportunities, type Fixture, type ValueOpportunity, type ValueAnalysisConfig } from '@/lib/utils/value-analysis'
 import DataTable, { Column } from '../../components/ui/data-table'
@@ -126,7 +126,7 @@ const RatioFilterRenderer = ({ column, currentFilters, onFilterChange, onClose }
   )
 }
 
-export default function ValuesPage() {
+function ValuesPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -2289,5 +2289,22 @@ export default function ValuesPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function ValuesPage() {
+  return (
+    <Suspense fallback={
+      <div className="fixed inset-0 top-[57px] left-0 right-0 bottom-0 bg-black overflow-auto">
+        <div className="w-full px-4">
+          <div className="py-8 text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-400"></div>
+            <span className="ml-2 text-gray-400 text-sm font-mono">Loading values...</span>
+          </div>
+        </div>
+      </div>
+    }>
+      <ValuesPageContent />
+    </Suspense>
   )
 }
