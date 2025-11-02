@@ -1,13 +1,25 @@
-## Setup
+# AVAI Football Database
 
-1. Install dependencies:
-```bash
-npm install
-```
+A comprehensive football (soccer) data analysis platform with machine learning predictions, betting odds analysis, and value betting opportunities.
 
-2. Create a `.env.local` file in the root directory with your database credentials and API keys:
+## Features
 
-   Required environment variables:
+- **Fixtures Management**: Browse, filter, and analyze football matches with detailed statistics
+- **Machine Learning Predictions**: TensorFlow-based MLP model for match outcome predictions
+- **Value Analysis**: Identify betting value opportunities by comparing bookmaker odds
+- **Real-time Odds Streaming**: Live betting odds updates via streaming APIs
+- **Expected Goals (xG) Integration**: Multiple xG data sources (API-Football, Sofascore, Flashlive)
+- **Admin Dashboard**: League management, data fetching, ML model training, and betting simulations
+
+## Quick Start
+
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Set up environment:**
+   Create `.env.local` with required database and API credentials:
    ```
    DB_USER=your_db_user
    DB_PASSWORD=your_db_password
@@ -17,36 +29,27 @@ npm install
    DB_SSL=false
    ```
 
-3. Run the development server:
-```bash
-npm run dev
-```
+3. **Run the application:**
+   ```bash
+   npm run dev
+   ```
+   The app runs on `http://localhost:3005`
 
-## XG Data Sources
+## Main Sections
 
-The application supports fetching Expected Goals (XG) data from three different sources:
+- **Fixtures**: Browse matches, view statistics, lineups, and odds
+- **Values**: Analyze betting value opportunities across bookmakers
+- **Admin**: Manage leagues, fetch data, train ML models, run simulations
 
-### 1. Native (API-Football)
-- Uses the same API as fixtures
-- Set XG source URL to `NATIVE` in league configuration
-- Fetches XG data directly from API-Football fixture statistics
+## Documentation
 
-### 2. Sofascore
-- Uses tournament and season ID format: `tournamentId-seasonId` (e.g., `22-74091`)
-- Requires RapidAPI subscription for Sofascore endpoints
-- Fetches data from Sofascore's tournaments and match statistics APIs
+- [API Documentation](API_DOCUMENTATION.md) - Complete API reference
+- [Database Schema](schema.sql) - PostgreSQL database structure
 
-### 3. Flashlive
-- Uses tournament stage ID format (e.g., `e98d763a`)
-- Requires RapidAPI subscription for Flashlive endpoints  
-- Fetches data from Flashlive's tournaments results and event statistics APIs
+## Tech Stack
 
-### Requirements
-
-- All three XG source APIs require RapidAPI subscriptions
-- Rate limiting: 5 requests per second (200ms between requests) across all XG API endpoints
-- Intelligent caching: Tournament data is fetched once per league/season and cached for all fixtures
-- Smart Pagination: Automatically searches up to 10 pages with intelligent early termination (stops when enough matches found, on duplicates, fewer results, or empty pages)
-- Processes multiple fixtures sequentially with optimized API usage
-- XG data is only fetched for finished matches (status: AET, FT, PEN) that don't already have XG data
-- Only processes fixtures from seasons marked as `current=true` in the league configuration
+- **Frontend**: Next.js 14, React, Tailwind CSS
+- **Backend**: Next.js API Routes
+- **Database**: PostgreSQL
+- **ML**: TensorFlow.js with custom MLP neural networks
+- **Data Sources**: Multiple football APIs (API-Football, Sofascore, Flashlive) and betting APIs

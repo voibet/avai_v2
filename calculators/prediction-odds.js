@@ -272,38 +272,91 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
         // Get current timestamp
         const timestamp = Math.floor(Date.now() / 1000);
 
-        // Format odds in the same structure as other bookies
-        const oddsX12 = JSON.stringify([{
-          t: timestamp,
-          x12: [homeOdds, drawOdds, awayOdds]
-        }]);
-
-        const oddsOU = JSON.stringify([{
-          t: timestamp,
-          ou_o: ouOddsOver,
-          ou_u: ouOddsUnder
-        }]);
-
-        const oddsAH = JSON.stringify([{
-          t: timestamp,
-          ah_h: ahOddsHome,
-          ah_a: ahOddsAway
-        }]);
-
-        const lines = JSON.stringify([{
-          t: timestamp,
-          ou: ouLines,
-          ah: ahLines
-        }]);
-
-        const latestT = JSON.stringify({
+        const latestT = {
           x12_ts: timestamp,
           ou_ts: timestamp,
           ah_ts: timestamp,
           lines_ts: timestamp
-        });
+        };
 
-        // Insert or update odds in football_odds table
+        // Prepare new odds entries
+        const newX12Entry = { t: timestamp, x12: [homeOdds, drawOdds, awayOdds] };
+        const newOuEntry = { t: timestamp, ou_o: ouOddsOver, ou_u: ouOddsUnder };
+        const newAhEntry = { t: timestamp, ah_h: ahOddsHome, ah_a: ahOddsAway };
+        const newLinesEntry = { t: timestamp, ou: ouLines, ah: ahLines };
+
+        // Check if odds record exists and merge with historical data
+        const existingQuery = `
+          SELECT odds_x12, odds_ou, odds_ah, lines, latest_t 
+          FROM football_odds
+          WHERE fixture_id = $1 AND bookie = $2
+        `;
+        const existingResult = await pool.query(existingQuery, [prediction.fixture_id, 'Prediction']);
+
+        let finalX12Odds = [newX12Entry];
+        let finalOuOdds = [newOuEntry];
+        let finalAhOdds = [newAhEntry];
+        let finalLines = [newLinesEntry];
+        let finalLatestT = latestT;
+
+        if (existingResult.rows.length > 0) {
+          const existing = existingResult.rows[0];
+
+          // Merge X12 odds - add to existing array or replace if same timestamp
+          if (existing.odds_x12) {
+            const existingX12 = existing.odds_x12;
+            const existingIndex = existingX12.findIndex(entry => entry.t === timestamp);
+            if (existingIndex >= 0) {
+              existingX12[existingIndex] = newX12Entry; // Replace if same timestamp
+              finalX12Odds = existingX12;
+            } else {
+              finalX12Odds = [...existingX12, newX12Entry]; // Append new timestamp
+            }
+          }
+
+          // Merge OU odds
+          if (existing.odds_ou) {
+            const existingOu = existing.odds_ou;
+            const existingIndex = existingOu.findIndex(entry => entry.t === timestamp);
+            if (existingIndex >= 0) {
+              existingOu[existingIndex] = newOuEntry;
+              finalOuOdds = existingOu;
+            } else {
+              finalOuOdds = [...existingOu, newOuEntry];
+            }
+          }
+
+          // Merge AH odds
+          if (existing.odds_ah) {
+            const existingAh = existing.odds_ah;
+            const existingIndex = existingAh.findIndex(entry => entry.t === timestamp);
+            if (existingIndex >= 0) {
+              existingAh[existingIndex] = newAhEntry;
+              finalAhOdds = existingAh;
+            } else {
+              finalAhOdds = [...existingAh, newAhEntry];
+            }
+          }
+
+          // Merge lines
+          if (existing.lines) {
+            const existingLines = existing.lines;
+            const existingIndex = existingLines.findIndex(entry => entry.t === timestamp);
+            if (existingIndex >= 0) {
+              existingLines[existingIndex] = newLinesEntry;
+              finalLines = existingLines;
+            } else {
+              finalLines = [...existingLines, newLinesEntry];
+            }
+          }
+
+          // Merge latest_t
+          if (existing.latest_t) {
+            finalLatestT = { ...existing.latest_t, ...latestT };
+          }
+        }
+
+        // Insert or update odds in football_odds table with merged data
         await pool.query(
           `INSERT INTO football_odds (
             fixture_id,
@@ -329,11 +382,11 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
             prediction.fixture_id,
             1, // Prediction model 1
             'Prediction',
-            oddsX12,
-            oddsOU,
-            oddsAH,
-            lines,
-            latestT,
+            JSON.stringify(finalX12Odds),
+            JSON.stringify(finalOuOdds),
+            JSON.stringify(finalAhOdds),
+            JSON.stringify(finalLines),
+            JSON.stringify(finalLatestT),
             3 // decimals = 3 (basis points / 1000)
           ]
         );

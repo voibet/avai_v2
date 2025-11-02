@@ -1,4 +1,4 @@
-import { executeAutoRefresh, isAutoRefreshRunning } from '@/app/api/admin/auto-refresh/route';
+import { executeAutoRefresh, isAutoRefreshRunning } from '@/lib/services/auto-refresh-service';
 
 // Global singleton to prevent multiple schedulers
 const SCHEDULER_INSTANCE_KEY = '__SCHEDULER_INSTANCE__';

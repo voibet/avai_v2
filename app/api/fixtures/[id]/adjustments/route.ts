@@ -83,7 +83,7 @@ export async function POST(
       );
     }
 
-    // Recalculate odds for this fixture using the new adjustments
+    // Recalculate odds for this fixture
     await calculateOddsFromPredictions([Number(fixtureId)]);
 
     return NextResponse.json({

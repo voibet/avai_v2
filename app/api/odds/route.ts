@@ -118,13 +118,18 @@ async function getFixtureOdds(request: Request) {
     query = `
       SELECT
         ff.id as fixture_id,
+        ff.home_team_id,
         ff.home_team_name,
+        ff.away_team_id,
         ff.away_team_name,
         ff.date,
+        ff.league_id,
         ff.league_name,
+        ff.season,
+        ff.status_short,
+        ff.round,
         COALESCE(fo.bookie, ffo.bookie) as bookie,
         COALESCE(fo.decimals, ffo.decimals) as decimals,
-        EXTRACT(epoch FROM COALESCE(fo.updated_at, ffo.updated_at))::integer as updated_at,
         -- Regular odds from football_odds table
         fo.odds_x12,
         fo.odds_ah,
@@ -135,7 +140,7 @@ async function getFixtureOdds(request: Request) {
         ffo.fair_odds_x12,
         ffo.fair_odds_ah,
         ffo.fair_odds_ou,
-        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_latest_lines
+        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines
       FROM football_fixtures ff
       LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
       LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id AND fo.bookie = ffo.bookie
@@ -151,13 +156,18 @@ async function getFixtureOdds(request: Request) {
     query = `
       SELECT
         ff.id as fixture_id,
+        ff.home_team_id,
         ff.home_team_name,
+        ff.away_team_id,
         ff.away_team_name,
         ff.date,
+        ff.league_id,
         ff.league_name,
+        ff.season,
+        ff.status_short,
+        ff.round,
         fo.bookie,
         fo.decimals,
-        EXTRACT(epoch FROM fo.updated_at)::integer as updated_at,
         -- Return full X12 odds array
         fo.odds_x12,
         -- Return full AH odds array
@@ -200,10 +210,16 @@ async function getFixtureOdds(request: Request) {
     if (!fixturesMap.has(fixtureId)) {
       fixturesMap.set(fixtureId, {
         fixture_id: fixtureId,
+        home_team_id: row.home_team_id,
         home_team: row.home_team_name,
+        away_team_id: row.away_team_id,
         away_team: row.away_team_name,
         date: row.date,
+        league_id: row.league_id,
         league: row.league_name,
+        season: row.season,
+        status_short: row.status_short,
+        round: row.round,
         odds: []
       });
     }
@@ -275,7 +291,6 @@ async function getFixtureOdds(request: Request) {
       const oddsObj: any = {
         bookie: row.bookie,
         decimals: row.decimals,
-        updated_at: row.updated_at,
         odds_x12: oddsX12,
         odds_ah: oddsAh,
         odds_ou: oddsOu,
@@ -289,7 +304,7 @@ async function getFixtureOdds(request: Request) {
           oddsObj.fair_odds_x12 = oddsX12 && oddsX12.length > 0 ? oddsX12[oddsX12.length - 1].x12 : null;
           oddsObj.fair_odds_ah = oddsAh && oddsAh.length > 0 ? oddsAh[oddsAh.length - 1] : null;
           oddsObj.fair_odds_ou = oddsOu && oddsOu.length > 0 ? oddsOu[oddsOu.length - 1] : null;
-          oddsObj.fair_latest_lines = lines && lines.length > 0 ? {
+          oddsObj.fair_odds_lines = lines && lines.length > 0 ? {
             ah: lines[lines.length - 1].ah || null,
             ou: lines[lines.length - 1].ou || null
           } : null;
@@ -298,7 +313,7 @@ async function getFixtureOdds(request: Request) {
           oddsObj.fair_odds_x12 = row.fair_odds_x12 || null;
           oddsObj.fair_odds_ah = row.fair_odds_ah || null;
           oddsObj.fair_odds_ou = row.fair_odds_ou || null;
-          oddsObj.fair_latest_lines = row.fair_latest_lines || null;
+          oddsObj.fair_odds_lines = row.fair_odds_lines || null;
         }
       }
 

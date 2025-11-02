@@ -46,6 +46,8 @@ export interface Fixture {
   season: number;
   round?: string;
   updated_at: string;
+  home_pred?: number;
+  away_pred?: number;
 }
 
 export interface FixtureStats {

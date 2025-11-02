@@ -1704,7 +1704,7 @@ export default function FixturesPage() {
             <div className="relative flex-1 max-w-md">
               <input
                 type="text"
-                placeholder="Search teams, leagues, or mappings..."
+                placeholder="Search teams or leagues..."
                 value={searchTerm}
                 onChange={handleSearchChange}
                 onKeyDown={handleSearchSubmit}

@@ -11,13 +11,10 @@ export async function POST() {
         const fetcher = new FixtureFetcher();
 
         // Progress callback to send updates to client
-        const onProgress = (leagueName: string, current: number, total: number) => {
+        const onProgress = (info: string) => {
           const progressData = {
             type: 'progress',
-            league: leagueName,
-            current,
-            total,
-            message: `Fetching ${leagueName} (${current}/${total})`
+            message: info
           };
 
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(progressData)}\n\n`));

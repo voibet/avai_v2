@@ -5,6 +5,12 @@ export interface Fixture {
   date: string
   league: string
   odds: BookieOdds[]
+  home_team_id?: number
+  away_team_id?: number
+  league_id?: number
+  season?: string | number
+  status_short?: string
+  round?: string
 }
 
 export interface BookieOdds {
@@ -24,7 +30,7 @@ export interface BookieOdds {
     fair_ou_o?: number[]
     fair_ou_u?: number[]
   }
-  fair_latest_lines?: {
+  fair_odds_lines?: {
     ah?: number[]
     ou?: number[]
   }
@@ -133,7 +139,7 @@ export function analyzeValueOpportunities(
         const oddsBookieAH = oddsBookieData.odds_ah[0]
         const fairBookieAH = fairOddsBookieData.fair_odds_ah
         const oddsBookieLines = oddsBookieData.lines?.[0]?.ah || []
-        const fairBookieLines = fairOddsBookieData.fair_latest_lines?.ah || []
+        const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ah || []
 
         // AH Away - match by lines
         if (oddsBookieAH.ah_a && fairBookieAH?.fair_ah_a && oddsBookieLines.length > 0 && fairBookieLines.length > 0) {
@@ -159,7 +165,7 @@ export function analyzeValueOpportunities(
                     oddsBookieOdds: odds,
                     fairOddsBookieOdds: fairBookieAH.fair_ah_a[fairBookieIndex],
                     ratio,
-                    line: oddsBookieLine
+                    line: oddsBookieLine === 0 ? 0 : -oddsBookieLine
                   })
                 }
               }
@@ -205,7 +211,7 @@ export function analyzeValueOpportunities(
         const oddsBookieOU = oddsBookieData.odds_ou[0]
         const fairBookieOU = fairOddsBookieData.fair_odds_ou
         const oddsBookieLines = oddsBookieData.lines?.[0]?.ou || []
-        const fairBookieLines = fairOddsBookieData.fair_latest_lines?.ou || []
+        const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ou || []
 
         // OU Over - match by lines
         if (oddsBookieOU.ou_o && fairBookieOU?.fair_ou_o && oddsBookieLines.length > 0 && fairBookieLines.length > 0) {

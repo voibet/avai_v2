@@ -26,13 +26,18 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
     query = `
       SELECT
         COALESCE(fo.fixture_id, ffo.fixture_id) as fixture_id,
+        ff.home_team_id,
         ff.home_team_name,
+        ff.away_team_id,
         ff.away_team_name,
         ff.date,
+        ff.league_id,
         ff.league_name,
+        ff.season,
+        ff.status_short,
+        ff.round,
         COALESCE(fo.bookie, ffo.bookie) as bookie,
         COALESCE(fo.decimals, ffo.decimals) as decimals,
-        EXTRACT(epoch FROM COALESCE(fo.updated_at, ffo.updated_at))::integer as updated_at,
         -- Regular odds from football_odds table
         fo.odds_x12->-1 as odds_x12,
         fo.odds_ah->-1 as odds_ah,
@@ -42,7 +47,7 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
         ffo.fair_odds_x12,
         ffo.fair_odds_ah,
         ffo.fair_odds_ou,
-        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_latest_lines
+        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines
       FROM football_fixtures ff
       LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
       LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id AND fo.bookie = ffo.bookie
@@ -58,13 +63,18 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
     query = `
       SELECT
         fo.fixture_id,
+        ff.home_team_id,
         ff.home_team_name,
+        ff.away_team_id,
         ff.away_team_name,
         ff.date,
+        ff.league_id,
         ff.league_name,
+        ff.season,
+        ff.status_short,
+        ff.round,
         fo.bookie,
         fo.decimals,
-        EXTRACT(epoch FROM fo.updated_at)::integer as updated_at,
         -- Extract latest X12 odds (last element of array using -> -1)
         fo.odds_x12->-1 as odds_x12,
         -- Extract latest AH odds (last element of array using -> -1)
@@ -153,7 +163,20 @@ export async function GET(request: Request) {
     async start(controller) {
       try {
         // Get a dedicated client from the pool for this connection
-        client = await pool.connect();
+        try {
+          client = await pool.connect();
+        } catch (dbError) {
+          console.error('Database connection failed:', dbError);
+          if (dbError instanceof Error && dbError.message.includes('timeout')) {
+            throw new Error('Database connection timeout - pool may be exhausted');
+          }
+          throw new Error(`Database connection failed: ${dbError instanceof Error ? dbError.message : 'Unknown error'}`);
+        }
+
+        if (!client) {
+          console.error('Client is null after pool.connect() - this should not happen');
+          throw new Error('Database client is null after successful connection');
+        }
 
         // Store bookie filter for use in notification handler
         bookieFilterStr = bookieFilter;
@@ -161,21 +184,33 @@ export async function GET(request: Request) {
 
         // Get fixture IDs to listen to their channels
         let finalFixtureIds: number[];
+        let listenToAllFixtures = false;
+        try {
         if (fixtureIds.length > 0) {
           // Use specified fixture IDs
           finalFixtureIds = fixtureIds;
-        } else {
-          // Get all current future fixture IDs to listen to their channels
-          const fixturesResult = await client.query(`
-            SELECT id FROM football_fixtures
-            WHERE LOWER(status_short) = ANY($1) AND date >= CURRENT_DATE
-          `, [IN_FUTURE]);
-          finalFixtureIds = fixturesResult.rows.map(row => row.id);
+          } else {
+            // Listen to ALL future fixtures - don't filter by specific IDs
+            listenToAllFixtures = true;
+            finalFixtureIds = []; // Will query fresh on each notification
+          }
+        } catch (fixtureQueryError) {
+          console.error('Error fetching fixture IDs:', fixtureQueryError);
+          // Continue anyway - we'll listen to all updates
+          listenToAllFixtures = true;
+          finalFixtureIds = [];
         }
 
-        // Listen to all fixture-specific channels
-        for (const fixtureId of finalFixtureIds) {
-          await client.query(`LISTEN odds_update_${fixtureId}`);
+        // Listen to single odds updates channel
+        if (!client) {
+          console.error('Client became null before LISTEN command');
+          throw new Error('Database client is not available');
+        }
+        try {
+          await client.query(`LISTEN odds_updates`);
+        } catch (listenError) {
+          console.error('Failed to LISTEN on odds_updates:', listenError);
+          throw new Error(`Failed to listen on channel odds_updates: ${listenError instanceof Error ? listenError.message : 'Unknown error'}`);
         }
 
         // Send initial "started" message
@@ -186,84 +221,108 @@ export async function GET(request: Request) {
         });
         controller.enqueue(encoder.encode(`data: ${startedData}\n\n`));
 
-        // Set up notification handler for all channels
+        // Set up notification handler for the odds_updates channel
         client.on('notification', async (msg) => {
-          // Check if it's an odds_update channel
-          if (msg.channel.startsWith('odds_update_')) {
+          // Check if it's the odds_updates channel
+          if (msg.channel === 'odds_updates') {
             try {
-              // Extract fixture ID from channel name
-              const fixtureId = parseInt(msg.channel.replace('odds_update_', ''));
+              // Extract fixture ID from payload
+              if (!msg.payload) {
+                console.error('[Odds Stream] Received notification without payload');
+                return;
+              }
+
+              const fixtureId = parseInt(msg.payload);
 
               if (fixtureId && !isNaN(fixtureId)) {
-                // Fetch updated odds data for this specific fixture
-                const updates = await getLatestOddsUpdates(client!, fixtureId, bookieFilterStr, bookieParamsArr, useFairOdds);
+                // Process if: listening to all fixtures OR this specific fixture is in our list
+                if (listenToAllFixtures || finalFixtureIds.includes(fixtureId)) {
+                  const updates = await getLatestOddsUpdates(client!, fixtureId, bookieFilterStr, bookieParamsArr, useFairOdds);
 
-                if (updates.length > 0) {
-                  // Group updates by fixture for cleaner streaming
-                  const fixturesMap = new Map();
+                  if (updates.length > 0) {
+                    // Group updates by fixture for cleaner streaming
+                    const fixturesMap = new Map();
 
-                  updates.forEach(row => {
-                    const fixtureId = row.fixture_id;
+                    updates.forEach(row => {
+                      const fixtureId = row.fixture_id;
 
-                    if (!fixturesMap.has(fixtureId)) {
-                      fixturesMap.set(fixtureId, {
-                        fixture_id: fixtureId,
-                        home_team: row.home_team_name,
-                        away_team: row.away_team_name,
-                        date: row.date,
-                        league: row.league_name,
-                        updated_at: row.updated_at,
-                        odds: []
-                      });
-                    }
-
-                    // Only add odds if they exist (regular odds or fair odds)
-                    if (row.odds_x12 || row.odds_ah || row.odds_ou || row.fair_odds_x12 || row.fair_odds_ah || row.fair_odds_ou) {
-                      const oddsObj: any = {
-                        bookie: row.bookie,
-                        decimals: row.decimals,
-                        updated_at: row.updated_at,
-                        odds_x12: row.odds_x12 || null,
-                        odds_ah: row.odds_ah || null,
-                        odds_ou: row.odds_ou || null,
-                        lines: row.lines || null
-                      };
-
-                      // Add fair odds fields when fair_odds=true
-                      if (useFairOdds) {
-                        if (row.bookie === 'Prediction') {
-                          // For Prediction, use latest regular odds as fair odds (without timestamps) since they're already calculated without margins
-                          oddsObj.fair_odds_x12 = row.odds_x12 && row.odds_x12.length > 0 ? row.odds_x12[row.odds_x12.length - 1].x12 : null;
-                          oddsObj.fair_odds_ah = row.odds_ah && row.odds_ah.length > 0 ? row.odds_ah[row.odds_ah.length - 1] : null;
-                          oddsObj.fair_odds_ou = row.odds_ou && row.odds_ou.length > 0 ? row.odds_ou[row.odds_ou.length - 1] : null;
-                          oddsObj.fair_latest_lines = row.lines && row.lines.length > 0 ? {
-                            ah: row.lines[row.lines.length - 1].ah || null,
-                            ou: row.lines[row.lines.length - 1].ou || null
-                          } : null;
-                        } else {
-                          // For other bookmakers, use calculated fair odds
-                          oddsObj.fair_odds_x12 = row.fair_odds_x12 || null;
-                          oddsObj.fair_odds_ah = row.fair_odds_ah || null;
-                          oddsObj.fair_odds_ou = row.fair_odds_ou || null;
-                          oddsObj.fair_latest_lines = row.fair_latest_lines || null;
-                        }
+                      if (!fixturesMap.has(fixtureId)) {
+                        fixturesMap.set(fixtureId, {
+                          fixture_id: fixtureId,
+                          home_team_id: row.home_team_id,
+                          home_team: row.home_team_name,
+                          away_team_id: row.away_team_id,
+                          away_team: row.away_team_name,
+                          date: row.date,
+                          league_id: row.league_id,
+                          league: row.league_name,
+                          season: row.season,
+                          status_short: row.status_short,
+                          round: row.round,
+                          odds: []
+                        });
                       }
 
-                      fixturesMap.get(fixtureId).odds.push(oddsObj);
-                    }
-                  });
+                      // Only add odds if they exist (regular odds or fair odds)
+                      if (row.odds_x12 || row.odds_ah || row.odds_ou || row.fair_odds_x12 || row.fair_odds_ah || row.fair_odds_ou) {
+                        const oddsObj: any = {
+                          bookie: row.bookie,
+                          decimals: row.decimals,
+                          // Wrap single objects in arrays (SQL ->-1 returns last element, not array)
+                          odds_x12: row.odds_x12 ? [row.odds_x12] : null,
+                          odds_ah: row.odds_ah ? [row.odds_ah] : null,
+                          odds_ou: row.odds_ou ? [row.odds_ou] : null,
+                          lines: row.lines ? [row.lines] : null,
+                          updated_at: row.updated_at
+                        };
 
-                  const fixtures = Array.from(fixturesMap.values());
+                        // Add fair odds fields when fair_odds=true
+                        if (useFairOdds) {
+                          if (row.bookie === 'Prediction') {
+                            // For Prediction, row.odds_x12 is single object (from SQL ->-1), already has latest values
+                            oddsObj.fair_odds_x12 = row.odds_x12 && row.odds_x12.x12 ? row.odds_x12.x12 : null;
+                            oddsObj.fair_odds_ah = row.odds_ah || null;
+                            oddsObj.fair_odds_ou = row.odds_ou || null;
+                            oddsObj.fair_odds_lines = row.lines ? {
+                              ah: row.lines.ah || null,
+                              ou: row.lines.ou || null
+                            } : null;
+                          } else {
+                            // For other bookmakers, use calculated fair odds
+                            oddsObj.fair_odds_x12 = row.fair_odds_x12 || null;
+                            oddsObj.fair_odds_ah = row.fair_odds_ah || null;
+                            oddsObj.fair_odds_ou = row.fair_odds_ou || null;
+                            oddsObj.fair_odds_lines = row.fair_odds_lines || null;
+                          }
+                        }
 
-                  if (fixtures.length > 0) {
-                    // For single fixture streams, return fixture with odds
-                    const data = JSON.stringify({
-                      type: 'odds_update',
-                      timestamp: Date.now(),
-                      fixture_id: fixtures[0].fixture_id,
-                      odds: fixtures[0].odds
+                        fixturesMap.get(fixtureId).odds.push(oddsObj);
+                      }
                     });
-                    controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+
+                    const fixtures = Array.from(fixturesMap.values());
+
+                    if (fixtures.length > 0) {
+                      // Return fixture with odds, including all fixture metadata
+                      const fixture = fixtures[0];
+                      const data = JSON.stringify({
+                        type: 'odds_update',
+                        timestamp: Date.now(),
+                        fixture_id: fixture.fixture_id,
+                        home_team_id: fixture.home_team_id,
+                        home_team_name: fixture.home_team,
+                        away_team_id: fixture.away_team_id,
+                        away_team_name: fixture.away_team,
+                        date: fixture.date,
+                        league_id: fixture.league_id,
+                        league_name: fixture.league,
+                        season: fixture.season,
+                        status_short: fixture.status_short,
+                        round: fixture.round,
+                        odds: fixture.odds
+                      });
+                      controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+                    }
                   }
                 }
               }

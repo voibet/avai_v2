@@ -104,21 +104,6 @@ function calculateMarketXgFromOdds(homeOdds, drawOdds, awayOdds, over25Odds = nu
   };
 }
 
-/**
- * Dixon-Coles correlation adjustment for low-scoring games
- */
-function dixonColesAdjustment(homeGoals, awayGoals, homeXg, awayXg, rho = -0.1) {
-  if (homeGoals === 0 && awayGoals === 0) {
-    return 1 - homeXg * awayXg * rho;
-  } else if (homeGoals === 0 && awayGoals === 1) {
-    return 1 + homeXg * rho;
-  } else if (homeGoals === 1 && awayGoals === 0) {
-    return 1 + awayXg * rho;
-  } else if (homeGoals === 1 && awayGoals === 1) {
-    return 1 - rho;
-  }
-  return 1.0;
-}
 
 /**
  * Calculate and populate market XG using Dixon-Coles Poisson optimization
