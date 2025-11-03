@@ -1,7 +1,7 @@
 'use client'
 
 import { useSearchParams, useRouter } from 'next/navigation'
-import { useState, useCallback, useMemo, useEffect, useRef, Suspense } from 'react'
+import { useState, useCallback, useMemo, useEffect, Suspense } from 'react'
 import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches } from '../../lib/hooks/use-football-data'
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
 import DataTable, { Column } from '../../components/ui/data-table'
@@ -27,11 +27,6 @@ function FixturesPageContent() {
     descriptionPercentages: { [description: string]: number };
     winPercentage: number | null;
   } | null>(null)
-
-  // Streaming state
-  const [streaming, setStreaming] = useState(false)
-  const eventSourceRef = useRef<EventSource | null>(null)
-  const [streamedFixtures, setStreamedFixtures] = useState<Map<number, any>>(new Map())
 
   // Fetch teams and leagues data for search
   const { teams, leagues, loading: searchDataLoading } = useFootballSearchData()
@@ -432,62 +427,6 @@ function FixturesPageContent() {
     window.location.reload()
   }, [])
 
-  // Function to update fixture data when received from stream
-  const updateFixtureData = useCallback((fixtureId: number, fixtureData: any) => {
-    // Store the updated fixture data in state - create new Map to trigger re-render
-    setStreamedFixtures(prev => {
-      const updated = new Map(prev)
-      updated.set(fixtureData.id, fixtureData)
-      return updated
-    })
-  }, [])
-
-  const startStreaming = useCallback(() => {
-    // Prevent starting multiple streams
-    if (streaming) {
-      return
-    }
-
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close()
-    }
-
-    // Simple: stream all non-finished fixtures
-    const streamUrl = new URL('/api/fixtures/stream', window.location.origin)
-    const eventSource = new EventSource(streamUrl.toString())
-
-    eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-
-        if (data.type === 'fixture_update' && data.fixture_id && data.fixture) {
-          updateFixtureData(data.fixture_id, data.fixture)
-        }
-      } catch (error) {
-        console.error('Error parsing streaming data:', error)
-      }
-    }
-
-    eventSource.onerror = (error) => {
-      console.error('EventSource error:', error)
-      setStreaming(false)
-    }
-
-    eventSource.onopen = () => {
-      setStreaming(true)
-    }
-
-    eventSourceRef.current = eventSource
-  }, [updateFixtureData, streaming])
-
-  const stopStreaming = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close()
-      eventSourceRef.current = null
-    }
-    setStreaming(false)
-  }
-
   const handlePageChange = useCallback((page: number) => {
     const params = new URLSearchParams(searchParams.toString())
     params.set('page', page.toString())
@@ -611,9 +550,10 @@ function FixturesPageContent() {
         }
       })
 
-      // Add search parameter
-      if (searchTerm.trim()) {
-        queryParams.append('search', searchTerm.trim())
+      // Add search parameter from URL (only when explicitly submitted)
+      const urlSearchTerm = searchParams.get('search')
+      if (urlSearchTerm && urlSearchTerm.trim()) {
+        queryParams.append('search', urlSearchTerm.trim())
       }
 
       const response = await fetch(`/api/fixtures?${queryParams}`)
@@ -636,19 +576,12 @@ function FixturesPageContent() {
     } finally {
       setFixturesLoading(false)
     }
-  }, [currentPage, currentSort, currentFilters, searchTerm])
+  }, [currentPage, currentSort, currentFilters, searchParams])
 
   // Fetch data when dependencies change
   useEffect(() => {
     fetchFixturesData()
   }, [fetchFixturesData])
-
-  // Start streaming automatically when component mounts
-  useEffect(() => {
-    startStreaming()
-    return () => stopStreaming()
-  }, [])
-
 
   const renderLineupsSection = useCallback((fixture: any) => {
     if (lineupsLoading || coachesLoading) {
@@ -1810,20 +1743,10 @@ function FixturesPageContent() {
 
         <DataTable
         title="FIXTURES"
-        data={useMemo(() => {
-          // Merge streamed updates with fetched data
-          return fixturesData.map(fixture => {
-            // Use fixture ID to match streamed updates
-            const streamedUpdate = streamedFixtures.get(fixture.id)
-            if (streamedUpdate) {
-              return { ...fixture, ...streamedUpdate }
-            }
-            return fixture
-          })
-        }, [fixturesData, streamedFixtures])}
+        data={fixturesData}
         columns={fixturesColumns}
         getItemId={(fixture) => fixture.id || `${fixture.home_team_name}-${fixture.away_team_name}-${fixture.date}`}
-        emptyMessage="No fixtures found with current filters"
+        emptyMessage=""
         filterable={true}
         currentFilters={currentFilters}
         currentSort={currentSort}

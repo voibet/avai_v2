@@ -6,8 +6,11 @@ import { IN_PAST, IN_PLAY, IN_FUTURE } from '../constants';
 interface ChainOptions {
   type: 'league' | 'all';
   leagueId?: number;
+  fixtureId?: number;
   onProgress?: (message: string, current: number, total: number) => void;
   skipFixtureFetch?: boolean;
+  skipXG?: boolean;
+  forceStatsUpdate?: boolean;
 }
 
 interface ChainResult {
@@ -18,16 +21,19 @@ interface ChainResult {
 }
 
 export async function executeChain(options: ChainOptions): Promise<ChainResult> {
-  const { type, leagueId, onProgress, skipFixtureFetch = false } = options;
+  const { type, leagueId, fixtureId, onProgress, skipFixtureFetch = false, skipXG = false, forceStatsUpdate = false } = options;
 
   let fixturesUpdated = 0;
-  let xgUpdated = 0;
-
   let statusChangedToPastCount = 0;
+
+  // Calculate total steps based on what we're actually doing
+  const totalSteps = 5 - (skipFixtureFetch ? 1 : 0) - (skipXG ? 1 : 0);
+  let currentStep = 0;
 
   // Step 1: Fetch fixtures (skip if requested)
   if (!skipFixtureFetch) {
-    console.log('[1/5] Fetching fixtures...');
+    currentStep++;
+    onProgress?.(`Step ${currentStep}/${totalSteps}: Fetching fixtures...`, currentStep, totalSteps);
     const fixtureFetcher = new FixtureFetcher();
 
     let fixtureResult;
@@ -40,22 +46,21 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
         [leagueId!.toString()]: [currentSeason.toString()]
       };
       fixtureResult = await fixtureFetcher.fetchAndUpdateFixtures(
-        (info: string) => console.log(`[1/5] Fetched ${info}`),
+        (info: string) => onProgress?.(`Fetched ${info}`, currentStep, totalSteps),
         selectedSeasons
       );
     } else {
       fixtureResult = await fixtureFetcher.fetchAndUpdateFixtures(
-        (info: string) => console.log(`[1/5] Fetched ${info}`)
+        (info: string) => onProgress?.(`Fetched ${info}`, currentStep, totalSteps)
       );
     }
     fixturesUpdated = fixtureResult.updatedCount || 0;
     statusChangedToPastCount = fixtureResult.statusChangedToPastCount || 0;
-  } else {
-    console.log('[1/5] Skipping fixture fetch');
   }
 
   // Step 2: Calculate market XG for any fixtures that need it (IN_PAST or IN_PLAY with NULL market XG)
-  console.log('[2/5] Checking for market XG calculations...');
+  currentStep++;
+  onProgress?.(`Step ${currentStep}/${totalSteps}: Checking for market XG calculations...`, currentStep, totalSteps);
 
   let fixturesNeedingMarketXGQuery: string;
   let fixturesNeedingMarketXGResult: any;
@@ -90,39 +95,49 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
     console.log(`Market XG calculation complete`);
   }
 
-  // Step 3: Fetch xG data for completed matches
-  console.log('[3/5] Fetching xG data...');
-  onProgress?.('Step 3/5: Fetching xG data...', 3, 5);
+  // Step 3: Fetch xG data for completed matches (skip if requested)
+  let xgUpdated = 0;
+  let xgUpdatedFixtureIds: number[] = [];
 
-  const xgFetcher = new XGFetcher();
-  let xgResult;
+  if (!skipXG) {
+    currentStep++;
+    onProgress?.(`Step ${currentStep}/${totalSteps}: Fetching xG data...`, currentStep, totalSteps);
 
-  if (type === 'league') {
-    xgResult = await xgFetcher.fetchXGDataForLeague(
-      leagueId!,
-      (msg: string) => onProgress?.(`xG: ${msg}`, 2, 4)
-    );
-  } else {
-    xgResult = await xgFetcher.fetchXGDataForAllLeagues(
-      (msg: string) => onProgress?.(`xG: ${msg}`, 2, 4)
-    );
+    const xgFetcher = new XGFetcher();
+    let xgResult;
+
+    if (type === 'league') {
+      xgResult = await xgFetcher.fetchXGDataForLeague(
+        leagueId!,
+        (msg: string) => onProgress?.(`xG: ${msg}`, 2, 4)
+      );
+    } else {
+      xgResult = await xgFetcher.fetchXGDataForAllLeagues(
+        (msg: string) => onProgress?.(`xG: ${msg}`, 2, 4)
+      );
+    }
+
+    xgUpdated = xgResult.updatedCount || 0;
+    xgUpdatedFixtureIds = xgResult.updatedFixtureIds || [];
   }
 
-  xgUpdated = xgResult.updatedCount || 0;
-  const xgUpdatedFixtureIds = xgResult.updatedFixtureIds || [];
-
-  // Step 4: Update statistics and predictions if we have meaningful changes
-  // Trigger calculations if: market XG was calculated OR basic XG was updated
-  const hasMeaningfulChanges = marketXGCalculatedFixtureIds.length > 0 || xgUpdatedFixtureIds.length > 0;
+  // Step 4: Update statistics and predictions if we have meaningful changes or forced update
+  // Trigger calculations if: market XG was calculated OR basic XG was updated OR forced update
+  const hasMeaningfulChanges = marketXGCalculatedFixtureIds.length > 0 || xgUpdatedFixtureIds.length > 0 || forceStatsUpdate;
 
   if (hasMeaningfulChanges) {
-    console.log('[4/5] Updating statistics...');
-    onProgress?.('Step 4/5: Updating statistics...', 4, 5);
+    currentStep++;
+    onProgress?.(`Step ${currentStep}/${totalSteps}: Updating statistics...`, currentStep, totalSteps);
 
 
     // Collect all fixture IDs that need statistics updates
     const allAffectedFixtureIds = [...marketXGCalculatedFixtureIds, ...xgUpdatedFixtureIds];
-    
+
+    // If doing forced update for a specific fixture, include that fixture's teams
+    if (forceStatsUpdate && fixtureId) {
+      allAffectedFixtureIds.push(fixtureId);
+    }
+
     // Get teams from the affected fixtures
     let affectedTeams: number[] = [];
     if (allAffectedFixtureIds.length > 0) {
@@ -180,26 +195,22 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
         await pool.query('SELECT populate_adjusted_rolling_market_xg_batch($1)', [futureFixtureIds]);
 
         // Step 5: Generate predictions and odds
-        console.log('[5/5] Generating predictions...');
-        onProgress?.('Step 5/5: Generating predictions...', 5, 5);
+        currentStep++;
+        onProgress?.(`Step ${currentStep}/${totalSteps}: Generating predictions...`, currentStep, totalSteps);
         const { predictFixtures } = await import('@/lib/ml/ml-predict');
         await predictFixtures({ fixtureIds: futureFixtureIds });
 
         const { calculateOddsFromPredictions } = await import('@/calculators/prediction-odds.js');
         await calculateOddsFromPredictions(futureFixtureIds);
       } else {
-        console.log('[5/5] No future fixtures to update');
+        onProgress?.(`No future fixtures to update`, currentStep, totalSteps);
       }
     } else {
-      console.log('[4/5] No teams affected, skipping statistics update');
+      onProgress?.(`No teams affected, skipping statistics update`, currentStep, totalSteps);
     }
   } else {
-    console.log('[4/5] No meaningful changes, skipping updates');
-    onProgress?.('Step 4/5: No meaningful changes, skipping updates...', 4, 5);
+    onProgress?.(`Step ${currentStep}/${totalSteps}: No meaningful changes, skipping updates...`, currentStep, totalSteps);
   }
-
-  // Log chain completion
-  console.log(`✓ Chain complete: ${fixturesUpdated} fixtures fetched, ${xgUpdated} xG updated`);
 
   return {
     success: true,

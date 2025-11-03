@@ -75,21 +75,51 @@ async function runTask() {
           
         } else if (mode === 'test') {
           // TEST MODE (with metrics)
-          console.log(`[Process] Starting test training with ${trainingData.length} training fixtures`);
-          
-          const result = await trainAndPredict({
-            trainingData,
-            predictionData,
-            features,
-            epochs: epochs,
-            batchSize: batchSize,
-            calculateMetrics: true
-          });
+          // Redirect ALL console output to stderr so stdout contains only JSON results
+          const originalConsoleLog = console.log;
+          const originalConsoleError = console.error;
+          console.log = (...args) => originalConsoleError(...args);
+          console.error = (...args) => originalConsoleError(...args);
 
-          console.log(`[Process] Test complete with metrics calculated`);
-          
+          let result;
+          try {
+            result = await trainAndPredict({
+              trainingData,
+              predictionData,
+              features,
+              epochs: epochs,
+              batchSize: batchSize,
+              calculateMetrics: true
+            });
+
+            // Output results to parent process via stdout (JSON only)
+            const testResults = {
+              success: true,
+              message: 'Model performance test completed successfully',
+              config: {
+                features,
+                epochs,
+                batchSize
+              },
+              metrics: result.metrics,
+              data: {
+                totalFixtures: trainingData.length + predictionData.length,
+                trainFixtures: trainingData.length,
+                testFixtures: predictionData.length
+              },
+              modelStats: result.modelData.stats
+            };
+
+            // Write results to stdout for parent process to capture
+            process.stdout.write(JSON.stringify(testResults));
+          } finally {
+            // Restore console methods
+            console.log = originalConsoleLog;
+            console.error = originalConsoleError;
+          }
+
           // Cleanup tensors (test mode doesn't save the model)
-          if (result.modelData) {
+          if (result && result.modelData) {
             result.modelData.model.dispose();
             result.modelData.minVals.dispose();
             result.modelData.maxVals.dispose();

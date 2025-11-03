@@ -35,6 +35,17 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
     awayAdjustment: '',
     reason: ''
   })
+  const [teamMappingsText, setTeamMappingsText] = useState({
+    home_team_mappings: '',
+    away_team_mappings: ''
+  })
+  const [eventIds, setEventIds] = useState({
+    flashlive: '',
+    sofascore: '',
+    sofascoreOdds: ''
+  })
+  const [xgFetchLoading, setXgFetchLoading] = useState(false)
+  const [oddsFetchLoading, setOddsFetchLoading] = useState(false)
 
   useEffect(() => {
     // Fetch team mappings for both teams
@@ -43,14 +54,31 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
         const response = await fetch(`/api/admin/fixtures/${fixture.id}/mappings`)
         if (response.ok) {
           const data = await response.json()
+          const homeMappings = data.home_mappings || []
+          const awayMappings = data.away_mappings || []
           setFormData((prev: any) => ({
             ...prev,
-            home_team_mappings: JSON.stringify(data.home_mappings || [], null, 2),
-            away_team_mappings: JSON.stringify(data.away_mappings || [], null, 2)
+            home_team_mappings: JSON.stringify(homeMappings, null, 2),
+            away_team_mappings: JSON.stringify(awayMappings, null, 2)
           }))
+          setTeamMappingsText({
+            home_team_mappings: homeMappings.length > 0 ? homeMappings.join('\n') + '\n' : fixture.home_team_name + '\n',
+            away_team_mappings: awayMappings.length > 0 ? awayMappings.join('\n') + '\n' : fixture.away_team_name + '\n'
+          })
+        } else {
+          // If fetch fails or returns no data, use team names as defaults
+          setTeamMappingsText({
+            home_team_mappings: fixture.home_team_name + '\n',
+            away_team_mappings: fixture.away_team_name + '\n'
+          })
         }
       } catch (error) {
         console.error('Failed to fetch team mappings:', error)
+        // On error, use team names as defaults
+        setTeamMappingsText({
+          home_team_mappings: fixture.home_team_name + '\n',
+          away_team_mappings: fixture.away_team_name + '\n'
+        })
       }
     }
 
@@ -102,6 +130,8 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
       away_country: fixture.away_country ?? '',
       xg_home: fixture.xg_home ?? '',
       xg_away: fixture.xg_away ?? '',
+      market_xg_home: fixture.market_xg_home ?? '',
+      market_xg_away: fixture.market_xg_away ?? '',
       goals_home: fixture.goals_home ?? '',
       goals_away: fixture.goals_away ?? '',
       score_halftime_home: fixture.score_halftime_home ?? '',
@@ -119,6 +149,12 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
       round: fixture.round ?? '',
       home_team_mappings: '[]',
       away_team_mappings: '[]'
+    })
+
+    // Initialize team mappings text with team names as defaults
+    setTeamMappingsText({
+      home_team_mappings: fixture.home_team_name + '\n',
+      away_team_mappings: fixture.away_team_name + '\n'
     })
 
     // Fetch available bookies
@@ -142,7 +178,8 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
   // Helper function to convert line-by-line text to JSON array
   const textToJsonArray = (text: string): string => {
     if (!text.trim()) return '[]'
-    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+    // Split by newlines and filter out empty/whitespace-only lines
+    const lines = text.split('\n').filter(line => line.trim().length > 0)
     return JSON.stringify(lines, null, 2)
   }
 
@@ -151,7 +188,7 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
     try {
       const array = JSON.parse(jsonString)
       if (Array.isArray(array)) {
-        return array.join('\n')
+        return array.join('\n') + (array.length > 0 ? '\n' : '')
       }
       return ''
     } catch {
@@ -160,14 +197,28 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
   }
 
   const handleInputChange = (field: string, value: any) => {
-    // Special handling for team mappings - convert line-by-line input to JSON array
+    // Special handling for team mappings - update raw text without conversion
     if (field === 'home_team_mappings' || field === 'away_team_mappings') {
-      value = textToJsonArray(value)
+      setTeamMappingsText((prev: any) => ({
+        ...prev,
+        [field]: value
+      }))
+      return
     }
 
     setFormData((prev: any) => ({
       ...prev,
       [field]: value
+    }))
+  }
+
+  const handleTeamMappingsBlur = (field: string) => {
+    // Convert raw text to JSON array when field loses focus
+    const rawText = teamMappingsText[field as keyof typeof teamMappingsText]
+    const jsonValue = textToJsonArray(rawText)
+    setFormData((prev: any) => ({
+      ...prev,
+      [field]: jsonValue
     }))
   }
 
@@ -197,6 +248,137 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
     )
   }
 
+  const handleEventIdChange = (source: 'flashlive' | 'sofascore' | 'sofascoreOdds', value: string) => {
+    setEventIds((prev: any) => ({
+      ...prev,
+      [source]: value
+    }))
+  }
+
+  const fetchOddsByEventId = async () => {
+    const eventId = eventIds.sofascoreOdds
+    if (!eventId.trim()) {
+      setError('Please enter a Sofascore Event ID for odds')
+      return
+    }
+
+    setOddsFetchLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/fixtures/xg/fetch-odds', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          eventId: eventId.trim()
+        })
+      })
+
+      const data = await response.json()
+
+      if (data.success && data.oddsData) {
+        // Update the odds data with the fetched values
+        setOddsData((prev: any) => ({
+          ...prev,
+          ...data.oddsData
+        }))
+        setSuccess(true)
+        setTimeout(() => setSuccess(false), 3000)
+      } else {
+        setError(data.message || 'Failed to fetch odds data')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch odds data')
+    } finally {
+      setOddsFetchLoading(false)
+    }
+  }
+
+  const fetchXGByEventId = async (source: 'flashlive' | 'sofascore' | 'native') => {
+    // For native source, we don't need an eventId - use fixture ID directly
+    if (source === 'native') {
+      setXgFetchLoading(true)
+      setError(null)
+
+      try {
+        const response = await fetch('/api/fixtures/xg/fetch-by-id', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            source,
+            fixtureId: fixture.id
+          })
+        })
+
+        const data = await response.json()
+
+        if (data.success && data.xgData) {
+          // Update the form data with the fetched XG values
+          setFormData((prev: any) => ({
+            ...prev,
+            xg_home: data.xgData.home,
+            xg_away: data.xgData.away
+          }))
+          setSuccess(true)
+          setTimeout(() => setSuccess(false), 3000)
+        } else {
+          setError(data.message || 'Failed to fetch XG data')
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch XG data')
+      } finally {
+        setXgFetchLoading(false)
+      }
+      return
+    }
+
+    // For flashlive and sofascore, require eventId
+    const eventId = eventIds[source]
+    if (!eventId.trim()) {
+      setError('Please enter an Event ID first')
+      return
+    }
+
+    setXgFetchLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/fixtures/xg/fetch-by-id', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          source,
+          eventId: eventId.trim()
+        })
+      })
+
+      const data = await response.json()
+
+      if (data.success && data.xgData) {
+        // Update the form data with the fetched XG values
+        setFormData((prev: any) => ({
+          ...prev,
+          xg_home: data.xgData.home,
+          xg_away: data.xgData.away
+        }))
+        setSuccess(true)
+        setTimeout(() => setSuccess(false), 3000)
+      } else {
+        setError(data.message || 'Failed to fetch XG data')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch XG data')
+    } finally {
+      setXgFetchLoading(false)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -204,8 +386,17 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
     setSuccess(false)
 
     try {
+      // Ensure team mappings are converted before submission
+      const finalFormData = { ...formData }
+      if (teamMappingsText.home_team_mappings) {
+        finalFormData.home_team_mappings = textToJsonArray(teamMappingsText.home_team_mappings)
+      }
+      if (teamMappingsText.away_team_mappings) {
+        finalFormData.away_team_mappings = textToJsonArray(teamMappingsText.away_team_mappings)
+      }
+
       // Convert empty strings to null for nullable fields, and convert numeric strings to numbers
-      const submitData = Object.entries(formData).reduce((acc, [key, value]) => {
+      const submitData = Object.entries(finalFormData).reduce((acc, [key, value]) => {
         if (value === '') {
           acc[key] = null
         } else if (typeof value === 'string' && !isNaN(Number(value)) && value.trim() !== '') {
@@ -281,6 +472,31 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
       }
 
       setSuccess(true)
+
+      // Trigger targeted calculations for the league (market XG, stats, predictions only)
+      try {
+        fetch('/api/admin/chain', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            type: 'league',
+            leagueId: fixture.league_id,
+            fixtureId: fixture.id,
+            skipFixtureFetch: true,
+            skipXG: true,
+            forceStatsUpdate: true
+          })
+        }).catch(error => {
+          console.warn('Failed to trigger chain calculations:', error)
+          // Don't show error to user - chain failure shouldn't block fixture save
+        })
+      } catch (chainError) {
+        console.warn('Failed to trigger chain calculations:', chainError)
+        // Don't show error to user - chain failure shouldn't block fixture save
+      }
+
       setTimeout(() => {
         onUpdate()
         onClose()
@@ -309,6 +525,31 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
       }
 
       setSuccess(true)
+
+      // Trigger targeted calculations for the league after deletion (market XG, stats, predictions only)
+      try {
+        fetch('/api/admin/chain', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            type: 'league',
+            leagueId: fixture.league_id,
+            fixtureId: fixture.id,
+            skipFixtureFetch: true,
+            skipXG: true,
+            forceStatsUpdate: true
+          })
+        }).catch(error => {
+          console.warn('Failed to trigger chain calculations after deletion:', error)
+          // Don't show error to user - chain failure shouldn't block fixture deletion
+        })
+      } catch (chainError) {
+        console.warn('Failed to trigger chain calculations after deletion:', chainError)
+        // Don't show error to user - chain failure shouldn't block fixture deletion
+      }
+
       setTimeout(() => {
         if (onDelete) onDelete()
         onUpdate()
@@ -520,8 +761,9 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
                     <div>
                       <label className={labelClasses}>Team Mappings (one per line)</label>
                       <textarea
-                        value={jsonArrayToText(formData.home_team_mappings)}
+                        value={teamMappingsText.home_team_mappings}
                         onChange={(e) => handleInputChange('home_team_mappings', e.target.value)}
+                        onBlur={() => handleTeamMappingsBlur('home_team_mappings')}
                         className={`${inputClasses} font-mono text-xs h-24 resize-none`}
                         placeholder={`Real Madrid${'\n'}Real Madrid CF${'\n'}Real Madrid Club de Fútbol`}
                       />
@@ -565,8 +807,9 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
                     <div>
                       <label className={labelClasses}>Team Mappings (one per line)</label>
                       <textarea
-                        value={jsonArrayToText(formData.away_team_mappings)}
+                        value={teamMappingsText.away_team_mappings}
                         onChange={(e) => handleInputChange('away_team_mappings', e.target.value)}
+                        onBlur={() => handleTeamMappingsBlur('away_team_mappings')}
                         className={`${inputClasses} font-mono text-xs h-24 resize-none`}
                         placeholder={`Real Madrid${'\n'}Real Madrid CF${'\n'}Real Madrid Club de Fútbol`}
                       />
@@ -579,7 +822,7 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
             {/* Scores */}
             <div className="border-t border-gray-600 pt-3">
               <h3 className="text-lg font-bold text-white font-mono mb-3">SCORES</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                 <div>
                   <label className={labelClasses}>Home Goals</label>
                   <input
@@ -618,7 +861,28 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
                     className={inputClasses}
                   />
                 </div>
+                <div>
+                  <label className={labelClasses}>Market Home XG</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.market_xg_home}
+                    onChange={(e) => handleInputChange('market_xg_home', e.target.value)}
+                    className={inputClasses}
+                  />
+                </div>
+                <div>
+                  <label className={labelClasses}>Market Away XG</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.market_xg_away}
+                    onChange={(e) => handleInputChange('market_xg_away', e.target.value)}
+                    className={inputClasses}
+                  />
+                </div>
               </div>
+
             </div>
 
             {/* Half Time and Full Time Scores */}
@@ -969,6 +1233,84 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Compact XG and Odds Fetch */}
+            <div className="border-t border-gray-600 pt-3 mt-4">
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <span className="text-gray-400 font-mono">Fetch:</span>
+
+                {/* Native XG Fetch */}
+                <button
+                  type="button"
+                  onClick={() => fetchXGByEventId('native')}
+                  disabled={xgFetchLoading}
+                  className="px-2 py-1 bg-green-600 hover:bg-green-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-mono rounded transition-colors"
+                  title="Fetch XG from API-Football (uses fixture ID)"
+                >
+                  {xgFetchLoading ? '...' : 'XG API'}
+                </button>
+
+                {/* Flashlive XG Fetch */}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={eventIds.flashlive}
+                    onChange={(e) => handleEventIdChange('flashlive', e.target.value)}
+                    className={`${inputClasses} text-xs w-20`}
+                    placeholder="FL ID"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fetchXGByEventId('flashlive')}
+                    disabled={xgFetchLoading || !eventIds.flashlive.trim()}
+                    className="px-2 py-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-mono rounded transition-colors"
+                    title="Fetch XG from Flashlive"
+                  >
+                    {xgFetchLoading ? '...' : 'XG FL'}
+                  </button>
+                </div>
+
+                {/* Sofascore XG Fetch */}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={eventIds.sofascore}
+                    onChange={(e) => handleEventIdChange('sofascore', e.target.value)}
+                    className={`${inputClasses} text-xs w-20`}
+                    placeholder="SC ID"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fetchXGByEventId('sofascore')}
+                    disabled={xgFetchLoading || !eventIds.sofascore.trim()}
+                    className="px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-mono rounded transition-colors"
+                    title="Fetch XG from Sofascore"
+                  >
+                    {xgFetchLoading ? '...' : 'XG SC'}
+                  </button>
+                </div>
+
+                {/* Sofascore Odds Fetch */}
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={eventIds.sofascoreOdds}
+                    onChange={(e) => handleEventIdChange('sofascoreOdds', e.target.value)}
+                    className={`${inputClasses} text-xs w-20`}
+                    placeholder="SC ID"
+                  />
+                  <button
+                    type="button"
+                    onClick={fetchOddsByEventId}
+                    disabled={oddsFetchLoading || !eventIds.sofascoreOdds.trim()}
+                    className="px-2 py-1 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-mono rounded transition-colors"
+                    title="Fetch opening/closing odds from Sofascore"
+                  >
+                    {oddsFetchLoading ? '...' : 'ODDS'}
+                  </button>
                 </div>
               </div>
             </div>

@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import pool from '../../../../../lib/database/db';
-import { trainAndPredict } from '../../../../../lib/ml/ml-evaluation';
-import { savePredictions } from '../../../../../lib/database/db-utils';
+import { startMLPWorker } from '../../../../../lib/ml/ml-worker';
 
 
 export const dynamic = 'force-dynamic';
 
-// POST - Test model performance on historical data
+// POST - Test model performance on historical data (background process)
 // Query parameters:
 // - selectedFeatures: Comma-separated list of features to use (default: all)
 // - epochs: Number of training epochs (default: 150)
@@ -106,45 +105,38 @@ export async function POST(request: Request) {
 
     console.log(`[MLP Test] Training on ${trainData.length} fixtures, testing on ${testData.length} fixtures`);
 
-    // Train model and make predictions with full evaluation metrics
-    console.log('[MLP Test] Training model and evaluating performance...');
-    const result = await trainAndPredict({
+    // Start testing in background process
+    console.log('[MLP Test] Starting background testing process...');
+    startMLPWorker('test', {
       trainingData: trainData,
       predictionData: testData,
       features,
       epochs,
-      batchSize,
-      calculateMetrics: true
+      batchSize
+    }, (result) => {
+      // This callback will be called when the background process completes
+      if (result) {
+        console.log('[MLP Test] Background test completed successfully');
+        // Results are handled in the background process - predictions are saved to DB
+      } else {
+        console.error('[MLP Test] Background test failed or returned no results');
+      }
     });
 
-    // Save test predictions to database
-    const savedCount = await savePredictions(result.predictions);
-    console.log(`[MLP Test] Saved ${savedCount} test predictions to database`);
-
-    // Clean up TensorFlow resources
-    result.modelData.model.dispose();
-    result.modelData.minVals.dispose();
-    result.modelData.maxVals.dispose();
-    result.modelData.range.dispose();
-
-    console.log(`[MLP Test] Test completed with comprehensive evaluation metrics`);
-
+    // Return immediately - results will be processed in background
     return NextResponse.json({
       success: true,
-      message: 'Model performance test completed successfully',
+      message: 'Model performance test started in background. Results will be saved to database when complete.',
       config: {
         features,
         epochs,
         batchSize
       },
-      metrics: result.metrics,
       data: {
         totalFixtures: allFixtures.length,
         trainFixtures: trainData.length,
-        testFixtures: testData.length,
-        predictionsSaved: savedCount
-      },
-      modelStats: result.modelData.stats
+        testFixtures: testData.length
+      }
     });
 
   } catch (error) {

@@ -244,6 +244,14 @@ export default function AdminPage() {
     setProgress(null);
 
     try {
+      // Show initial progress
+      setProgress({
+        league: leagueName,
+        current: 1,
+        total: 3,
+        message: 'Running chain calculations...'
+      });
+
       const response = await fetch('/api/admin/chain', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -254,57 +262,19 @@ export default function AdminPage() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Handle Server-Sent Events stream
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
+      // Handle JSON response
+      const data = await response.json();
 
-      if (!reader) {
-        throw new Error('Failed to get response reader');
-      }
-
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6)); // Remove 'data: ' prefix
-
-              if (data.type === 'progress') {
-                setProgress({
-                  league: leagueName,
-                  current: data.current,
-                  total: data.total,
-                  message: data.message
-                });
-              } else if (data.type === 'complete') {
-                setResult({
-                  success: data.success !== false,
-                  message: data.message || 'Chain completed successfully'
-                });
-                setProgress(null);
-              } else if (data.type === 'error') {
-                setResult({
-                  success: false,
-                  message: data.message
-                });
-                setProgress(null);
-              }
-            } catch (parseError) {
-              console.error('Failed to parse SSE data:', line, parseError);
-            }
-          }
-        }
+      if (data.success !== false) {
+        setResult({
+          success: true,
+          message: data.message || 'Chain completed successfully'
+        });
+      } else {
+        setResult({
+          success: false,
+          message: data.message || 'Chain failed'
+        });
       }
 
     } catch (error) {
@@ -312,9 +282,9 @@ export default function AdminPage() {
         success: false,
         message: error instanceof Error ? error.message : 'An error occurred'
       });
-      setProgress(null);
     } finally {
       setIsLoading(false);
+      setProgress(null);
     }
   };
 

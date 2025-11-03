@@ -192,7 +192,7 @@ async function calculateOddsFromPredictions(fixtureIds = null) {
     const predictions = result.rows;
 
     if (predictions.length === 0) {
-      console.log('   ℹ️  No predictions to process. Run MLP predictions first.');
+      console.log('   No predictions to process. ');
       return 0;
     }
 

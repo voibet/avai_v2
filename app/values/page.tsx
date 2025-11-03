@@ -2056,10 +2056,10 @@ function ValuesPageContent() {
       try {
         const data = JSON.parse(event.data)
 
-
-        // Handle streaming updates
-        if (data.fixture_id) {
+        // Handle streaming updates - check for fixture_update type
+        if (data.type === 'fixture_update' && data.fixture_id && data.fixture) {
           const fixtureId = data.fixture_id.toString()
+          const fixture = data.fixture
 
           // Update fixture data using streamedFixtures Map (for all fixtures)
           const updateData: any = {}
@@ -2070,39 +2070,20 @@ function ValuesPageContent() {
           }
 
           // Update fixture data if provided
-          if (data.home_team_name) {
-            updateData.home_team = data.home_team_name
-            updateData.away_team = data.away_team_name
-            updateData.date = data.date
-            updateData.league = data.league_name
+          if (fixture.home_team_name) {
+            updateData.home_team = fixture.home_team_name
+            updateData.away_team = fixture.away_team_name
+            updateData.date = fixture.date
+            updateData.league = fixture.league_name
           }
 
-          // Update odds data if provided
-          if (data.odds) {
-            updateData.odds = data.odds
+          // Update odds data if provided (odds are in the fixture object)
+          // Note: The stream may send odds updates separately, so we need to handle both cases
+          if (fixture.odds) {
+            updateData.odds = fixture.odds
           }
           
           updateFixtureData(fixtureId, updateData)
-          
-          // Check if this is a new fixture we don't have yet
-          setFixtures(prevFixtures => {
-            const existingFixture = prevFixtures.find(f => f.fixture_id === fixtureId)
-
-            if (!existingFixture && data.odds && data.odds.length > 0) {
-              // This is a new fixture - add it to base fixtures list
-              const newFixture: Fixture = {
-                fixture_id: fixtureId,
-                home_team: data.home_team_name || '',
-                away_team: data.away_team_name || '',
-                date: data.date || new Date().toISOString(),
-                league: data.league_name || '',
-                odds: [] // Empty initially, streamedFixtures has the actual odds
-              }
-              return [...prevFixtures, newFixture]
-            }
-
-            return prevFixtures
-          })
         }
       } catch (error) {
         console.error('Error parsing odds streaming data:', error)
@@ -2139,6 +2120,8 @@ function ValuesPageContent() {
           const data = await response.json()
           const newFixtures = (data.fixtures as Fixture[]) || []
           setFixtures(newFixtures)
+          // Clear streaming updates since we have fresh data
+          setStreamedFixtures(new Map())
         }
       } catch (err) {
         console.error('Error refreshing fixtures:', err)
@@ -2168,7 +2151,7 @@ function ValuesPageContent() {
 
 
   const formatOdds = (odds: number, decimals: number) => {
-    return (odds / Math.pow(10, decimals)).toFixed(decimals === 2 ? 2 : 3)
+    return (odds / Math.pow(10, decimals)).toFixed(decimals)
   }
 
   const getTypeLabel = (type: string, oddsIndex?: number, line?: number) => {

@@ -455,24 +455,25 @@ export class XGFetcher {
       });
 
       const statistics = response.data.response || [];
-      
+
       // Extract both home and away xG from the full statistics
       let homeXG = 0;
       let awayXG = 0;
 
+      // Convert fixture team IDs to numbers for comparison
+      const fixtureHomeTeamId = parseInt(fixture.home_team_id.toString());
+      const fixtureAwayTeamId = parseInt(fixture.away_team_id.toString());
+
       for (const teamStats of statistics) {
-        // Convert fixture team IDs to numbers for comparison
-        const fixtureHomeTeamId = parseInt(fixture.home_team_id.toString());
-        const fixtureAwayTeamId = parseInt(fixture.away_team_id.toString());
-        
-        const isHome = teamStats.team.id === fixtureHomeTeamId;
-        const isAway = teamStats.team.id === fixtureAwayTeamId;
-        
+        const teamId = teamStats.team.id;
+        const isHome = teamId === fixtureHomeTeamId;
+        const isAway = teamId === fixtureAwayTeamId;
+
         if (teamStats.statistics) {
           for (const stat of teamStats.statistics) {
             if (stat.type === 'expected_goals') {
               const xgValue = parseFloat(stat.value) || 0;
-              
+
               if (isHome) {
                 homeXG = xgValue;
               } else if (isAway) {
@@ -489,11 +490,9 @@ export class XGFetcher {
       if (homeXG > 0 || awayXG > 0) {
         return { home: homeXG, away: awayXG };
       } else {
-        console.log(`No xG statistics available for match ${fixture.id}`);
         return null;
       }
     } catch (error) {
-      console.error('Error fetching native XG:');
       return null;
     }
   }
@@ -967,5 +966,228 @@ export class XGFetcher {
   private clearCaches(): void {
     this.sofascoreCache.clear();
     this.flashliveCache.clear();
+  }
+
+  // New methods for fetching XG by EVENT_ID directly (for manual entry in edit modal)
+  async fetchFlashliveXGByEventId(eventId: string): Promise<XGData | null> {
+    try {
+
+      // Get statistics for the event
+      const statsResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/events/statistics', {
+        headers: {
+          'x-rapidapi-key': this.rapidApiKey,
+          'x-rapidapi-host': 'flashlive-sports.p.rapidapi.com'
+        },
+        params: {
+          event_id: eventId,
+          locale: 'en_INT'
+        },
+        timeout: 15000 // 15 second timeout
+      });
+
+      const statsData: FlashliveStatistics = statsResponse.data;
+
+      // Rate limiting: 5 requests per second (200ms between requests)
+      await new Promise(resolve => setTimeout(resolve, 250));
+
+      // Check if DATA exists and is iterable
+      if (!statsData.DATA || !Array.isArray(statsData.DATA)) {
+        return null;
+      }
+
+      // Extract XG data from statistics
+      for (const stage of statsData.DATA) {
+        if (!stage.GROUPS || !Array.isArray(stage.GROUPS)) {
+          continue;
+        }
+
+        for (const group of stage.GROUPS) {
+          if (!group.ITEMS || !Array.isArray(group.ITEMS)) {
+            continue;
+          }
+
+          for (const item of group.ITEMS) {
+            if (item.INCIDENT_NAME === 'Expected Goals (xG)') {
+              return {
+                home: parseFloat(item.VALUE_HOME) || 0,
+                away: parseFloat(item.VALUE_AWAY) || 0
+              };
+            }
+          }
+        }
+      }
+
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async fetchNativeXGByFixtureId(fixtureId: number): Promise<XGData | null> {
+    try {
+      // Fetch the actual fixture data to get team IDs
+      const fixtureResult = await executeQuery<Fixture>(
+        'SELECT id, home_team_id, away_team_id FROM football_fixtures WHERE id = $1',
+        [fixtureId]
+      );
+
+      if (fixtureResult.rows.length === 0) {
+        return null;
+      }
+
+      const fixture = fixtureResult.rows[0];
+      return await this.fetchNativeXG(fixture);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async fetchSofascoreOddsByEventId(eventId: number): Promise<any> {
+    try {
+      // Get all odds for the match
+      const oddsResponse = await axios.get('https://sofascore.p.rapidapi.com/matches/get-all-odds', {
+        headers: {
+          'x-rapidapi-key': this.rapidApiKey,
+          'x-rapidapi-host': 'sofascore.p.rapidapi.com'
+        },
+        params: {
+          matchId: eventId
+        },
+        timeout: 15000 // 15 second timeout
+      });
+
+      const oddsData = oddsResponse.data;
+
+      // Rate limiting: 5 requests per second (200ms between requests)
+      await new Promise(resolve => setTimeout(resolve, 250));
+
+      // The odds data is wrapped in a "markets" property
+      const markets = oddsData.markets;
+      if (!markets || !Array.isArray(markets)) {
+        return null;
+      }
+
+      return this.parseSofascoreOdds(markets);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private parseSofascoreOdds(oddsData: any[]): any {
+    const result = {
+      opening_x12_home: '',
+      opening_x12_draw: '',
+      opening_x12_away: '',
+      opening_ou25_over: '',
+      opening_ou25_under: '',
+      closing_x12_home: '',
+      closing_x12_draw: '',
+      closing_x12_away: '',
+      closing_ou25_over: '',
+      closing_ou25_under: ''
+    };
+
+    for (const market of oddsData) {
+      // X12 odds - marketId 1 represents the main match result (1X2)
+      if (market.marketId === 1) {
+        for (const choice of market.choices || []) {
+          const openingDecimal = this.fractionalToDecimal(choice.initialFractionalValue);
+          const closingDecimal = this.fractionalToDecimal(choice.fractionalValue);
+
+          if (choice.name === '1' || choice.name === 'Home') {
+            result.opening_x12_home = openingDecimal;
+            result.closing_x12_home = closingDecimal;
+          } else if (choice.name === 'X' || choice.name === 'Draw') {
+            result.opening_x12_draw = openingDecimal;
+            result.closing_x12_draw = closingDecimal;
+          } else if (choice.name === '2' || choice.name === 'Away') {
+            result.opening_x12_away = openingDecimal;
+            result.closing_x12_away = closingDecimal;
+          }
+        }
+      }
+
+      // Over/Under 2.5 goals
+      if (market.marketId === 9 && market.choiceGroup === '2.5') {
+        for (const choice of market.choices || []) {
+          const openingDecimal = this.fractionalToDecimal(choice.initialFractionalValue);
+          const closingDecimal = this.fractionalToDecimal(choice.fractionalValue);
+
+          if (choice.name === 'Over') {
+            result.opening_ou25_over = openingDecimal;
+            result.closing_ou25_over = closingDecimal;
+          } else if (choice.name === 'Under') {
+            result.opening_ou25_under = openingDecimal;
+            result.closing_ou25_under = closingDecimal;
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  private fractionalToDecimal(fractional: string): string {
+    if (!fractional || !fractional.includes('/')) {
+      return '';
+    }
+
+    const [numerator, denominator] = fractional.split('/').map(Number);
+    if (isNaN(numerator) || isNaN(denominator) || denominator === 0) {
+      return '';
+    }
+
+    const decimal = (numerator / denominator) + 1;
+    return decimal.toFixed(2);
+  }
+
+  async fetchSofascoreXGByEventId(eventId: number): Promise<XGData | null> {
+    try {
+
+      // Get statistics for the event
+      const statsResponse = await axios.get('https://sofascore.p.rapidapi.com/matches/get-statistics', {
+        headers: {
+          'x-rapidapi-key': this.rapidApiKey,
+          'x-rapidapi-host': 'sofascore.p.rapidapi.com'
+        },
+        params: {
+          matchId: eventId
+        },
+        timeout: 15000 // 15 second timeout
+      });
+
+      const statsData: SofascoreStatistics = statsResponse.data;
+
+      // Rate limiting: 5 requests per second (200ms between requests)
+      await new Promise(resolve => setTimeout(resolve, 250));
+
+      // Check if statistics exists and is iterable
+      if (!statsData.statistics || !Array.isArray(statsData.statistics)) {
+        console.log(`No statistics data available for Sofascore event ${eventId}`);
+        return null;
+      }
+
+      // Extract XG data from statistics
+      for (const period of statsData.statistics) {
+        if (period.period === 'ALL') {
+          for (const group of period.groups) {
+            for (const item of group.statisticsItems) {
+              if (item.key === 'expectedGoals') {
+                return {
+                  home: item.homeValue || 0,
+                  away: item.awayValue || 0
+                };
+              }
+            }
+          }
+        }
+      }
+
+      console.log(`No xG statistics found for Sofascore event ${eventId}`);
+      return null;
+    } catch (error) {
+      console.error(`Error fetching Sofascore XG for event ${eventId}:`, error);
+      return null;
+    }
   }
 }

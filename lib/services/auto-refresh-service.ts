@@ -73,9 +73,6 @@ async function runAutoRefreshInternal() {
     for (const league of leaguesToProcess) {
       try {
         console.log(`Processing league: ${league.league_name} (ID: ${league.league_id})`);
-        console.log(`  - In-play fixtures: ${league.in_play_count}`);
-        console.log(`  - Past fixtures missing XG: ${league.past_missing_xg_count}`);
-        console.log(`  - Should have started: ${league.should_have_started_count}`);
 
         await executeChain({
           type: 'league',
@@ -83,7 +80,8 @@ async function runAutoRefreshInternal() {
         });
 
         leaguesProcessed++;
-        console.log(`Successfully processed league: ${league.league_name}`);
+        console.log(`✓ Successfully processed league: ${league.league_name}`);
+        console.log('');
 
         // Add a small delay between leagues to avoid overwhelming the system
         await new Promise(resolve => setTimeout(resolve, 1000));

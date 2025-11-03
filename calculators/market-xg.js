@@ -152,11 +152,29 @@ async function calculateMarketXG(fixtureIds = null) {
         f.id as fixture_id,
         fs.avg_goals_league,
         bfo.decimals,
-        (bfo.fair_odds_x12->>0)::numeric / (10^bfo.decimals) as home_odds,
-        (bfo.fair_odds_x12->>1)::numeric / (10^bfo.decimals) as draw_odds,
-        (bfo.fair_odds_x12->>2)::numeric / (10^bfo.decimals) as away_odds,
+        -- X12 odds: check if values suggest different decimals needed
+        CASE
+          WHEN (bfo.fair_odds_x12->>0)::numeric >= 1000 THEN (bfo.fair_odds_x12->>0)::numeric / 1000
+          WHEN (bfo.fair_odds_x12->>0)::numeric >= 100 THEN (bfo.fair_odds_x12->>0)::numeric / 100
+          ELSE (bfo.fair_odds_x12->>0)::numeric / 10
+        END as home_odds,
+        CASE
+          WHEN (bfo.fair_odds_x12->>1)::numeric >= 1000 THEN (bfo.fair_odds_x12->>1)::numeric / 1000
+          WHEN (bfo.fair_odds_x12->>1)::numeric >= 100 THEN (bfo.fair_odds_x12->>1)::numeric / 100
+          ELSE (bfo.fair_odds_x12->>1)::numeric / 10
+        END as draw_odds,
+        CASE
+          WHEN (bfo.fair_odds_x12->>2)::numeric >= 1000 THEN (bfo.fair_odds_x12->>2)::numeric / 1000
+          WHEN (bfo.fair_odds_x12->>2)::numeric >= 100 THEN (bfo.fair_odds_x12->>2)::numeric / 100
+          ELSE (bfo.fair_odds_x12->>2)::numeric / 10
+        END as away_odds,
+        -- OU odds: check if values suggest different decimals needed
         (
-          SELECT (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / (10^bfo.decimals)
+          SELECT CASE
+            WHEN (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric >= 1000 THEN (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / 1000
+            WHEN (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric >= 100 THEN (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / 100
+            ELSE (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / 10
+          END
           FROM jsonb_array_elements_text(bfo.latest_lines->'ou') WITH ORDINALITY AS t(val, idx)
           WHERE t.val::numeric = 2.5
           LIMIT 1

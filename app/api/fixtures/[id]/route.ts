@@ -92,7 +92,7 @@ async function updateFixture(request: Request, { params }: { params: { id: strin
       'referee', 'timestamp', 'date', 'venue_name', 'status_long', 'status_short',
       'home_team_id', 'home_team_name', 'home_country',
       'away_team_id', 'away_team_name', 'away_country',
-      'xg_home', 'xg_away', 'goals_home', 'goals_away',
+      'xg_home', 'xg_away', 'market_xg_home', 'market_xg_away', 'goals_home', 'goals_away',
       'score_halftime_home', 'score_halftime_away',
       'score_fulltime_home', 'score_fulltime_away',
       'score_extratime_home', 'score_extratime_away',
