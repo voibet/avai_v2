@@ -2,7 +2,7 @@
 
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useState, useCallback, useMemo, useEffect, Suspense } from 'react'
-import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches } from '../../lib/hooks/use-football-data'
+import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches, useLeagueTeamsElo } from '../../lib/hooks/use-football-data'
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
 import DataTable, { Column } from '../../components/ui/data-table'
 import FixtureEditModal from '../../components/admin/FixtureEditModal'
@@ -96,6 +96,11 @@ function FixturesPageContent() {
   const { data: standingsData, loading: standingsLoading, error: standingsError } = useLeagueStandings(
     standingsExpanded && currentFixtureData ? currentFixtureData.league_id?.toString() : null,
     standingsExpanded && currentFixtureData ? currentFixtureData.season?.toString() : null
+  )
+
+  // Fetch team ELO ratings when standings are expanded
+  const { data: teamsEloData, loading: teamsEloLoading, error: teamsEloError } = useLeagueTeamsElo(
+    standingsExpanded && currentFixtureData ? currentFixtureData.league_id?.toString() : null
   )
 
   const formatDate = useCallback((dateString: string) => {
@@ -858,53 +863,61 @@ function FixturesPageContent() {
               <div className="text-center py-1">
                 <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
               </div>
-            ) : homeInjuriesData && homeInjuriesData.length > 0 ? (
-              <div className="space-y-0.5">
-                {/* Header */}
-                <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-3 text-gray-400">PLAYER</div>
-                  <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                  <div className="col-span-2 text-gray-400 text-center">STATUS</div>
-                  <div className="col-span-2 text-gray-400 text-center">SINCE</div>
-                  <div className="col-span-2 text-gray-400 text-center">MISSED</div>
-                </div>
-                {homeInjuriesData.filter((injury) => {
-                  // Filter out injuries older than 8 days
-                  if (injury.daysSinceInjury > 8) return false;
-                  const status = formatInjuryTiming(injury);
-                  return !(status.startsWith('WAS') && injury.reason === 'Red Card');
-                }).map((injury) => (
-                  <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div 
-                      className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
-                      onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
-                    >
-                      {injury.player.name}
-                    </div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
-                      {injury.reason}
-                    </div>
-                    <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
-                      {formatInjuryTiming(injury)}
-                    </div>
-                    <div className="col-span-2 text-center text-gray-400">
-                      {injury.injuryDate ? (() => {
-                        const date = new Date(injury.injuryDate);
-                        const day = date.getDate().toString().padStart(2, '0');
-                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                        const year = date.getFullYear();
-                        return `${day}.${month}.${year}`;
-                      })() : '-'}
-                    </div>
-                    <div className="col-span-2 text-center text-white font-bold">
-                      {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
-                    </div>
+            ) : homeInjuriesData && homeInjuriesData.length > 0 ? (() => {
+              const filteredInjuries = homeInjuriesData.filter((injury) => {
+                // Filter out injuries older than 8 days
+                if (injury.daysSinceInjury > 8) return false;
+                const status = formatInjuryTiming(injury);
+                return !(status.startsWith('WAS') && injury.reason === 'Red Card');
+              });
+
+              return filteredInjuries.length > 0 ? (
+                <div className="space-y-0.5">
+                  {/* Header */}
+                  <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                    <div className="col-span-3 text-gray-400">PLAYER</div>
+                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                    <div className="col-span-2 text-gray-400 text-center">STATUS</div>
+                    <div className="col-span-2 text-gray-400 text-center">SINCE</div>
+                    <div className="col-span-2 text-gray-400 text-center">MISSED</div>
                   </div>
-                ))}
-              </div>
-            ) : (
+                  {filteredInjuries.map((injury) => (
+                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                      <div
+                        className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                        onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                      >
+                        {injury.player.name}
+                      </div>
+                      <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
+                        {injury.reason}
+                      </div>
+                      <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                        {formatInjuryTiming(injury)}
+                      </div>
+                      <div className="col-span-2 text-center text-gray-400">
+                        {injury.injuryDate ? (() => {
+                          const date = new Date(injury.injuryDate);
+                          const day = date.getDate().toString().padStart(2, '0');
+                          const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                          const year = date.getFullYear();
+                          return `${day}.${month}.${year}`;
+                        })() : '-'}
+                      </div>
+                      <div className="col-span-2 text-center text-white font-bold">
+                        {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-1">
+                  <span className="text-gray-500 text-xs font-mono">No injuries reported or data not available</span>
+                </div>
+              );
+            })() : (
               <div className="text-center py-1">
-                <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
+                <span className="text-gray-500 text-xs font-mono">No injuries reported or data not available</span>
               </div>
             )}
           </div>
@@ -924,53 +937,61 @@ function FixturesPageContent() {
               <div className="text-center py-1">
                 <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
               </div>
-            ) : awayInjuriesData && awayInjuriesData.length > 0 ? (
-              <div className="space-y-0.5">
-                {/* Header */}
-                <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-3 text-gray-400">PLAYER</div>
-                  <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                  <div className="col-span-2 text-gray-400 text-center">STATUS</div>
-                  <div className="col-span-2 text-gray-400 text-center">SINCE</div>
-                  <div className="col-span-2 text-gray-400 text-center">MISSED</div>
-                </div>
-                {awayInjuriesData.filter((injury) => {
-                  // Filter out injuries older than 8 days
-                  if (injury.daysSinceInjury > 8) return false;
-                  const status = formatInjuryTiming(injury);
-                  return !(status.startsWith('WAS') && injury.reason === 'Red Card');
-                }).map((injury) => (
-                  <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div 
-                      className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
-                      onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
-                    >
-                      {injury.player.name}
-                    </div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
-                      {injury.reason}
-                    </div>
-                    <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
-                      {formatInjuryTiming(injury)}
-                    </div>
-                    <div className="col-span-2 text-center text-gray-400">
-                      {injury.injuryDate ? (() => {
-                        const date = new Date(injury.injuryDate);
-                        const day = date.getDate().toString().padStart(2, '0');
-                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                        const year = date.getFullYear();
-                        return `${day}.${month}.${year}`;
-                      })() : '-'}
-                    </div>
-                    <div className="col-span-2 text-center text-white font-bold">
-                      {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
-                    </div>
+            ) : awayInjuriesData && awayInjuriesData.length > 0 ? (() => {
+              const filteredInjuries = awayInjuriesData.filter((injury) => {
+                // Filter out injuries older than 8 days
+                if (injury.daysSinceInjury > 8) return false;
+                const status = formatInjuryTiming(injury);
+                return !(status.startsWith('WAS') && injury.reason === 'Red Card');
+              });
+
+              return filteredInjuries.length > 0 ? (
+                <div className="space-y-0.5">
+                  {/* Header */}
+                  <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                    <div className="col-span-3 text-gray-400">PLAYER</div>
+                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                    <div className="col-span-2 text-gray-400 text-center">STATUS</div>
+                    <div className="col-span-2 text-gray-400 text-center">SINCE</div>
+                    <div className="col-span-2 text-gray-400 text-center">MISSED</div>
                   </div>
-                ))}
-              </div>
-            ) : (
+                  {filteredInjuries.map((injury) => (
+                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                      <div
+                        className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                        onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                      >
+                        {injury.player.name}
+                      </div>
+                      <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
+                        {injury.reason}
+                      </div>
+                      <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                        {formatInjuryTiming(injury)}
+                      </div>
+                      <div className="col-span-2 text-center text-gray-400">
+                        {injury.injuryDate ? (() => {
+                          const date = new Date(injury.injuryDate);
+                          const day = date.getDate().toString().padStart(2, '0');
+                          const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                          const year = date.getFullYear();
+                          return `${day}.${month}.${year}`;
+                        })() : '-'}
+                      </div>
+                      <div className="col-span-2 text-center text-white font-bold">
+                        {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-1">
+                  <span className="text-gray-500 text-xs font-mono">No injuries reported or data not available</span>
+                </div>
+              );
+            })() : (
               <div className="text-center py-1">
-                <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
+                <span className="text-gray-500 text-xs font-mono">No injuries reported or data not available</span>
               </div>
             )}
           </div>
@@ -1197,6 +1218,16 @@ function FixturesPageContent() {
 
     const { standings } = standingsData.standings;
 
+    // Create ELO map for quick lookup
+    const eloMap = new Map<number, number>();
+    if (teamsEloData?.success && teamsEloData.teams) {
+      teamsEloData.teams.forEach(team => {
+        if (team.elo !== null) {
+          eloMap.set(team.id, team.elo);
+        }
+      });
+    }
+
     // Group standings by group (similar to leagues page logic)
     const groupedStandings = standings.reduce((acc, standing) => {
       const group = standing.group || 'Main Table'
@@ -1299,6 +1330,10 @@ function FixturesPageContent() {
             aValue = a.all.played > 0 ? (a.all.win / a.all.played) * 100 : 0;
             bValue = b.all.played > 0 ? (b.all.win / b.all.played) * 100 : 0;
             break;
+          case 'elo':
+            aValue = eloMap.get(a.team.id) || 0;
+            bValue = eloMap.get(b.team.id) || 0;
+            break;
           default:
             return 0;
         }
@@ -1316,7 +1351,7 @@ function FixturesPageContent() {
         {/* Standings Table */}
         <div className="px-1 py-1">
           {/* Header */}
-          <div className="grid grid-cols-17 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+          <div className="grid grid-cols-18 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
             <div
               className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('rank')}
@@ -1443,6 +1478,17 @@ function FixturesPageContent() {
             </div>
             <div
               className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('elo')}
+            >
+              ELO
+              {standingsSortColumn === 'elo' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('win_pct')}
             >
               WIN%
@@ -1469,7 +1515,7 @@ function FixturesPageContent() {
             return (
               <div key={standing.team.id}>
                 <div
-                  className={`grid grid-cols-17 gap-1 py-1 ${hasDivider ? 'border-b-2 border-gray-500' : 'border-b border-gray-800'} text-xs font-mono hover:bg-gray-900 ${
+                  className={`grid grid-cols-18 gap-1 py-1 ${hasDivider ? 'border-b-2 border-gray-500' : 'border-b border-gray-800'} text-xs font-mono hover:bg-gray-900 ${
                     isParticipatingTeam ? 'bg-gray-700' : ''
                   }`}
                 >
@@ -1544,6 +1590,9 @@ function FixturesPageContent() {
                 </div>
                 <div className="col-span-1 text-orange-400 text-center text-xs">
                   {standing.xg_stats.expected_points_projected.toFixed(1)}
+                </div>
+                <div className="col-span-1 text-cyan-400 text-center text-xs">
+                  {eloMap.get(standing.team.id) ? eloMap.get(standing.team.id)?.toFixed(1) : '-'}
                 </div>
                 <div className="col-span-1 text-purple-400 text-center text-xs">
                   {standing.win_percentage?.toFixed(1)}%

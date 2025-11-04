@@ -239,6 +239,22 @@ export function useFixtureCoaches(fixtureId: string | null) {
   }>(url);
 }
 
+// Hook for fetching league teams with ELO ratings
+export function useLeagueTeamsElo(leagueId: string | null) {
+  const url = leagueId ? `/api/teams?league_id=${leagueId}` : null;
+  return useApi<{
+    success: boolean;
+    teams: Array<{
+      id: number;
+      name: string;
+      country: string;
+      venue: string;
+      mappings: any;
+      elo: number | null;
+    }>;
+  }>(url);
+}
+
 // Hook for fetching player statistics
 export function usePlayerStats(playerId: string | null, season: string | null, teamId?: string | null, leagueId?: string | null) {
   const url = playerId && season ? `/api/player-stats?player_id=${playerId}&season=${season}${teamId ? `&team_id=${teamId}` : ''}${leagueId ? `&league_id=${leagueId}` : ''}` : null;

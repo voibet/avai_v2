@@ -2,13 +2,33 @@ import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
 import { Team } from '@/types/database';
 
-async function getTeams(_request: Request) {
+async function getTeams(request: Request) {
   try {
-    // First get all teams
-    const teamsResult = await executeQuery<Team>('SELECT id, name, country, venue, mappings FROM football_teams ORDER BY name');
+    const url = new URL(request.url);
+    const leagueId = url.searchParams.get('league_id');
+
+    // First get teams, optionally filtered by league
+    let teamsQuery = 'SELECT id, name, country, venue, mappings FROM football_teams';
+    let teamsParams: any[] = [];
+
+    if (leagueId) {
+      teamsQuery += `
+        WHERE id IN (
+          SELECT DISTINCT home_team_id FROM football_fixtures WHERE league_id = $1
+          UNION
+          SELECT DISTINCT away_team_id FROM football_fixtures WHERE league_id = $1
+        )
+      `;
+      teamsParams = [leagueId];
+    }
+
+    teamsQuery += ' ORDER BY name';
+
+    const teamsResult = await executeQuery<Team>(teamsQuery, teamsParams);
 
     // Then get the latest ELO for each team by finding their most recent fixture
-    const eloQuery = `
+    // Optionally filtered by league
+    let eloQuery = `
       WITH team_fixtures AS (
         SELECT
           t.id as team_id,
@@ -22,6 +42,16 @@ async function getTeams(_request: Request) {
         FROM football_teams t
         INNER JOIN football_fixtures f ON (f.home_team_id = t.id OR f.away_team_id = t.id)
         WHERE f.status_long = 'Match Finished'
+    `;
+
+    let eloParams: any[] = [];
+
+    if (leagueId) {
+      eloQuery += ' AND f.league_id = $1';
+      eloParams = [leagueId];
+    }
+
+    eloQuery += `
       ),
       latest_stats AS (
         SELECT
@@ -41,7 +71,7 @@ async function getTeams(_request: Request) {
       WHERE elo IS NOT NULL
     `;
 
-    const eloResult = await executeQuery(eloQuery);
+    const eloResult = await executeQuery(eloQuery, eloParams);
 
     // Create a map of team_id to elo
     const eloMap = new Map<number, number>();

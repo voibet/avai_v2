@@ -4,13 +4,12 @@ import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } fr
 import { useSearchParams, useRouter } from 'next/navigation'
 import { analyzeValueOpportunities, type Fixture, type ValueOpportunity, type ValueAnalysisConfig } from '@/lib/utils/value-analysis'
 import DataTable, { Column } from '../../components/ui/data-table'
-import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches } from '../../lib/hooks/use-football-data'
+import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches, useLeagueTeamsElo } from '../../lib/hooks/use-football-data'
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
 import FixtureEditModal from '../../components/admin/FixtureEditModal'
 import PlayerStatsModal from '../../components/fixtures/PlayerStatsModal'
 import TeamStandingsModal from '../../components/fixtures/TeamStandingsModal'
 import { FixtureOdds } from '../../components/FixtureOdds'
-import { IN_PAST, CANCELLED, IN_PLAY, IN_FUTURE } from '../../lib/constants'
 
 // Custom filter component for ODDS - defined outside component (NO HOOKS!)
 const OddsFilterRenderer = ({ column, currentFilters, onFilterChange, onClose }: any) => {
@@ -155,7 +154,7 @@ function ValuesPageContent() {
   } | null>(null)
 
   // Filter states
-  const [fairOddsBookie, setFairOddsBookie] = useState('Pinnacle')
+  const [fairOddsBookies, setFairOddsBookies] = useState<string[]>(['Pinnacle'])
   const [oddsRatioBookies, setOddsRatioBookies] = useState<string[]>(['Veikkaus'])
   const [minRatio] = useState(0.9)
 
@@ -304,6 +303,11 @@ function ValuesPageContent() {
   const { data: standingsData, loading: standingsLoading, error: standingsError } = useLeagueStandings(
     standingsExpanded && currentFixtureData ? currentFixtureData.league_id?.toString() : null,
     standingsExpanded && currentFixtureData ? currentFixtureData.season?.toString() : null
+  )
+
+  // Fetch team ELO ratings when standings are expanded
+  const { data: teamsEloData, loading: teamsEloLoading, error: teamsEloError } = useLeagueTeamsElo(
+    standingsExpanded && currentFixtureData ? currentFixtureData.league_id?.toString() : null
   )
 
   // Only fetch lineups when the lineups section is expanded
@@ -492,7 +496,7 @@ function ValuesPageContent() {
     )
   }
 
-  const fairOddsBookies = useMemo(() => {
+  const fairOddsBookiesOptions = useMemo(() => {
     return availableBookies.filter(bookie =>
       mergedFixtures.some(f => f.odds.some((o: any) => o.bookie === bookie && (
         o.fair_odds_x12 || o.fair_odds_ah || o.fair_odds_ou
@@ -552,11 +556,24 @@ function ValuesPageContent() {
       filterable: true, // Enable filtering for Time column
       sortType: 'date',
       sortKey: 'fixture.date',
-      render: (opportunity) => (
-        <div className="text-gray-400 text-xs font-mono">
-          {formatDate(opportunity.fixture.date)}
-        </div>
-      )
+      render: (opportunity) => {
+        // Use stream timestamp if available, otherwise fall back to fixture date
+        const streamTimestamp = (opportunity.fixture as any).stream_timestamp
+        let displayDate
+
+        if (streamTimestamp) {
+          // stream_timestamp is already in milliseconds
+          displayDate = new Date(streamTimestamp).toISOString()
+        } else {
+          displayDate = opportunity.fixture.date
+        }
+
+        return (
+          <div className="text-gray-400 text-xs font-mono">
+            {formatDate(displayDate)}
+          </div>
+        )
+      }
     },
     {
       key: 'market',
@@ -650,11 +667,11 @@ function ValuesPageContent() {
 
   // Create config from current filter state (memoized to prevent unnecessary recreations)
   const config: ValueAnalysisConfig = useMemo(() => ({
-    fairOddsBookie,
+    fairOddsBookie: fairOddsBookies.length === 1 ? fairOddsBookies[0] : fairOddsBookies,
     oddsRatioBookies: oddsRatioBookies.length === 1 ? oddsRatioBookies[0] : oddsRatioBookies,
     minRatio
     // maxOdds is now handled by client-side filtering
-  }), [fairOddsBookie, oddsRatioBookies, minRatio])
+  }), [fairOddsBookies, oddsRatioBookies, minRatio])
 
   const handleEditFixture = useCallback((fixture: any) => {
     setEditingFixture(fixture)
@@ -976,51 +993,59 @@ function ValuesPageContent() {
               <div className="text-center py-1">
                 <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
               </div>
-            ) : homeInjuriesData && homeInjuriesData.length > 0 ? (
-              <div className="space-y-0.5">
-                {/* Header */}
-                <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-3 text-gray-400">PLAYER</div>
-                  <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                  <div className="col-span-2 text-gray-400 text-center">STATUS</div>
-                  <div className="col-span-2 text-gray-400 text-center">SINCE</div>
-                  <div className="col-span-2 text-gray-400 text-center">MISSED</div>
-                </div>
-                {homeInjuriesData.filter((injury) => {
-                  // Filter out injuries older than 8 days
-                  if (injury.daysSinceInjury > 8) return false;
-                  const status = formatInjuryTiming(injury);
-                  return !(status.startsWith('WAS') && injury.reason === 'Red Card');
-                }).map((injury) => (
-                  <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div
-                      className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
-                      onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
-                    >
-                      {injury.player.name}
-                    </div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
-                      {injury.reason}
-                    </div>
-                    <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
-                      {formatInjuryTiming(injury)}
-                    </div>
-                    <div className="col-span-2 text-center text-gray-400">
-                      {injury.injuryDate ? (() => {
-                        const date = new Date(injury.injuryDate);
-                        const day = date.getDate().toString().padStart(2, '0');
-                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                        const year = date.getFullYear();
-                        return `${day}.${month}.${year}`;
-                      })() : '-'}
-                    </div>
-                    <div className="col-span-2 text-center text-white font-bold">
-                      {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
-                    </div>
+            ) : homeInjuriesData && homeInjuriesData.length > 0 ? (() => {
+              const filteredInjuries = homeInjuriesData.filter((injury) => {
+                // Filter out injuries older than 8 days
+                if (injury.daysSinceInjury > 8) return false;
+                const status = formatInjuryTiming(injury);
+                return !(status.startsWith('WAS') && injury.reason === 'Red Card');
+              });
+
+              return filteredInjuries.length > 0 ? (
+                <div className="space-y-0.5">
+                  {/* Header */}
+                  <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                    <div className="col-span-3 text-gray-400">PLAYER</div>
+                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                    <div className="col-span-2 text-gray-400 text-center">STATUS</div>
+                    <div className="col-span-2 text-gray-400 text-center">SINCE</div>
+                    <div className="col-span-2 text-gray-400 text-center">MISSED</div>
                   </div>
-                ))}
-              </div>
-            ) : (
+                  {filteredInjuries.map((injury) => (
+                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                      <div
+                        className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                        onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                      >
+                        {injury.player.name}
+                      </div>
+                      <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
+                        {injury.reason}
+                      </div>
+                      <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                        {formatInjuryTiming(injury)}
+                      </div>
+                      <div className="col-span-2 text-center text-gray-400">
+                        {injury.injuryDate ? (() => {
+                          const date = new Date(injury.injuryDate);
+                          const day = date.getDate().toString().padStart(2, '0');
+                          const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                          const year = date.getFullYear();
+                          return `${day}.${month}.${year}`;
+                        })() : '-'}
+                      </div>
+                      <div className="col-span-2 text-center text-white font-bold">
+                        {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-1">
+                  <span className="text-gray-500 text-xs font-mono">No injuries reported or data not available</span>
+                </div>
+              );
+            })() : (
               <div className="text-center py-1">
                 <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
               </div>
@@ -1042,51 +1067,59 @@ function ValuesPageContent() {
               <div className="text-center py-1">
                 <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
               </div>
-            ) : awayInjuriesData && awayInjuriesData.length > 0 ? (
-              <div className="space-y-0.5">
-                {/* Header */}
-                <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-3 text-gray-400">PLAYER</div>
-                  <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                  <div className="col-span-2 text-gray-400 text-center">STATUS</div>
-                  <div className="col-span-2 text-gray-400 text-center">SINCE</div>
-                  <div className="col-span-2 text-gray-400 text-center">MISSED</div>
-                </div>
-                {awayInjuriesData.filter((injury) => {
-                  // Filter out injuries older than 8 days
-                  if (injury.daysSinceInjury > 8) return false;
-                  const status = formatInjuryTiming(injury);
-                  return !(status.startsWith('WAS') && injury.reason === 'Red Card');
-                }).map((injury) => (
-                  <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
-                    <div
-                      className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
-                      onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
-                    >
-                      {injury.player.name}
-                    </div>
-                    <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
-                      {injury.reason}
-                    </div>
-                    <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
-                      {formatInjuryTiming(injury)}
-                    </div>
-                    <div className="col-span-2 text-center text-gray-400">
-                      {injury.injuryDate ? (() => {
-                        const date = new Date(injury.injuryDate);
-                        const day = date.getDate().toString().padStart(2, '0');
-                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                        const year = date.getFullYear();
-                        return `${day}.${month}.${year}`;
-                      })() : '-'}
-                    </div>
-                    <div className="col-span-2 text-center text-white font-bold">
-                      {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
-                    </div>
+            ) : awayInjuriesData && awayInjuriesData.length > 0 ? (() => {
+              const filteredInjuries = awayInjuriesData.filter((injury) => {
+                // Filter out injuries older than 8 days
+                if (injury.daysSinceInjury > 8) return false;
+                const status = formatInjuryTiming(injury);
+                return !(status.startsWith('WAS') && injury.reason === 'Red Card');
+              });
+
+              return filteredInjuries.length > 0 ? (
+                <div className="space-y-0.5">
+                  {/* Header */}
+                  <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+                    <div className="col-span-3 text-gray-400">PLAYER</div>
+                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
+                    <div className="col-span-2 text-gray-400 text-center">STATUS</div>
+                    <div className="col-span-2 text-gray-400 text-center">SINCE</div>
+                    <div className="col-span-2 text-gray-400 text-center">MISSED</div>
                   </div>
-                ))}
-              </div>
-            ) : (
+                  {filteredInjuries.map((injury) => (
+                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                      <div
+                        className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
+                        onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
+                      >
+                        {injury.player.name}
+                      </div>
+                      <div className={`col-span-3 text-center font-bold ${getInjuryStatusColor(injury)} truncate`}>
+                        {injury.reason}
+                      </div>
+                      <div className={`col-span-2 text-center font-bold ${getInjuryStatusColor(injury)}`}>
+                        {formatInjuryTiming(injury)}
+                      </div>
+                      <div className="col-span-2 text-center text-gray-400">
+                        {injury.injuryDate ? (() => {
+                          const date = new Date(injury.injuryDate);
+                          const day = date.getDate().toString().padStart(2, '0');
+                          const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                          const year = date.getFullYear();
+                          return `${day}.${month}.${year}`;
+                        })() : '-'}
+                      </div>
+                      <div className="col-span-2 text-center text-white font-bold">
+                        {injury.matchesMissed !== undefined ? `${injury.matchesMissed}` : '0'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-1">
+                  <span className="text-gray-500 text-xs font-mono">No injuries reported or data not available</span>
+                </div>
+              );
+            })() : (
               <div className="text-center py-1">
                 <span className="text-gray-500 text-xs font-mono">No injuries reported</span>
               </div>
@@ -1304,6 +1337,16 @@ function ValuesPageContent() {
 
     const { standings } = standingsData.standings;
 
+    // Create ELO map for quick lookup
+    const eloMap = new Map<number, number>();
+    if (teamsEloData?.success && teamsEloData.teams) {
+      teamsEloData.teams.forEach(team => {
+        if (team.elo !== null) {
+          eloMap.set(team.id, team.elo);
+        }
+      });
+    }
+
     // Group standings by group (similar to leagues page logic)
     const groupedStandings = standings.reduce((acc, standing) => {
       const group = standing.group || 'Main Table'
@@ -1406,6 +1449,10 @@ function ValuesPageContent() {
             aValue = a.all.played > 0 ? (a.all.win / a.all.played) * 100 : 0;
             bValue = b.all.played > 0 ? (b.all.win / b.all.played) * 100 : 0;
             break;
+          case 'elo':
+            aValue = eloMap.get(a.team.id) || 0;
+            bValue = eloMap.get(b.team.id) || 0;
+            break;
           default:
             return 0;
         }
@@ -1423,7 +1470,7 @@ function ValuesPageContent() {
         {/* Standings Table */}
         <div className="px-1 py-1">
           {/* Header */}
-          <div className="grid grid-cols-17 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+          <div className="grid grid-cols-18 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
             <div
               className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('rank')}
@@ -1550,6 +1597,17 @@ function ValuesPageContent() {
             </div>
             <div
               className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              onClick={() => handleColumnSort('elo')}
+            >
+              ELO
+              {standingsSortColumn === 'elo' && (
+                <span className="text-xs">
+                  {standingsSortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+              )}
+            </div>
+            <div
+              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('win_pct')}
             >
               WIN%
@@ -1576,7 +1634,7 @@ function ValuesPageContent() {
             return (
               <div key={standing.team.id}>
                 <div
-                  className={`grid grid-cols-17 gap-1 py-1 ${hasDivider ? 'border-b-2 border-gray-500' : 'border-b border-gray-800'} text-xs font-mono hover:bg-gray-900 ${
+                  className={`grid grid-cols-18 gap-1 py-1 ${hasDivider ? 'border-b-2 border-gray-500' : 'border-b border-gray-800'} text-xs font-mono hover:bg-gray-900 ${
                     isParticipatingTeam ? 'bg-gray-700' : ''
                   }`}
                 >
@@ -1651,6 +1709,9 @@ function ValuesPageContent() {
                 </div>
                 <div className="col-span-1 text-orange-400 text-center text-xs">
                   {standing.xg_stats.expected_points_projected.toFixed(1)}
+                </div>
+                <div className="col-span-1 text-cyan-400 text-center text-xs">
+                  {eloMap.get(standing.team.id) ? eloMap.get(standing.team.id)?.toFixed(1) : '-'}
                 </div>
                 <div className="col-span-1 text-purple-400 text-center text-xs">
                   {standing.win_percentage?.toFixed(1)}%
@@ -2190,20 +2251,34 @@ function ValuesPageContent() {
         {/* Filter Controls */}
         <div className="mb-2">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {/* Fair Odds Bookie */}
+              {/* Fair Odds Bookies */}
               <div>
                 <label className="block text-xs font-mono text-gray-400 mb-0.5">
-                  Fair Odds Bookie
+                  Fair Odds Bookies (must beat ALL selected)
                 </label>
-                <select
-                  value={fairOddsBookie}
-                  onChange={(e) => setFairOddsBookie(e.target.value)}
-                  className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
-                >
-                  {fairOddsBookies.map(bookie => (
-                    <option key={bookie} value={bookie}>{bookie}</option>
-                  ))}
-                </select>
+                <div className="bg-gray-700 border border-gray-600 rounded px-2 py-1.5 max-h-32 overflow-y-auto">
+                  <div className="flex flex-wrap gap-1">
+                    {fairOddsBookiesOptions.map(bookie => (
+                      <label key={bookie} className="flex items-center space-x-2 text-xs cursor-pointer hover:bg-gray-600 rounded px-1 py-0.5">
+                        <input
+                          type="checkbox"
+                          checked={fairOddsBookies.includes(bookie)}
+                          onChange={() => {
+                            setFairOddsBookies(prev => {
+                              const newSelection = prev.includes(bookie)
+                                ? prev.filter(b => b !== bookie)
+                                : [...prev, bookie]
+                              // Ensure at least one bookie is selected
+                              return newSelection.length === 0 ? [bookie] : newSelection
+                            })
+                          }}
+                          className="rounded border-gray-500 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-gray-300 font-mono">{bookie}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
 
 
