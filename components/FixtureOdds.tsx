@@ -3,11 +3,11 @@ import { OddsChart } from './OddsChart';
 
 
 interface FixtureOddsProps {
-  fixtureId: string | null;
-  fixture?: {
-    odds_bookie_used?: string;
-    fair_odds_bookie_used?: string;
-  };
+  fixture?: any; // Made flexible to support different fixture formats
+  oddsData?: OddsData | null;
+  minRatio?: number;
+  fairOddsBookies?: Array<{bookie: string, required: boolean}>;
+  filterMethod?: 'individual' | 'above_all' | 'average';
 }
 
 interface OddsData {
@@ -35,10 +35,34 @@ interface OddsData {
   }>;
 }
 
+interface RatioData {
+  fair_odds_bookie: string;
+  odds_bookie: string;
+  ratios_x12?: number[];
+  ratios_ah?: {
+    ratios_ah_a?: number[];
+    ratios_ah_h?: number[];
+  };
+  ratios_ou?: {
+    ratios_ou_o?: number[];
+    ratios_ou_u?: number[];
+  };
+  ratios_lines?: {
+    ah?: number[];
+    ou?: number[];
+  };
+}
 
-export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
-  const [oddsData, setOddsData] = useState<OddsData | null>(null);
-  const [oddsLoading, setOddsLoading] = useState(true);
+
+export function FixtureOdds({
+  fixture,
+  oddsData: propOddsData,
+  minRatio = 1.0,
+  fairOddsBookies = [{bookie: 'Pinnacle', required: false}],
+  filterMethod = 'individual'
+}: FixtureOddsProps) {
+  const [oddsData, setOddsData] = useState<OddsData | null>(propOddsData || null);
+  const [oddsLoading, setOddsLoading] = useState(!propOddsData);
   const [oddsError, setOddsError] = useState<string | null>(null);
 
   // Track which cells have flashed and their direction: 'up' (green) or 'down' (red)
@@ -46,100 +70,126 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
   const [flashingCells, setFlashingCells] = useState<Record<string, 'up' | 'down'>>({});
 
   // Use ref to track previous odds without causing re-renders
-  const previousOddsRef = React.useRef<OddsData | null>(null);
+  const previousOddsRef = React.useRef<OddsData | null>(propOddsData || null);
 
-  // Subscribe to SSE stream for real-time updates
+  // EventSource ref for streaming
+  const eventSourceRef = React.useRef<EventSource | null>(null);
+
+  // Handle odds data updates from props
   useEffect(() => {
-    if (!fixtureId) {
-      setOddsLoading(true);
-      setOddsData(null);
-      previousOddsRef.current = null;
-      return;
-    }
-
-    let eventSource: EventSource | null = null;
-    let isMounted = true;
-
-    const setupOdds = async () => {
-      try {
-        // Fetch current odds data
-        const response = await fetch(`/api/odds?fixtureId=${fixtureId}`);
-        if (response.ok && isMounted) {
-          const data = await response.json();
-          if (data.odds && data.odds.length > 0) {
-            const initialData: OddsData = { odds: data.odds };
-            setOddsData(initialData);
-            previousOddsRef.current = initialData;
-          }
+    if (propOddsData !== undefined) { // Check for undefined to allow null values
+      // Compare with previous odds to detect changes for flashing
+      if (previousOddsRef.current && propOddsData) {
+        const changes = detectOddsChanges(previousOddsRef.current, propOddsData);
+        if (Object.keys(changes).length > 0) {
+          setFlashingCells(changes);
+          setTimeout(() => setFlashingCells({}), 2000);
         }
-      } catch (error) {
-        console.warn('Failed to fetch initial odds data:', error);
       }
 
-      // Set up the stream for real-time updates
-      if (isMounted) {
-        eventSource = new EventSource(`/api/odds/stream?fixtureId=${fixtureId}`);
+      // Update local state
+      setOddsData(propOddsData);
+      previousOddsRef.current = propOddsData;
+      setOddsLoading(false);
+      setOddsError(null);
+    }
+  }, [propOddsData]);
+
+  // Fetch odds data when fixture is provided but oddsData prop is not
+  useEffect(() => {
+    if (fixture && propOddsData === undefined) {
+      const fixtureId = fixture.id || fixture.fixture_id;
+      if (fixtureId) {
+        setOddsLoading(true);
+        setOddsError(null);
+
+        fetch(`/api/odds?fixtureId=${fixtureId}e&fair_odds=true`)
+          .then(response => {
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(data => {
+            if (data.odds && data.odds.length > 0) {
+              setOddsData(data);
+              previousOddsRef.current = data;
+            } else {
+              setOddsData(null);
+            }
+            setOddsLoading(false);
+          })
+          .catch(error => {
+            console.error('Failed to fetch odds:', error);
+            setOddsError(error.message);
+            setOddsData(null);
+            setOddsLoading(false);
+          });
+      }
+    }
+  }, [fixture, propOddsData]);
+
+  // Start streaming odds updates when fixture is provided
+  useEffect(() => {
+    if (fixture && propOddsData === undefined) {
+      const fixtureId = fixture.id || fixture.fixture_id;
+      if (fixtureId) {
+        // Close any existing stream
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+        }
+
+        // Start new stream for this fixture
+        const streamUrl = `/api/odds/stream?fixtureId=${fixtureId}&fair_odds=true`;
+        const eventSource = new EventSource(streamUrl);
+        eventSourceRef.current = eventSource;
 
         eventSource.onmessage = (event) => {
-          if (!isMounted) return;
-
           try {
             const data = JSON.parse(event.data);
 
-            if (data.error) {
-              console.warn('SSE error received:', data.error);
-              setOddsError(data.error);
-            } else if (data.type !== 'started') {
-              // Handle odds update
-              const normalizedData: OddsData = { odds: data.odds || [] };
-
-              // Validate the data structure
-              if (!Array.isArray(normalizedData.odds)) {
-                console.error('Invalid odds data structure - odds is not an array:', normalizedData);
-                setOddsError('Invalid odds data structure');
-                return;
-              }
-
-              // Compare with previous odds to detect changes
-              if (previousOddsRef.current) {
-                const changes = detectOddsChanges(previousOddsRef.current, normalizedData);
+            // Handle odds updates
+            if (data.type === 'odds_update' && data.odds && data.odds.length > 0) {
+              // Compare with current odds for flashing
+              if (oddsData) {
+                const changes = detectOddsChanges(oddsData, data);
                 if (Object.keys(changes).length > 0) {
                   setFlashingCells(changes);
                   setTimeout(() => setFlashingCells({}), 2000);
                 }
               }
 
-              previousOddsRef.current = normalizedData;
-              setOddsData(normalizedData);
+              // Update odds data
+              setOddsData(data);
+              previousOddsRef.current = data;
+              setOddsLoading(false);
               setOddsError(null);
             }
-          } catch (e) {
-            console.error('Error parsing SSE data:', e);
-            setOddsError('Failed to parse odds update');
+          } catch (error) {
+            console.error('Error parsing streaming odds data:', error);
           }
         };
 
         eventSource.onerror = (error) => {
-          if (!isMounted) return;
-          console.error('SSE error:', error);
-          setOddsError('Connection error');
+          console.error('EventSource error:', error);
+          setOddsError('Streaming connection failed');
         };
 
-        // Mark as loaded once stream is set up
-        setOddsLoading(false);
+        return () => {
+          eventSource.close();
+          eventSourceRef.current = null;
+        };
       }
-    };
+    }
 
-    setupOdds();
-
-    // Cleanup
+    // Cleanup when fixture changes or component unmounts
     return () => {
-      isMounted = false;
-      if (eventSource) {
-        eventSource.close();
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
       }
     };
-  }, [fixtureId]);
+  }, [fixture, propOddsData, oddsData]);
 
   // Helper function to detect odds changes
   const detectOddsChanges = (oldData: OddsData, newData: OddsData): Record<string, 'up' | 'down'> => {
@@ -541,6 +591,20 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
     return 'bg-black'; // Dark background for other bookies
   };
 
+  // Helper to get text color class for ratio based on value and filter
+  const getRatioTextColorClass = (ratio: number): string => {
+    // Use small epsilon for floating point comparison
+    const epsilon = 0.0001;
+
+    if (ratio >= (minRatio - epsilon)) {
+      return 'text-green-400'; // Green if above or equal to filter
+    } else if (ratio >= (1.0 - epsilon)) {
+      return 'text-yellow-400'; // Yellow if above or equal to 1.0 but below filter
+    } else {
+      return 'text-red-400'; // Red if below filter and below 1.0
+    }
+  };
+
 
   // Helper to get payout background color class based on payout percentage
   const getPayoutBgColorClass = (payoutPercentage: number): string => {
@@ -575,6 +639,71 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
     const hasData = bookmakers.some(bm => outcomes.some(outcome => outcome.getValue(bm.odds, bm) !== null));
     if (!hasData) return null;
 
+    // Get ratio for X12 outcomes - using the same logic as Values page
+    const getTopRatio = (outcomeIndex: number) => {
+      if (!fixture?.ratios) return null;
+
+      // Collect all available ratios from selected fair odds bookies
+      const availableRatios: Array<{fairBookie: string, ratio: number, oddsBookie: string}> = [];
+      
+      fixture.ratios.forEach((ratioData: RatioData) => {
+        // Only consider selected fair odds bookies
+        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === ratioData.fair_odds_bookie);
+        if (!isSelectedFairBookie) return;
+        
+        if (ratioData.ratios_x12 && ratioData.ratios_x12[outcomeIndex] > 0) {
+          availableRatios.push({
+            fairBookie: ratioData.fair_odds_bookie,
+            ratio: ratioData.ratios_x12[outcomeIndex],
+            oddsBookie: ratioData.odds_bookie
+          });
+        }
+      });
+      
+      if (availableRatios.length === 0) return null;
+      
+      // Check required bookies criterion
+      const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
+      if (requiredFairBookies.length > 0) {
+        const hasRequiredBookie = requiredFairBookies.some(requiredBookie =>
+          availableRatios.some(r => r.fairBookie === requiredBookie)
+        );
+        if (!hasRequiredBookie) return null;
+      }
+      
+      // Apply filter method
+      let displayRatio = 0;
+      let displayBookie = availableRatios[0].oddsBookie;
+      
+      if (filterMethod === 'average') {
+        // Average of all fair odds bookies
+        displayRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length;
+      } else if (filterMethod === 'above_all') {
+        // Minimum (lowest) ratio
+        displayRatio = Math.min(...availableRatios.map(r => r.ratio));
+      } else {
+        // Individual - show the highest for display purposes
+        displayRatio = Math.max(...availableRatios.map(r => r.ratio));
+      }
+      
+      return displayRatio > 0 ? { ratio: displayRatio, bookie: displayBookie } : null;
+    };
+
+    // Get top odds for X12 outcomes (excluding Prediction)
+    const getTopOdds = (outcomeIndex: number) => {
+      let topOdds = 0;
+      let topBookie = '';
+      for (const bm of bookmakers) {
+        if (bm.bookie === 'Prediction') continue; // Exclude Prediction bookie
+        const value = outcomes[outcomeIndex].getValue(bm.odds, bm);
+        if (value && parseFloat(value) > topOdds) {
+          topOdds = parseFloat(value);
+          topBookie = bm.bookie;
+        }
+      }
+      return topOdds > 0 ? { odds: topOdds, bookie: topBookie } : null;
+    };
+
     return (
       <div className="mb-3">
         <h4 className="text-xs font-bold text-white font-mono mb-2">{marketName}</h4>
@@ -588,6 +717,14 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
                     {bm.bookie === 'Prediction' ? 'Prediction' : bm.bookie}
                   </th>
                 ))}
+                <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
+                  Top
+                </th>
+                {fixture?.ratios && fixture.ratios.length > 0 && (
+                  <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
+                    Ratios
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -615,6 +752,39 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
                       </td>
                     );
                   })}
+                  <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                    const topOddsData = getTopOdds(index);
+                    return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-black';
+                  })()}`}>
+                    {(() => {
+                      const topOddsData = getTopOdds(index);
+                      if (!topOddsData) return <span className="text-gray-500">-</span>;
+
+                      return (
+                        <span className="font-mono text-xs px-1 text-white">
+                          {topOddsData.odds.toFixed(2)}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  {fixture?.ratios && fixture.ratios.length > 0 && (
+                    <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                      const topRatioData = getTopRatio(index);
+                      return topRatioData ? getBookieColorClass(topRatioData.bookie) : 'bg-black';
+                    })()}`}>
+                      {(() => {
+                        const topRatioData = getTopRatio(index);
+                        if (!topRatioData) return <span className="text-gray-500">-</span>;
+
+                        const textColorClass = getRatioTextColorClass(topRatioData.ratio);
+                        return (
+                          <span className={`font-mono text-xs px-1 rounded ${textColorClass}`}>
+                            {topRatioData.ratio.toFixed(3)}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -645,19 +815,33 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
       }
     });
 
+    // Also include lines from ratios data
+    if (fixture?.ratios) {
+      fixture.ratios.forEach((ratioData: RatioData) => {
+        if (ratioData.ratios_lines?.[linesKey]) {
+          ratioData.ratios_lines[linesKey].forEach((line: number) => allLines.add(line));
+        }
+      });
+    }
+
     const sortedLines = Array.from(allLines).sort((a, b) => a - b);
 
-    // Filter out lines that have no odds from any bookmaker
-    const linesWithOdds = sortedLines.filter(line =>
+    // Filter out lines that have no odds from any bookmaker OR no ratios
+    const linesWithData = sortedLines.filter(line =>
       bookmakers.some(bm => {
         const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
         return lineIndex !== undefined && lineIndex >= 0 &&
                (bm.odds[side1.oddsKey]?.[lineIndex] || bm.odds[side2.oddsKey]?.[lineIndex]);
-      })
+      }) ||
+      (fixture?.ratios && fixture.ratios.some((ratioData: RatioData) => {
+        const ratioLines = ratioData.ratios_lines?.[linesKey] || [];
+        const lineIndex = ratioLines.indexOf(line);
+        return lineIndex >= 0;
+      }))
     );
 
     // Check if we have any data
-    const hasData = linesWithOdds.length > 0;
+    const hasData = linesWithData.length > 0;
     if (!hasData) return null;
 
     // Helper to get odds for a specific line and side
@@ -676,6 +860,89 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
       return null;
     };
 
+    // Helper to get the ratio for a specific line and side - using the same logic as Values page
+    const getTopRatio = (line: number, sideKey: 'ratios_ah_a' | 'ratios_ah_h' | 'ratios_ou_o' | 'ratios_ou_u') => {
+      if (!fixture?.ratios) return null;
+
+      // Collect all available ratios from selected fair odds bookies
+      const availableRatios: Array<{fairBookie: string, ratio: number, oddsBookie: string}> = [];
+      
+      fixture.ratios.forEach((ratioData: RatioData) => {
+        // Only consider selected fair odds bookies
+        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === ratioData.fair_odds_bookie);
+        if (!isSelectedFairBookie) return;
+        
+        const ratioLines = ratioData.ratios_lines?.[linesKey] || [];
+        const lineIndex = ratioLines.indexOf(line);
+
+        if (lineIndex >= 0) {
+          let ratioValue = 0;
+          if (linesKey === 'ah' && ratioData.ratios_ah) {
+            const sideRatios = ratioData.ratios_ah[sideKey as keyof typeof ratioData.ratios_ah];
+            if (Array.isArray(sideRatios) && sideRatios[lineIndex]) {
+              ratioValue = sideRatios[lineIndex];
+            }
+          } else if (linesKey === 'ou' && ratioData.ratios_ou) {
+            const sideRatios = ratioData.ratios_ou[sideKey as keyof typeof ratioData.ratios_ou];
+            if (Array.isArray(sideRatios) && sideRatios[lineIndex]) {
+              ratioValue = sideRatios[lineIndex];
+            }
+          }
+
+          if (ratioValue > 0) {
+            availableRatios.push({
+              fairBookie: ratioData.fair_odds_bookie,
+              ratio: ratioValue,
+              oddsBookie: ratioData.odds_bookie
+            });
+          }
+        }
+      });
+
+      if (availableRatios.length === 0) return null;
+      
+      // Check required bookies criterion
+      const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
+      if (requiredFairBookies.length > 0) {
+        const hasRequiredBookie = requiredFairBookies.some(requiredBookie =>
+          availableRatios.some(r => r.fairBookie === requiredBookie)
+        );
+        if (!hasRequiredBookie) return null;
+      }
+      
+      // Apply filter method
+      let displayRatio = 0;
+      let displayBookie = availableRatios[0].oddsBookie;
+      
+      if (filterMethod === 'average') {
+        // Average of all fair odds bookies
+        displayRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length;
+      } else if (filterMethod === 'above_all') {
+        // Minimum (lowest) ratio
+        displayRatio = Math.min(...availableRatios.map(r => r.ratio));
+      } else {
+        // Individual - show the highest for display purposes
+        displayRatio = Math.max(...availableRatios.map(r => r.ratio));
+      }
+
+      return displayRatio > 0 ? { ratio: displayRatio, bookie: displayBookie } : null;
+    };
+
+    // Helper to get top odds for a specific line and side (excluding Prediction)
+    const getTopOdds = (line: number, oddsKey: string) => {
+      let topOdds = 0;
+      let topBookie = '';
+      for (const bm of bookmakers) {
+        if (bm.bookie === 'Prediction') continue; // Exclude Prediction bookie
+        const odds = getOdds(bm, line, oddsKey);
+        if (odds && parseFloat(odds) > topOdds) {
+          topOdds = parseFloat(odds);
+          topBookie = bm.bookie;
+        }
+      }
+      return topOdds > 0 ? { odds: topOdds, bookie: topBookie } : null;
+    };
+
     return (
       <div className="mb-3">
         <h4 className="text-xs font-bold text-white font-mono mb-2">{marketName}</h4>
@@ -689,73 +956,156 @@ export function FixtureOdds({ fixtureId, fixture }: FixtureOddsProps) {
                     {bm.bookie === 'Prediction' ? 'Prediction' : bm.bookie}
                   </th>
                 ))}
+                <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
+                  Top
+                </th>
+                {fixture?.ratios && fixture.ratios.length > 0 && (
+                  <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[80px] font-bold">
+                    Ratios
+                  </th>
+                )}
                 <th className="px-1 py-0.5 text-left text-bg-black border border-gray-600">{side2.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side2.label}-${bm.bookie}`} className="px-1 py-0.5 text-center text-bg-black border border-gray-600 min-w-[60px]">
                     {bm.bookie === 'Prediction' ? 'Prediction' : bm.bookie}
                   </th>
                 ))}
+                <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
+                  Top
+                </th>
+                {fixture?.ratios && fixture.ratios.length > 0 && (
+                  <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[80px] font-bold">
+                    Ratios
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
-              {linesWithOdds.map((line, index) => (
-                <tr key={line}>
-                  <td className="px-1 py-0.5 text-bg-black border border-gray-600 font-medium">
-                    {side1.lineFormatter(line)}
-                  </td>
-                  {bookmakers.map(bm => {
-                    const odds = getOdds(bm, line, side1.oddsKey);
-                    const flashClass = getFlashClass(bm.bookie, marketName, side1.label, line);
-                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds);
-                    return (
-                      <td key={`${side1.label}-${bm.bookie}`} className={`px-1 py-0.5 text-center border border-gray-600 ${bgColorClass}`}>
-                        {odds ? (
-                          <button
-                            onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
-                            className={`text-white hover:text-gray-300 px-1 py-0 rounded transition-colors cursor-pointer ${flashClass}`}
-                          >
-                            {odds}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
-                            className={`text-gray-500 hover:text-gray-700 px-1 py-0 rounded transition-colors cursor-pointer`}
-                          >
-                            -
-                          </button>
-                        )}
+              {linesWithData.map((line, index) => {
+                const side1TopRatio = getTopRatio(line, linesKey === 'ah' ? 'ratios_ah_h' : 'ratios_ou_o');
+                const side2TopRatio = getTopRatio(line, linesKey === 'ah' ? 'ratios_ah_a' : 'ratios_ou_u');
+
+                return (
+                  <tr key={line}>
+                    <td className="px-1 py-0.5 text-bg-black border border-gray-600 font-medium">
+                      {side1.lineFormatter(line)}
+                    </td>
+                    {bookmakers.map(bm => {
+                      const odds = getOdds(bm, line, side1.oddsKey);
+                      const flashClass = getFlashClass(bm.bookie, marketName, side1.label, line);
+                      const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds);
+                      return (
+                        <td key={`${side1.label}-${bm.bookie}`} className={`px-1 py-0.5 text-center border border-gray-600 ${bgColorClass}`}>
+                          {odds ? (
+                            <button
+                              onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
+                              className={`text-white hover:text-gray-300 px-1 py-0 rounded transition-colors cursor-pointer ${flashClass}`}
+                            >
+                              {odds}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
+                              className={`text-gray-500 hover:text-gray-700 px-1 py-0 rounded transition-colors cursor-pointer`}
+                            >
+                              -
+                            </button>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                      const topOddsData = getTopOdds(line, side1.oddsKey);
+                      return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-black';
+                    })()}`}>
+                      {(() => {
+                        const topOddsData = getTopOdds(line, side1.oddsKey);
+                        if (!topOddsData) return <span className="text-gray-500">-</span>;
+
+                        return (
+                          <span className="font-mono text-xs px-1 text-white">
+                            {topOddsData.odds.toFixed(2)}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    {fixture?.ratios && fixture.ratios.length > 0 && (
+                      <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                        return side1TopRatio ? getBookieColorClass(side1TopRatio.bookie) : 'bg-black';
+                      })()}`}>
+                        {(() => {
+                          if (!side1TopRatio) return <span className="text-gray-500">-</span>;
+
+                          const textColorClass = getRatioTextColorClass(side1TopRatio.ratio);
+                          return (
+                            <span className={`font-mono text-xs px-1 rounded ${textColorClass}`}>
+                              {side1TopRatio.ratio.toFixed(3)}
+                            </span>
+                          );
+                        })()}
                       </td>
-                    );
-                  })}
-                  <td className="px-1 py-0.5 text-gray-300 border border-gray-600 font-medium">
-                    {side2.lineFormatter(line)}
-                  </td>
-                  {bookmakers.map(bm => {
-                    const odds = getOdds(bm, line, side2.oddsKey);
-                    const flashClass = getFlashClass(bm.bookie, marketName, side2.label, line);
-                    const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds);
-                    return (
-                      <td key={`${side2.label}-${bm.bookie}`} className={`px-1 py-0.5 text-center border border-gray-600 ${bgColorClass}`}>
-                        {odds ? (
-                          <button
-                            onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
-                            className={`text-white hover:text-gray-300 px-1 py-0 rounded transition-colors cursor-pointer ${flashClass}`}
-                          >
-                            {odds}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
-                            className={`text-gray-500 hover:text-gray-700 px-1 py-0 rounded transition-colors cursor-pointer`}
-                          >
-                            -
-                          </button>
-                        )}
+                    )}
+                    <td className="px-1 py-0.5 text-gray-300 border border-gray-600 font-medium">
+                      {side2.lineFormatter(line)}
+                    </td>
+                    {bookmakers.map(bm => {
+                      const odds = getOdds(bm, line, side2.oddsKey);
+                      const flashClass = getFlashClass(bm.bookie, marketName, side2.label, line);
+                      const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds);
+                      return (
+                        <td key={`${side2.label}-${bm.bookie}`} className={`px-1 py-0.5 text-center border border-gray-600 ${bgColorClass}`}>
+                          {odds ? (
+                            <button
+                              onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
+                              className={`text-white hover:text-gray-300 px-1 py-0 rounded transition-colors cursor-pointer ${flashClass}`}
+                            >
+                              {odds}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
+                              className={`text-gray-500 hover:text-gray-700 px-1 py-0 rounded transition-colors cursor-pointer`}
+                            >
+                              -
+                            </button>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                      const topOddsData = getTopOdds(line, side2.oddsKey);
+                      return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-black';
+                    })()}`}>
+                      {(() => {
+                        const topOddsData = getTopOdds(line, side2.oddsKey);
+                        if (!topOddsData) return <span className="text-gray-500">-</span>;
+
+                        return (
+                          <span className="font-mono text-xs px-1 text-white">
+                            {topOddsData.odds.toFixed(2)}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    {fixture?.ratios && fixture.ratios.length > 0 && (
+                      <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                        return side2TopRatio ? getBookieColorClass(side2TopRatio.bookie) : 'bg-black';
+                      })()}`}>
+                        {(() => {
+                          if (!side2TopRatio) return <span className="text-gray-500">-</span>;
+
+                          const textColorClass = getRatioTextColorClass(side2TopRatio.ratio);
+                          return (
+                            <span className={`font-mono text-xs px-1 rounded ${textColorClass}`}>
+                              {side2TopRatio.ratio.toFixed(3)}
+                            </span>
+                          );
+                        })()}
                       </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

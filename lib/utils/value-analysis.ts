@@ -36,6 +36,24 @@ export interface BookieOdds {
   }
 }
 
+export interface BookieRatio {
+  fair_odds_bookie: string
+  odds_bookie: string
+  ratios_x12?: number[]
+  ratios_ah?: {
+    ratios_ah_a?: number[]
+    ratios_ah_h?: number[]
+  }
+  ratios_ou?: {
+    ratios_ou_o?: number[]
+    ratios_ou_u?: number[]
+  }
+  ratios_lines?: {
+    ah?: number[]
+    ou?: number[]
+  }
+}
+
 export interface ValueOpportunity {
   fixture: Fixture
   bookie: string
@@ -48,6 +66,12 @@ export interface ValueOpportunity {
   line?: number
 }
 
+export interface ValueOpportunityWithRatios {
+  fixture: Fixture & {
+    ratios: BookieRatio[]
+  }
+}
+
 export interface ValueAnalysisConfig {
   fairOddsBookie: string | string[]
   oddsRatioBookies: string | string[]
@@ -57,7 +81,8 @@ export interface ValueAnalysisConfig {
 }
 
 /**
- * Analyzes fixtures for value opportunities by comparing odds ratios between bookies
+ * Analyzes fixtures for all value opportunities by comparing odds ratios between bookies
+ * Returns ratios for all markets, outcomes and lines organized by bookie combinations
  * @param fixtures Array of fixtures to analyze
  * @param config Configuration for the analysis
  * @returns Object containing opportunities and analyzed fixtures count
@@ -65,16 +90,14 @@ export interface ValueAnalysisConfig {
 export function analyzeValueOpportunities(
   fixtures: Fixture[],
   config: ValueAnalysisConfig
-): { opportunities: ValueOpportunity[]; analyzedFixtures: number } {
-  const { fairOddsBookie, oddsRatioBookies, minRatio, maxOdds, futureOnly = true } = config
+): { opportunities: ValueOpportunityWithRatios[]; analyzedFixtures: number } {
+  const { fairOddsBookie, oddsRatioBookies, maxOdds, futureOnly = true } = config
 
   // Normalize fairOddsBookie and oddsRatioBookies to arrays
   const fairBookies = Array.isArray(fairOddsBookie) ? fairOddsBookie : [fairOddsBookie]
   const oddsBookies = Array.isArray(oddsRatioBookies) ? oddsRatioBookies : [oddsRatioBookies]
 
-  // Compares odds using exact line matching - only lines that exist in both bookies are compared!
-  // This ensures we're comparing equivalent handicap/over-under values between bookies.
-  const opportunities: ValueOpportunity[] = []
+  const opportunities: ValueOpportunityWithRatios[] = []
   let analyzedFixtures = 0
 
   fixtures.forEach(fixture => {
@@ -85,11 +108,11 @@ export function analyzeValueOpportunities(
       if (fixtureDate <= now) return
     }
 
-    // Find all fair odds bookies
+    // Find all fair odds and odds bookies for this fixture
     const fairOddsBookieDataList = fairBookies
       .map(bookie => fixture.odds.find(o => o.bookie === bookie))
       .filter(Boolean)
-    
+
     const oddsBookieDataList = oddsBookies
       .map(bookie => fixture.odds.find(o => o.bookie === bookie))
       .filter(Boolean)
@@ -98,354 +121,205 @@ export function analyzeValueOpportunities(
 
     analyzedFixtures++
 
-    // Analyze for each odds bookie
-    oddsBookieDataList.forEach(oddsBookieData => {
-      if (!oddsBookieData) return
+    const fixtureRatios: BookieRatio[] = []
 
-      // Analyze X12 odds (always 3 outcomes: Home, Draw, Away - no line matching needed)
-      if (oddsBookieData.odds_x12 && oddsBookieData.odds_x12.length > 0) {
-        const oddsBookieX12 = oddsBookieData.odds_x12[0].x12
+    // For each fair odds bookie
+    fairOddsBookieDataList.forEach(fairOddsBookieData => {
+      if (!fairOddsBookieData) return
 
-        oddsBookieX12.forEach((odds, index) => {
-          if (odds <= 0) return
+      // For each odds bookie
+      oddsBookieDataList.forEach(oddsBookieData => {
+        if (!oddsBookieData) return
 
-          const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
+        const bookieRatio: BookieRatio = {
+          fair_odds_bookie: fairOddsBookieData.bookie,
+          odds_bookie: oddsBookieData.bookie
+        }
 
-          // Apply max odds filter if specified
-          if (maxOdds && oddsDecimal > maxOdds) return
+        // Calculate X12 ratios
+        if (oddsBookieData.odds_x12 && oddsBookieData.odds_x12.length > 0 &&
+            fairOddsBookieData.fair_odds_x12) {
+          const oddsBookieX12 = oddsBookieData.odds_x12[0].x12
+          const fairBookieX12 = fairOddsBookieData.fair_odds_x12
+          const ratios_x12: number[] = []
 
-          // Check ratio against ALL fair odds bookies - must pass for ALL
-          let passesAllFairBookies = true
-          let minRatioValue = Infinity
-          let primaryFairOdds = 0
-
-          for (const fairOddsBookieData of fairOddsBookieDataList) {
-            if (!fairOddsBookieData || !fairOddsBookieData.fair_odds_x12) {
-              passesAllFairBookies = false
-              break
+          oddsBookieX12.forEach((odds, index) => {
+            if (odds <= 0 || !fairBookieX12[index] || fairBookieX12[index] <= 0) {
+              ratios_x12.push(0)
+              return
             }
 
-            const fairBookieX12 = fairOddsBookieData.fair_odds_x12
-            if (!fairBookieX12[index] || fairBookieX12[index] <= 0) {
-              passesAllFairBookies = false
-              break
-            }
-
+            const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
             const fairDecimal = fairBookieX12[index] / Math.pow(10, fairOddsBookieData.decimals)
+
+            // Apply max odds filter if specified
+            if (maxOdds && oddsDecimal > maxOdds) {
+              ratios_x12.push(0)
+              return
+            }
+
             const ratio = oddsDecimal / fairDecimal
+            ratios_x12.push(ratio)
+          })
 
-            if (ratio <= minRatio) {
-              passesAllFairBookies = false
-              break
+          bookieRatio.ratios_x12 = ratios_x12
+        }
+
+        // Calculate AH ratios with line matching
+        if (oddsBookieData.odds_ah && oddsBookieData.odds_ah.length > 0 &&
+            fairOddsBookieData.fair_odds_ah) {
+          const oddsBookieAH = oddsBookieData.odds_ah[0]
+          const oddsBookieLines = oddsBookieData.lines?.[0]?.ah || []
+          const fairBookieAH = fairOddsBookieData.fair_odds_ah
+          const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ah || []
+
+          const ratios_ah_a: number[] = []
+          const ratios_ah_h: number[] = []
+
+          // Find matching lines and calculate ratios
+          oddsBookieLines.forEach((oddsLine, oddsIndex) => {
+            const fairIndex = fairBookieLines.indexOf(oddsLine)
+            if (fairIndex === -1) {
+              ratios_ah_a.push(0)
+              ratios_ah_h.push(0)
+              return
             }
 
-            // Track the minimum ratio and use the first fair bookie's odds for display
-            if (ratio < minRatioValue) {
-              minRatioValue = ratio
-              primaryFairOdds = fairBookieX12[index]
+            // AH Away ratios
+            if (oddsBookieAH.ah_a?.[oddsIndex] && fairBookieAH.fair_ah_a?.[fairIndex]) {
+              const odds = oddsBookieAH.ah_a[oddsIndex]
+              const fairOdds = fairBookieAH.fair_ah_a[fairIndex]
+
+              if (odds > 0 && fairOdds > 0) {
+                const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
+                const fairDecimal = fairOdds / Math.pow(10, fairOddsBookieData.decimals)
+
+                if (!maxOdds || oddsDecimal <= maxOdds) {
+                  ratios_ah_a.push(oddsDecimal / fairDecimal)
+                } else {
+                  ratios_ah_a.push(0)
+                }
+              } else {
+                ratios_ah_a.push(0)
+              }
+            } else {
+              ratios_ah_a.push(0)
             }
+
+            // AH Home ratios
+            if (oddsBookieAH.ah_h?.[oddsIndex] && fairBookieAH.fair_ah_h?.[fairIndex]) {
+              const odds = oddsBookieAH.ah_h[oddsIndex]
+              const fairOdds = fairBookieAH.fair_ah_h[fairIndex]
+
+              if (odds > 0 && fairOdds > 0) {
+                const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
+                const fairDecimal = fairOdds / Math.pow(10, fairOddsBookieData.decimals)
+
+                if (!maxOdds || oddsDecimal <= maxOdds) {
+                  ratios_ah_h.push(oddsDecimal / fairDecimal)
+                } else {
+                  ratios_ah_h.push(0)
+                }
+              } else {
+                ratios_ah_h.push(0)
+              }
+            } else {
+              ratios_ah_h.push(0)
+            }
+          })
+
+          bookieRatio.ratios_ah = {
+            ratios_ah_a,
+            ratios_ah_h
           }
-
-          if (passesAllFairBookies && minRatioValue > minRatio) {
-            opportunities.push({
-              fixture,
-              bookie: oddsBookieData.bookie,
-              type: 'x12',
-              oddsIndex: index,
-              oddsBookieOdds: odds,
-              fairOddsBookieOdds: primaryFairOdds,
-              ratio: minRatioValue
-            })
+          bookieRatio.ratios_lines = {
+            ...bookieRatio.ratios_lines,
+            ah: oddsBookieLines
           }
-        })
-      }
-
-      // Only use lines that exist in both bookies (exact matches only)
-      const findMatchingLineIndex = (oddsBookieLines: number[], fairBookieLines: number[], targetLine: number): number | null => {
-        // Find exact match only
-        const fairBookieIndex = fairBookieLines.indexOf(targetLine)
-        return fairBookieIndex !== -1 ? fairBookieIndex : null
-      }
-
-      // Analyze AH odds with line matching
-      if (oddsBookieData.odds_ah && oddsBookieData.odds_ah.length > 0) {
-        const oddsBookieAH = oddsBookieData.odds_ah[0]
-        const oddsBookieLines = oddsBookieData.lines?.[0]?.ah || []
-
-        // AH Away - match by lines
-        if (oddsBookieAH.ah_a && oddsBookieLines.length > 0) {
-          oddsBookieAH.ah_a.forEach((odds, oddsBookieIndex) => {
-            const oddsBookieLine = oddsBookieLines[oddsBookieIndex]
-            if (oddsBookieLine === undefined || odds <= 0) return
-
-            const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
-
-            // Apply max odds filter if specified
-            if (maxOdds && oddsDecimal > maxOdds) return
-
-            // Check ratio against ALL fair odds bookies - must pass for ALL
-            let passesAllFairBookies = true
-            let minRatioValue = Infinity
-            let primaryFairOdds = 0
-
-            for (const fairOddsBookieData of fairOddsBookieDataList) {
-              if (!fairOddsBookieData || !fairOddsBookieData.fair_odds_ah) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieAH = fairOddsBookieData.fair_odds_ah
-              const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ah || []
-
-              if (fairBookieLines.length === 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieIndex = findMatchingLineIndex(oddsBookieLines, fairBookieLines, oddsBookieLine)
-              if (fairBookieIndex === null || !fairBookieAH.fair_ah_a?.[fairBookieIndex] || fairBookieAH.fair_ah_a[fairBookieIndex] <= 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairDecimal = fairBookieAH.fair_ah_a[fairBookieIndex] / Math.pow(10, fairOddsBookieData.decimals)
-              const ratio = oddsDecimal / fairDecimal
-
-              if (ratio <= minRatio) {
-                passesAllFairBookies = false
-                break
-              }
-
-              // Track the minimum ratio and use the first fair bookie's odds for display
-              if (ratio < minRatioValue) {
-                minRatioValue = ratio
-                primaryFairOdds = fairBookieAH.fair_ah_a[fairBookieIndex]
-              }
-            }
-
-            if (passesAllFairBookies && minRatioValue > minRatio) {
-              opportunities.push({
-                fixture,
-                bookie: oddsBookieData.bookie,
-                type: 'ah',
-                lineIndex: oddsBookieIndex,
-                oddsIndex: 0, // away
-                oddsBookieOdds: odds,
-                fairOddsBookieOdds: primaryFairOdds,
-                ratio: minRatioValue,
-                line: oddsBookieLine === 0 ? 0 : -oddsBookieLine
-              })
-            }
-          })
         }
 
-        // AH Home - match by lines
-        if (oddsBookieAH.ah_h && oddsBookieLines.length > 0) {
-          oddsBookieAH.ah_h.forEach((odds, oddsBookieIndex) => {
-            const oddsBookieLine = oddsBookieLines[oddsBookieIndex]
-            if (oddsBookieLine === undefined || odds <= 0) return
+        // Calculate OU ratios with line matching
+        if (oddsBookieData.odds_ou && oddsBookieData.odds_ou.length > 0 &&
+            fairOddsBookieData.fair_odds_ou) {
+          const oddsBookieOU = oddsBookieData.odds_ou[0]
+          const oddsBookieLines = oddsBookieData.lines?.[0]?.ou || []
+          const fairBookieOU = fairOddsBookieData.fair_odds_ou
+          const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ou || []
 
-            const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
+          const ratios_ou_o: number[] = []
+          const ratios_ou_u: number[] = []
 
-            // Apply max odds filter if specified
-            if (maxOdds && oddsDecimal > maxOdds) return
-
-            // Check ratio against ALL fair odds bookies - must pass for ALL
-            let passesAllFairBookies = true
-            let minRatioValue = Infinity
-            let primaryFairOdds = 0
-
-            for (const fairOddsBookieData of fairOddsBookieDataList) {
-              if (!fairOddsBookieData || !fairOddsBookieData.fair_odds_ah) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieAH = fairOddsBookieData.fair_odds_ah
-              const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ah || []
-
-              if (fairBookieLines.length === 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieIndex = findMatchingLineIndex(oddsBookieLines, fairBookieLines, oddsBookieLine)
-              if (fairBookieIndex === null || !fairBookieAH.fair_ah_h?.[fairBookieIndex] || fairBookieAH.fair_ah_h[fairBookieIndex] <= 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairDecimal = fairBookieAH.fair_ah_h[fairBookieIndex] / Math.pow(10, fairOddsBookieData.decimals)
-              const ratio = oddsDecimal / fairDecimal
-
-              if (ratio <= minRatio) {
-                passesAllFairBookies = false
-                break
-              }
-
-              // Track the minimum ratio and use the first fair bookie's odds for display
-              if (ratio < minRatioValue) {
-                minRatioValue = ratio
-                primaryFairOdds = fairBookieAH.fair_ah_h[fairBookieIndex]
-              }
+          // Find matching lines and calculate ratios
+          oddsBookieLines.forEach((oddsLine, oddsIndex) => {
+            const fairIndex = fairBookieLines.indexOf(oddsLine)
+            if (fairIndex === -1) {
+              ratios_ou_o.push(0)
+              ratios_ou_u.push(0)
+              return
             }
 
-            if (passesAllFairBookies && minRatioValue > minRatio) {
-              opportunities.push({
-                fixture,
-                bookie: oddsBookieData.bookie,
-                type: 'ah',
-                lineIndex: oddsBookieIndex,
-                oddsIndex: 1, // home
-                oddsBookieOdds: odds,
-                fairOddsBookieOdds: primaryFairOdds,
-                ratio: minRatioValue,
-                line: oddsBookieLine
-              })
+            // OU Over ratios
+            if (oddsBookieOU.ou_o?.[oddsIndex] && fairBookieOU.fair_ou_o?.[fairIndex]) {
+              const odds = oddsBookieOU.ou_o[oddsIndex]
+              const fairOdds = fairBookieOU.fair_ou_o[fairIndex]
+
+              if (odds > 0 && fairOdds > 0) {
+                const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
+                const fairDecimal = fairOdds / Math.pow(10, fairOddsBookieData.decimals)
+
+                if (!maxOdds || oddsDecimal <= maxOdds) {
+                  ratios_ou_o.push(oddsDecimal / fairDecimal)
+                } else {
+                  ratios_ou_o.push(0)
+                }
+              } else {
+                ratios_ou_o.push(0)
+              }
+            } else {
+              ratios_ou_o.push(0)
+            }
+
+            // OU Under ratios
+            if (oddsBookieOU.ou_u?.[oddsIndex] && fairBookieOU.fair_ou_u?.[fairIndex]) {
+              const odds = oddsBookieOU.ou_u[oddsIndex]
+              const fairOdds = fairBookieOU.fair_ou_u[fairIndex]
+
+              if (odds > 0 && fairOdds > 0) {
+                const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
+                const fairDecimal = fairOdds / Math.pow(10, fairOddsBookieData.decimals)
+
+                if (!maxOdds || oddsDecimal <= maxOdds) {
+                  ratios_ou_u.push(oddsDecimal / fairDecimal)
+                } else {
+                  ratios_ou_u.push(0)
+                }
+              } else {
+                ratios_ou_u.push(0)
+              }
+            } else {
+              ratios_ou_u.push(0)
             }
           })
-        }
-      }
 
-      // Analyze OU odds with line matching
-      if (oddsBookieData.odds_ou && oddsBookieData.odds_ou.length > 0) {
-        const oddsBookieOU = oddsBookieData.odds_ou[0]
-        const oddsBookieLines = oddsBookieData.lines?.[0]?.ou || []
-
-        // OU Over - match by lines
-        if (oddsBookieOU.ou_o && oddsBookieLines.length > 0) {
-          oddsBookieOU.ou_o.forEach((odds, oddsBookieIndex) => {
-            const oddsBookieLine = oddsBookieLines[oddsBookieIndex]
-            if (oddsBookieLine === undefined || odds <= 0) return
-
-            const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
-
-            // Apply max odds filter if specified
-            if (maxOdds && oddsDecimal > maxOdds) return
-
-            // Check ratio against ALL fair odds bookies - must pass for ALL
-            let passesAllFairBookies = true
-            let minRatioValue = Infinity
-            let primaryFairOdds = 0
-
-            for (const fairOddsBookieData of fairOddsBookieDataList) {
-              if (!fairOddsBookieData || !fairOddsBookieData.fair_odds_ou) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieOU = fairOddsBookieData.fair_odds_ou
-              const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ou || []
-
-              if (fairBookieLines.length === 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieIndex = findMatchingLineIndex(oddsBookieLines, fairBookieLines, oddsBookieLine)
-              if (fairBookieIndex === null || !fairBookieOU.fair_ou_o?.[fairBookieIndex] || fairBookieOU.fair_ou_o[fairBookieIndex] <= 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairDecimal = fairBookieOU.fair_ou_o[fairBookieIndex] / Math.pow(10, fairOddsBookieData.decimals)
-              const ratio = oddsDecimal / fairDecimal
-
-              if (ratio <= minRatio) {
-                passesAllFairBookies = false
-                break
-              }
-
-              // Track the minimum ratio and use the first fair bookie's odds for display
-              if (ratio < minRatioValue) {
-                minRatioValue = ratio
-                primaryFairOdds = fairBookieOU.fair_ou_o[fairBookieIndex]
-              }
-            }
-
-            if (passesAllFairBookies && minRatioValue > minRatio) {
-              opportunities.push({
-                fixture,
-                bookie: oddsBookieData.bookie,
-                type: 'ou',
-                lineIndex: oddsBookieIndex,
-                oddsIndex: 0, // over
-                oddsBookieOdds: odds,
-                fairOddsBookieOdds: primaryFairOdds,
-                ratio: minRatioValue,
-                line: oddsBookieLine
-              })
-            }
-          })
+          bookieRatio.ratios_ou = {
+            ratios_ou_o,
+            ratios_ou_u
+          }
+          bookieRatio.ratios_lines = {
+            ...bookieRatio.ratios_lines,
+            ou: oddsBookieLines
+          }
         }
 
-        // OU Under - match by lines
-        if (oddsBookieOU.ou_u && oddsBookieLines.length > 0) {
-          oddsBookieOU.ou_u.forEach((odds, oddsBookieIndex) => {
-            const oddsBookieLine = oddsBookieLines[oddsBookieIndex]
-            if (oddsBookieLine === undefined || odds <= 0) return
+        fixtureRatios.push(bookieRatio)
+      })
+    })
 
-            const oddsDecimal = odds / Math.pow(10, oddsBookieData.decimals)
-
-            // Apply max odds filter if specified
-            if (maxOdds && oddsDecimal > maxOdds) return
-
-            // Check ratio against ALL fair odds bookies - must pass for ALL
-            let passesAllFairBookies = true
-            let minRatioValue = Infinity
-            let primaryFairOdds = 0
-
-            for (const fairOddsBookieData of fairOddsBookieDataList) {
-              if (!fairOddsBookieData || !fairOddsBookieData.fair_odds_ou) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieOU = fairOddsBookieData.fair_odds_ou
-              const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ou || []
-
-              if (fairBookieLines.length === 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairBookieIndex = findMatchingLineIndex(oddsBookieLines, fairBookieLines, oddsBookieLine)
-              if (fairBookieIndex === null || !fairBookieOU.fair_ou_u?.[fairBookieIndex] || fairBookieOU.fair_ou_u[fairBookieIndex] <= 0) {
-                passesAllFairBookies = false
-                break
-              }
-
-              const fairDecimal = fairBookieOU.fair_ou_u[fairBookieIndex] / Math.pow(10, fairOddsBookieData.decimals)
-              const ratio = oddsDecimal / fairDecimal
-
-              if (ratio <= minRatio) {
-                passesAllFairBookies = false
-                break
-              }
-
-              // Track the minimum ratio and use the first fair bookie's odds for display
-              if (ratio < minRatioValue) {
-                minRatioValue = ratio
-                primaryFairOdds = fairBookieOU.fair_ou_u[fairBookieIndex]
-              }
-            }
-
-            if (passesAllFairBookies && minRatioValue > minRatio) {
-              opportunities.push({
-                fixture,
-                bookie: oddsBookieData.bookie,
-                type: 'ou',
-                lineIndex: oddsBookieIndex,
-                oddsIndex: 1, // under
-                oddsBookieOdds: odds,
-                fairOddsBookieOdds: primaryFairOdds,
-                ratio: minRatioValue,
-                line: oddsBookieLine
-              })
-            }
-          })
-        }
-      }
+    opportunities.push({
+      fixture: {
+        ...fixture,
+        ratios: fixtureRatios
+      } as Fixture & { ratios: BookieRatio[] }
     })
   })
 

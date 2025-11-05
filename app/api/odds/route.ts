@@ -302,8 +302,21 @@ async function getFixtureOdds(request: Request) {
         if (row.bookie === 'Prediction') {
           // For Prediction, use latest regular odds as fair odds (without timestamps) since they're already calculated without margins
           oddsObj.fair_odds_x12 = oddsX12 && oddsX12.length > 0 ? oddsX12[oddsX12.length - 1].x12 : null;
-          oddsObj.fair_odds_ah = oddsAh && oddsAh.length > 0 ? oddsAh[oddsAh.length - 1] : null;
-          oddsObj.fair_odds_ou = oddsOu && oddsOu.length > 0 ? oddsOu[oddsOu.length - 1] : null;
+
+          // Transform AH odds from regular format to fair odds format
+          const latestAh = oddsAh && oddsAh.length > 0 ? oddsAh[oddsAh.length - 1] : null;
+          oddsObj.fair_odds_ah = latestAh ? {
+            fair_ah_a: latestAh.ah_a || null,
+            fair_ah_h: latestAh.ah_h || null
+          } : null;
+
+          // Transform OU odds from regular format to fair odds format
+          const latestOu = oddsOu && oddsOu.length > 0 ? oddsOu[oddsOu.length - 1] : null;
+          oddsObj.fair_odds_ou = latestOu ? {
+            fair_ou_o: latestOu.ou_o || null,
+            fair_ou_u: latestOu.ou_u || null
+          } : null;
+
           oddsObj.fair_odds_lines = lines && lines.length > 0 ? {
             ah: lines[lines.length - 1].ah || null,
             ou: lines[lines.length - 1].ou || null

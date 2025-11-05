@@ -507,6 +507,7 @@ export class FixtureFetcher {
           updated_at = NOW()
         WHERE (
           football_fixtures.status_short IS DISTINCT FROM EXCLUDED.status_short OR
+          football_fixtures.timestamp IS DISTINCT FROM EXCLUDED.timestamp OR
           football_fixtures.goals_home IS DISTINCT FROM EXCLUDED.goals_home OR
           football_fixtures.goals_away IS DISTINCT FROM EXCLUDED.goals_away OR
           football_fixtures.score_halftime_home IS DISTINCT FROM EXCLUDED.score_halftime_home OR

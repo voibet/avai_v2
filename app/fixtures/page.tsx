@@ -1001,7 +1001,7 @@ function FixturesPageContent() {
   }, [homeInjuriesLoading, homeInjuriesError, homeInjuriesData, awayInjuriesLoading, awayInjuriesError, awayInjuriesData, formatInjuryTiming]);
 
   const renderOddsSection = useCallback((fixture: any) => {
-    return <FixtureOdds key={`odds-${fixture.id}`} fixtureId={fixture.id} fixture={fixture} />;
+    return <FixtureOdds key={`odds-${fixture.id}`} fixture={fixture} />;
   }, []);
 
   const renderStatsSection = useCallback((fixture: any) => {
