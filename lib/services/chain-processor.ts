@@ -153,33 +153,16 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
       affectedTeams = teamsFromAffectedResult.rows.map((row: any) => row.team_id);
     }
 
-    // Get future fixtures for affected teams (scoped to current league if type='league')
+    // Get future fixtures for affected teams (across all leagues)
     if (affectedTeams.length > 0) {
-      let futureFixturesQuery: string;
-      let futureFixturesResult: any;
-
-      if (type === 'league') {
-        // Only update future fixtures in the current league
-        futureFixturesQuery = `
-          SELECT f.id
-          FROM football_fixtures f
-          WHERE f.league_id = $1
-            AND LOWER(f.status_short) IN ('${IN_FUTURE.join("', '")}')
-            AND (f.home_team_id = ANY($2::bigint[]) OR f.away_team_id = ANY($2::bigint[]))
-          ORDER BY f.date ASC
-        `;
-        futureFixturesResult = await pool.query(futureFixturesQuery, [leagueId, affectedTeams]);
-      } else {
-        // Update all future fixtures for affected teams
-        futureFixturesQuery = `
-          SELECT f.id
-          FROM football_fixtures f
-          WHERE LOWER(f.status_short) IN ('${IN_FUTURE.join("', '")}')
-            AND (f.home_team_id = ANY($1::bigint[]) OR f.away_team_id = ANY($1::bigint[]))
-          ORDER BY f.date ASC
-        `;
-        futureFixturesResult = await pool.query(futureFixturesQuery, [affectedTeams]);
-      }
+      const futureFixturesQuery = `
+        SELECT f.id
+        FROM football_fixtures f
+        WHERE LOWER(f.status_short) IN ('${IN_FUTURE.join("', '")}')
+          AND (f.home_team_id = ANY($1::bigint[]) OR f.away_team_id = ANY($1::bigint[]))
+        ORDER BY f.date ASC
+      `;
+      const futureFixturesResult = await pool.query(futureFixturesQuery, [affectedTeams]);
 
       const futureFixtureIds = futureFixturesResult.rows.map((row: any) => row.id);
 

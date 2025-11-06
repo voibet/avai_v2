@@ -13,7 +13,7 @@ import {
 import { League } from '../../types/database';
 
 
-type AdminTab = 'fetch-fixtures' | 'add-leagues' | 'test' | 'simulate';
+type AdminTab = 'fetch-fixtures' | 'add-leagues' | 'test' | 'simulate' | 'monitor';
 
 interface AvailableLeague {
   id: number;
@@ -103,6 +103,20 @@ export default function AdminPage() {
       averageOdds: number;
     };
     bets?: any[];
+  } | null>(null);
+
+  // Monitor tab state
+  const [monitorData, setMonitorData] = useState<{
+    timestamp: string;
+    connections: { total: number; active: number; idle: number; idle_in_transaction: number; waiting: number; };
+    performance: {
+      active_queries: number;
+      average_query_duration_ms: number;
+      cache_hit_ratio: number;
+      recent_queries: any[];
+      database_stats: any[];
+    };
+    locks: any[];
   } | null>(null);
 
   // Load leagues data
@@ -453,6 +467,28 @@ export default function AdminPage() {
   const closeDeleteModal = () => {
     setDeleteModal({ isOpen: false, league: null });
   };
+
+  // Monitor tab handlers
+  const loadMonitorData = async () => {
+    try {
+      const response = await fetch('/api/admin/database-monitor');
+      if (response.ok) {
+        const data = await response.json();
+        setMonitorData(data);
+      }
+    } catch (error) {
+      console.error('Monitor error:', error);
+    }
+  };
+
+  // Auto-start monitoring when monitor tab is activated
+  useEffect(() => {
+    if (activeTab === 'monitor') {
+      loadMonitorData();
+      const interval = setInterval(loadMonitorData, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
 
   // MLP handlers
   const handleTrainModel = async () => {
@@ -1018,13 +1054,173 @@ export default function AdminPage() {
         {/* Tab Navigation */}
         <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
 
-        {/* Search - hide on test and simulate tabs */}
-        {activeTab !== 'test' && activeTab !== 'simulate' && (
+        {/* Search - hide on test, simulate, and monitor tabs */}
+        {activeTab !== 'test' && activeTab !== 'simulate' && activeTab !== 'monitor' && (
         <SearchBar value={searchQuery} onChange={setSearchQuery} />
         )}
 
         {/* Universal DataTable */}
-        {activeTab === 'test' ? (
+        {activeTab === 'monitor' ? (
+          <div className="space-y-4">
+            {/* Header */}
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold text-red-400 font-mono">DATABASE MONITOR</h2>
+              {monitorData && (
+                <span className="text-xs text-gray-500 font-mono">
+                  {new Date(monitorData.timestamp).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
+
+            {monitorData ? (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Cache & Performance */}
+                <div className="bg-gray-800 p-4 border border-gray-700">
+                  <h3 className="text-sm font-semibold text-white mb-3">Cache & Performance</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Cache Hit Ratio:</span>
+                      <span className={`font-mono ${
+                        monitorData.performance.cache_hit_ratio > 90 ? 'text-green-400' :
+                        monitorData.performance.cache_hit_ratio > 70 ? 'text-yellow-400' :
+                        'text-red-400'
+                      }`}>
+                        {monitorData.performance.cache_hit_ratio.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Avg Query Time:</span>
+                      <span className={`font-mono ${
+                        (monitorData.performance.average_query_duration_ms || 0) < 5 ? 'text-emerald-400' :
+                        (monitorData.performance.average_query_duration_ms || 0) < 100 ? 'text-green-400' :
+                        'text-yellow-400'
+                      }`}>
+                        {Number(monitorData.performance.average_query_duration_ms || 0).toFixed(1)}ms
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Active Queries:</span>
+                      <span className="text-white font-mono">{monitorData.performance.active_queries}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Connection Stats */}
+                <div className="bg-gray-800 p-4 border border-gray-700">
+                  <h3 className="text-sm font-semibold text-white mb-3">Connections</h3>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Total:</span>
+                      <span className="text-white font-mono">{monitorData.connections.total}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Active:</span>
+                      <span className="text-green-400 font-mono">{monitorData.connections.active}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Idle:</span>
+                      <span className="text-blue-400 font-mono">{monitorData.connections.idle}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Idle in TX:</span>
+                      <span className={`font-mono ${
+                        monitorData.connections.idle_in_transaction > 0 ? 'text-red-400' : 'text-gray-500'
+                      }`}>
+                        {monitorData.connections.idle_in_transaction}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-400">Waiting:</span>
+                      <span className={`font-mono ${
+                        monitorData.connections.waiting > 0 ? 'text-red-400' : 'text-gray-500'
+                      }`}>
+                        {monitorData.connections.waiting}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent Queries */}
+                <div className="bg-gray-800 p-4 border border-gray-700">
+                  <h3 className="text-sm font-semibold text-white mb-3">Recent Queries</h3>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {monitorData.performance.recent_queries.length > 0 ? (
+                      monitorData.performance.recent_queries.map((query, index) => (
+                        <div key={index} className="text-xs bg-gray-900 p-2 border border-gray-600">
+                          <div className="flex justify-between mb-1">
+                            <span className="text-gray-400 font-mono">PID: {query.pid}</span>
+                            <span className={`font-mono ${
+                              (query.duration_ms || 0) < 5 ? 'text-emerald-400' :
+                              (query.duration_ms || 0) < 100 ? 'text-green-400' : 'text-yellow-400'
+                            }`}>
+                              {Number(query.duration_ms || 0).toFixed(1)}ms
+                            </span>
+                          </div>
+                          <div className="text-gray-300 font-mono text-xs break-all">
+                            {query.query.length > 60 ? `${query.query.substring(0, 60)}...` : query.query}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-4">
+                        <div className="text-emerald-400 text-sm">⚡ Lightning Fast!</div>
+                        <div className="text-gray-500 text-xs">Queries complete too quickly to capture</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Database Stats & Locks */}
+                <div className="space-y-4">
+                  {/* Database Stats */}
+                  <div className="bg-gray-800 p-4 border border-gray-700">
+                    <h3 className="text-sm font-semibold text-white mb-3">Database Stats</h3>
+                    {monitorData.performance.database_stats.map((stat, index) => (
+                      <div key={index} className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Database:</span>
+                          <span className="text-white font-mono">{stat.datname}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Transactions:</span>
+                          <span className="text-white font-mono">{stat.xact_commit} / {stat.xact_rollback}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Active Locks */}
+                  <div className="bg-gray-800 p-4 border border-gray-700">
+                    <h3 className="text-sm font-semibold text-white mb-3">Active Locks ({monitorData.locks.length})</h3>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {monitorData.locks.length > 0 ? (
+                        monitorData.locks.map((lock, index) => (
+                          <div key={index} className="text-xs bg-gray-900 p-2 border border-gray-600">
+                            <div className="flex justify-between">
+                              <span className="text-blue-400 font-mono">{lock.locktype}</span>
+                              <span className={`font-mono ${lock.granted ? 'text-green-400' : 'text-red-400'}`}>
+                                {lock.granted ? 'GRANTED' : 'WAITING'}
+                              </span>
+                            </div>
+                            <div className="text-gray-400 font-mono text-xs mt-1">
+                              {lock.relation} | PID: {lock.pid}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-gray-500 text-xs">No active locks</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="text-gray-400">Loading...</div>
+              </div>
+            )}
+          </div>
+        ) : activeTab === 'test' ? (
           <div className="bg-gray-900 border border-gray-700 p-6">
             <div className="mb-6">
               <h2 className="text-lg font-semibold text-white mb-2">MLP Model Performance Test</h2>

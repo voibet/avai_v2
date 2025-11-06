@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
+import { BookieOdds } from '@/lib/utils/value-analysis';
 
 
 interface FixtureOddsProps {
   fixture?: any; // Made flexible to support different fixture formats
   oddsData?: OddsData | null;
   minRatio?: number;
-  fairOddsBookies?: Array<{bookie: string, required: boolean}>;
+  fairOddsBookies?: Array<{bookie: string, required: boolean, multiplier: number}>;
   filterMethod?: 'individual' | 'above_all' | 'average';
 }
 
@@ -58,12 +59,27 @@ export function FixtureOdds({
   fixture,
   oddsData: propOddsData,
   minRatio = 1.0,
-  fairOddsBookies = [{bookie: 'Pinnacle', required: false}],
+  fairOddsBookies = [{bookie: 'Pinnacle', required: false, multiplier: 1}],
   filterMethod = 'individual'
 }: FixtureOddsProps) {
   const [oddsData, setOddsData] = useState<OddsData | null>(propOddsData || null);
   const [oddsLoading, setOddsLoading] = useState(!propOddsData);
   const [oddsError, setOddsError] = useState<string | null>(null);
+
+  // Helper: Calculate weighted average ratio based on multipliers (same as values page)
+  const calculateWeightedAverage = (availableRatios: Array<{fairBookie: string, ratio: number}>): number => {
+    let totalWeightedSum = 0;
+    let totalWeight = 0;
+
+    availableRatios.forEach(({fairBookie, ratio}) => {
+      const bookieConfig = fairOddsBookies.find(config => config.bookie === fairBookie);
+      const multiplier = bookieConfig?.multiplier || 1;
+      totalWeightedSum += ratio * multiplier;
+      totalWeight += multiplier;
+    });
+
+    return totalWeight > 0 ? totalWeightedSum / totalWeight : 0;
+  };
 
   // Track which cells have flashed and their direction: 'up' (green) or 'down' (red)
   // Key format: "bookie:market:outcome[:line]"
@@ -582,7 +598,7 @@ export function FixtureOdds({
       return 'bg-blue-900'; // Dark blue for Veikkaus
     }
     if (bookieName.includes('betfair')) {
-      return 'bg-yellow-800'; // Dark yellow for Betfair
+      return 'bg-yellow-600'; // Yellow for Betfair
     }
     if (bookieName.includes('pinnacle')) {
       return 'bg-black'; // Black for Pinnacle
@@ -639,29 +655,48 @@ export function FixtureOdds({
     const hasData = bookmakers.some(bm => outcomes.some(outcome => outcome.getValue(bm.odds, bm) !== null));
     if (!hasData) return null;
 
-    // Get ratio for X12 outcomes - using the same logic as Values page
+    // Get ratio for X12 outcomes - using the exact same logic as Values page filtering
     const getTopRatio = (outcomeIndex: number) => {
       if (!fixture?.ratios) return null;
 
-      // Collect all available ratios from selected fair odds bookies
-      const availableRatios: Array<{fairBookie: string, ratio: number, oddsBookie: string}> = [];
-      
+      // Use the same logic as values page: pick the odds bookie with the best odds for this outcome
+      // Find which odds bookie has the best odds for this outcome
+      let bestOddsBookie = '';
+      let bestOdds = 0;
+
+      fixture.odds.forEach((oddsData: BookieOdds) => {
+        if (oddsData.odds_x12 && oddsData.odds_x12[0]?.x12?.[outcomeIndex]) {
+          const odds = oddsData.odds_x12[0].x12[outcomeIndex] / Math.pow(10, oddsData.decimals);
+          if (odds > bestOdds) {
+            bestOdds = odds;
+            bestOddsBookie = oddsData.bookie;
+          }
+        }
+      });
+
+      if (!bestOddsBookie) return null;
+
+      // Now get ratios for this specific odds bookie using the same logic as values page
+      const availableRatios: Array<{fairBookie: string, ratio: number}> = [];
+
       fixture.ratios.forEach((ratioData: RatioData) => {
+        // Only consider ratios for the best odds bookie
+        if (ratioData.odds_bookie !== bestOddsBookie) return;
+
         // Only consider selected fair odds bookies
         const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === ratioData.fair_odds_bookie);
         if (!isSelectedFairBookie) return;
-        
+
         if (ratioData.ratios_x12 && ratioData.ratios_x12[outcomeIndex] > 0) {
           availableRatios.push({
             fairBookie: ratioData.fair_odds_bookie,
-            ratio: ratioData.ratios_x12[outcomeIndex],
-            oddsBookie: ratioData.odds_bookie
+            ratio: ratioData.ratios_x12[outcomeIndex]
           });
         }
       });
-      
+
       if (availableRatios.length === 0) return null;
-      
+
       // Check required bookies criterion
       const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
       if (requiredFairBookies.length > 0) {
@@ -670,23 +705,20 @@ export function FixtureOdds({
         );
         if (!hasRequiredBookie) return null;
       }
-      
-      // Apply filter method
+
+      // Apply filter method - same as values page
       let displayRatio = 0;
-      let displayBookie = availableRatios[0].oddsBookie;
-      
+
       if (filterMethod === 'average') {
-        // Average of all fair odds bookies
-        displayRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length;
+        displayRatio = calculateWeightedAverage(availableRatios);
       } else if (filterMethod === 'above_all') {
-        // Minimum (lowest) ratio
         displayRatio = Math.min(...availableRatios.map(r => r.ratio));
       } else {
-        // Individual - show the highest for display purposes
+        // Individual - show the highest
         displayRatio = Math.max(...availableRatios.map(r => r.ratio));
       }
-      
-      return displayRatio > 0 ? { ratio: displayRatio, bookie: displayBookie } : null;
+
+      return displayRatio > 0 ? { ratio: displayRatio, bookie: bestOddsBookie } : null;
     };
 
     // Get top odds for X12 outcomes (excluding Prediction)
@@ -826,18 +858,14 @@ export function FixtureOdds({
 
     const sortedLines = Array.from(allLines).sort((a, b) => a - b);
 
-    // Filter out lines that have no odds from any bookmaker OR no ratios
+    // Filter out lines that have no odds available (odds must be > 0) from any bookmaker
     const linesWithData = sortedLines.filter(line =>
       bookmakers.some(bm => {
         const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
         return lineIndex !== undefined && lineIndex >= 0 &&
-               (bm.odds[side1.oddsKey]?.[lineIndex] || bm.odds[side2.oddsKey]?.[lineIndex]);
-      }) ||
-      (fixture?.ratios && fixture.ratios.some((ratioData: RatioData) => {
-        const ratioLines = ratioData.ratios_lines?.[linesKey] || [];
-        const lineIndex = ratioLines.indexOf(line);
-        return lineIndex >= 0;
-      }))
+               ((bm.odds[side1.oddsKey]?.[lineIndex] && bm.odds[side1.oddsKey][lineIndex] > 0) ||
+                (bm.odds[side2.oddsKey]?.[lineIndex] && bm.odds[side2.oddsKey][lineIndex] > 0));
+      })
     );
 
     // Check if we have any data
@@ -860,18 +888,64 @@ export function FixtureOdds({
       return null;
     };
 
-    // Helper to get the ratio for a specific line and side - using the same logic as Values page
+    // Helper to get the ratio for a specific line and side - using the exact same logic as Values page filtering
     const getTopRatio = (line: number, sideKey: 'ratios_ah_a' | 'ratios_ah_h' | 'ratios_ou_o' | 'ratios_ou_u') => {
       if (!fixture?.ratios) return null;
 
-      // Collect all available ratios from selected fair odds bookies
-      const availableRatios: Array<{fairBookie: string, ratio: number, oddsBookie: string}> = [];
-      
+      // Use the same logic as values page: pick the odds bookie with the best odds for this line/side
+      // Find which odds bookie has the best odds for this line and side
+      let bestOddsBookie = '';
+      let bestOdds = 0;
+
+      fixture.odds.forEach((oddsData: BookieOdds) => {
+        let odds = 0;
+        if (linesKey === 'ah') {
+          const ahData = oddsData.odds_ah?.[0];
+          if (ahData) {
+            const lines = oddsData.lines?.[0]?.ah || [];
+            const lineIndex = lines.indexOf(line);
+            if (lineIndex !== -1) {
+              if (sideKey === 'ratios_ah_a' && ahData.ah_a?.[lineIndex]) {
+                odds = ahData.ah_a[lineIndex] / Math.pow(10, oddsData.decimals);
+              } else if (sideKey === 'ratios_ah_h' && ahData.ah_h?.[lineIndex]) {
+                odds = ahData.ah_h[lineIndex] / Math.pow(10, oddsData.decimals);
+              }
+            }
+          }
+        } else if (linesKey === 'ou') {
+          const ouData = oddsData.odds_ou?.[0];
+          if (ouData) {
+            const lines = oddsData.lines?.[0]?.ou || [];
+            const lineIndex = lines.indexOf(line);
+            if (lineIndex !== -1) {
+              if (sideKey === 'ratios_ou_o' && ouData.ou_o?.[lineIndex]) {
+                odds = ouData.ou_o[lineIndex] / Math.pow(10, oddsData.decimals);
+              } else if (sideKey === 'ratios_ou_u' && ouData.ou_u?.[lineIndex]) {
+                odds = ouData.ou_u[lineIndex] / Math.pow(10, oddsData.decimals);
+              }
+            }
+          }
+        }
+
+        if (odds > bestOdds) {
+          bestOdds = odds;
+          bestOddsBookie = oddsData.bookie;
+        }
+      });
+
+      if (!bestOddsBookie) return null;
+
+      // Now get ratios for this specific odds bookie using the same logic as values page
+      const availableRatios: Array<{fairBookie: string, ratio: number}> = [];
+
       fixture.ratios.forEach((ratioData: RatioData) => {
+        // Only consider ratios for the best odds bookie
+        if (ratioData.odds_bookie !== bestOddsBookie) return;
+
         // Only consider selected fair odds bookies
         const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === ratioData.fair_odds_bookie);
         if (!isSelectedFairBookie) return;
-        
+
         const ratioLines = ratioData.ratios_lines?.[linesKey] || [];
         const lineIndex = ratioLines.indexOf(line);
 
@@ -892,15 +966,14 @@ export function FixtureOdds({
           if (ratioValue > 0) {
             availableRatios.push({
               fairBookie: ratioData.fair_odds_bookie,
-              ratio: ratioValue,
-              oddsBookie: ratioData.odds_bookie
+              ratio: ratioValue
             });
           }
         }
       });
 
       if (availableRatios.length === 0) return null;
-      
+
       // Check required bookies criterion
       const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
       if (requiredFairBookies.length > 0) {
@@ -909,23 +982,20 @@ export function FixtureOdds({
         );
         if (!hasRequiredBookie) return null;
       }
-      
-      // Apply filter method
+
+      // Apply filter method - same as values page
       let displayRatio = 0;
-      let displayBookie = availableRatios[0].oddsBookie;
-      
+
       if (filterMethod === 'average') {
-        // Average of all fair odds bookies
-        displayRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length;
+        displayRatio = calculateWeightedAverage(availableRatios);
       } else if (filterMethod === 'above_all') {
-        // Minimum (lowest) ratio
         displayRatio = Math.min(...availableRatios.map(r => r.ratio));
       } else {
-        // Individual - show the highest for display purposes
+        // Individual - show the highest
         displayRatio = Math.max(...availableRatios.map(r => r.ratio));
       }
 
-      return displayRatio > 0 ? { ratio: displayRatio, bookie: displayBookie } : null;
+      return displayRatio > 0 ? { ratio: displayRatio, bookie: bestOddsBookie } : null;
     };
 
     // Helper to get top odds for a specific line and side (excluding Prediction)

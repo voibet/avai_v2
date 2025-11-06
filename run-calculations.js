@@ -1449,27 +1449,35 @@ async function runCalculations() {
                                     SELECT
                                         CASE
                                             WHEN valid_odds.x12_array IS NOT NULL THEN
-                                                (
-                                                    SELECT jsonb_agg(
-                                                        ROUND(
-                                                            (
-                                                                3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
-                                                                (
-                                                                    3.0 - (
+                                                CASE
+                                                    WHEN 1.0 / (
+                                                        SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                        FROM jsonb_array_elements_text(valid_odds.x12_array) elem
+                                                        WHERE elem::numeric > 0
+                                                    ) < 0.92 THEN
+                                                        (
+                                                            SELECT jsonb_agg(
+                                                                ROUND(
+                                                                    (
+                                                                        3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
                                                                         (
-                                                                            SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                                                            FROM jsonb_array_elements_text(valid_odds.x12_array) elem
-                                                                            WHERE elem::numeric > 0
-                                                                        ) - 1.0
-                                                                    ) * (x12_odds::numeric / POWER(10, fo.decimals))
-                                                                )
-                                                            ) * POWER(10, fo.decimals)
-                                                        )::integer
-                                                        ORDER BY x12_idx
-                                                    )
-                                                    FROM jsonb_array_elements_text(valid_odds.x12_array) WITH ORDINALITY x12(x12_odds, x12_idx)
-                                                    WHERE x12_idx <= 3 AND x12_odds::numeric > 0
-                                                )
+                                                                            3.0 - (
+                                                                                (
+                                                                                    SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                                                    FROM jsonb_array_elements_text(valid_odds.x12_array) elem
+                                                                                    WHERE elem::numeric > 0
+                                                                                ) - 1.0
+                                                                            ) * (x12_odds::numeric / POWER(10, fo.decimals))
+                                                                        )
+                                                                    ) * POWER(10, fo.decimals)
+                                                                )::integer
+                                                                ORDER BY x12_idx
+                                                            )
+                                                            FROM jsonb_array_elements_text(valid_odds.x12_array) WITH ORDINALITY x12(x12_odds, x12_idx)
+                                                            WHERE x12_idx <= 3 AND x12_odds::numeric > 0
+                                                        )
+                                                    ELSE NULL
+                                                END
                                             ELSE NULL
                                         END
                                     FROM (
@@ -1503,7 +1511,8 @@ async function runCalculations() {
                                                     'fair_ah_h', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
+                                                                     1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
@@ -1527,7 +1536,8 @@ async function runCalculations() {
                                                     'fair_ah_a', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
+                                                                     1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
@@ -1600,7 +1610,8 @@ async function runCalculations() {
                                                     'fair_ou_o', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
+                                                                     1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
@@ -1624,7 +1635,8 @@ async function runCalculations() {
                                                     'fair_ou_u', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
+                                                                     1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
@@ -1854,27 +1866,35 @@ async function runCalculations() {
                                         SELECT
                                             CASE
                                                 WHEN valid_odds.x12_array IS NOT NULL THEN
-                                                    (
-                                                        SELECT jsonb_agg(
-                                                            ROUND(
-                                                                (
-                                                                    3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
-                                                                    (
-                                                                        3.0 - (
+                                                    CASE
+                                                        WHEN 1.0 / (
+                                                            SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                            FROM jsonb_array_elements_text(valid_odds.x12_array) elem
+                                                            WHERE elem::numeric > 0
+                                                        ) < 0.92 THEN
+                                                            (
+                                                                SELECT jsonb_agg(
+                                                                    ROUND(
+                                                                        (
+                                                                            3.0 * (x12_odds::numeric / POWER(10, fo.decimals)) /
                                                                             (
-                                                                                SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
-                                                                                FROM jsonb_array_elements_text(valid_odds.x12_array) elem
-                                                                                WHERE elem::numeric > 0
-                                                                            ) - 1.0
-                                                                        ) * (x12_odds::numeric / POWER(10, fo.decimals))
-                                                                    )
-                                                                ) * POWER(10, fo.decimals)
-                                                            )::integer
-                                                            ORDER BY x12_idx
-                                                        )
-                                                        FROM jsonb_array_elements_text(valid_odds.x12_array) WITH ORDINALITY x12(x12_odds, x12_idx)
-                                                        WHERE x12_idx <= 3 AND x12_odds::numeric > 0
-                                                    )
+                                                                                3.0 - (
+                                                                                    (
+                                                                                        SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
+                                                                                        FROM jsonb_array_elements_text(valid_odds.x12_array) elem
+                                                                                        WHERE elem::numeric > 0
+                                                                                    ) - 1.0
+                                                                                ) * (x12_odds::numeric / POWER(10, fo.decimals))
+                                                                            )
+                                                                        ) * POWER(10, fo.decimals)
+                                                                    )::integer
+                                                                    ORDER BY x12_idx
+                                                                )
+                                                                FROM jsonb_array_elements_text(valid_odds.x12_array) WITH ORDINALITY x12(x12_odds, x12_idx)
+                                                                WHERE x12_idx <= 3 AND x12_odds::numeric > 0
+                                                            )
+                                                        ELSE NULL
+                                                    END
                                                 ELSE NULL
                                             END
                                         FROM (
@@ -1908,7 +1928,8 @@ async function runCalculations() {
                                                         'fair_ah_h', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
+                                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
@@ -1932,7 +1953,8 @@ async function runCalculations() {
                                                         'fair_ah_a', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 THEN
+                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
+                                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
@@ -2005,7 +2027,8 @@ async function runCalculations() {
                                                         'fair_ou_o', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
+                                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
@@ -2029,7 +2052,8 @@ async function runCalculations() {
                                                         'fair_ou_u', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 THEN
+                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
+                                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /

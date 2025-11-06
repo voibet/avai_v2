@@ -177,11 +177,12 @@ function ValuesPageContent() {
   }
 
   // Filter states
-  const [fairOddsBookies, setFairOddsBookies] = useState<Array<{bookie: string, required: boolean}>>([{bookie: 'Pinnacle', required: false}])
+  const [fairOddsBookies, setFairOddsBookies] = useState<Array<{bookie: string, required: boolean, multiplier: number}>>([{bookie: 'Pinnacle', required: false, multiplier: 1}])
   const [oddsRatioBookies, setOddsRatioBookies] = useState<string[]>(['Veikkaus'])
   const [minRatio] = useState(0.9)
   const [filterMethod, setFilterMethod] = useState<'individual' | 'above_all' | 'average'>('individual')
   const [showHighestRatioPerFixture, setShowHighestRatioPerFixture] = useState(false)
+  const [filtersExpanded, setFiltersExpanded] = useState(true)
 
   // Sorting state
   const [sortBy, setSortBy] = useState<'ratio' | 'date' | 'updated'>('ratio')
@@ -245,12 +246,17 @@ function ValuesPageContent() {
     if (fairBookiesValue) {
       const selectedFairBookies = fairBookiesValue.split(',').map(bookie => {
         const isRequired = bookie.endsWith('*')
+        const cleanBookie = isRequired ? bookie.slice(0, -1) : bookie
+        // Check if there's a multiplier (format: bookie:multiplier or bookie*:multiplier)
+        const [bookieName, multiplierStr] = cleanBookie.split(':')
+        const multiplier = multiplierStr ? parseFloat(multiplierStr) || 1 : 1
         return {
-          bookie: isRequired ? bookie.slice(0, -1) : bookie,
-          required: isRequired
+          bookie: bookieName,
+          required: isRequired,
+          multiplier: multiplier
         }
       })
-      setFairOddsBookies(selectedFairBookies.length > 0 ? selectedFairBookies : [{bookie: 'Pinnacle', required: false}])
+      setFairOddsBookies(selectedFairBookies.length > 0 ? selectedFairBookies : [{bookie: 'Pinnacle', required: false, multiplier: 1}])
     }
 
     const filterMethodValue = searchParams.get('filter_method')
@@ -258,7 +264,7 @@ function ValuesPageContent() {
       setFilterMethod(filterMethodValue)
     }
 
-    const highestRatioValue = searchParams.get('highest_ratio_per_fixture')
+    const highestRatioValue = searchParams.get('only_highest')
     if (highestRatioValue === 'true') {
       setShowHighestRatioPerFixture(true)
     }
@@ -279,9 +285,10 @@ function ValuesPageContent() {
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
     if (fairOddsBookies.length > 0) {
-      const serializedBookies = fairOddsBookies.map(config =>
-        config.required ? `${config.bookie}*` : config.bookie
-      )
+      const serializedBookies = fairOddsBookies.map(config => {
+        const base = config.multiplier !== 1 ? `${config.bookie}:${config.multiplier}` : config.bookie
+        return config.required ? `${base}*` : base
+      })
       params.set('fair_bookies', serializedBookies.join(','))
     } else {
       params.delete('fair_bookies')
@@ -305,9 +312,9 @@ function ValuesPageContent() {
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
     if (showHighestRatioPerFixture) {
-      params.set('highest_ratio_per_fixture', 'true')
+      params.set('only_highest', 'true')
     } else {
-      params.delete('highest_ratio_per_fixture')
+      params.delete('only_highest')
     }
     router.replace(`/values?${params.toString()}`)
   }, [showHighestRatioPerFixture, router, searchParams])
@@ -2121,6 +2128,21 @@ function ValuesPageContent() {
       return ratios
     }
 
+    // Helper: Calculate weighted average ratio based on multipliers
+    const calculateWeightedAverage = (availableRatios: Array<{fairBookie: string, ratio: number}>): number => {
+      let totalWeightedSum = 0
+      let totalWeight = 0
+
+      availableRatios.forEach(({fairBookie, ratio}) => {
+        const bookieConfig = fairOddsBookies.find(config => config.bookie === fairBookie)
+        const multiplier = bookieConfig?.multiplier || 1
+        totalWeightedSum += ratio * multiplier
+        totalWeight += multiplier
+      })
+
+      return totalWeight > 0 ? totalWeightedSum / totalWeight : 0
+    }
+
     // Helper: Check if an outcome satisfies the required bookies criterion
     const meetsRequiredBookiesCriterion = (availableRatios: Array<{fairBookie: string, ratio: number}>): boolean => {
       if (requiredFairBookies.length === 0) return true
@@ -2184,8 +2206,8 @@ function ValuesPageContent() {
                   })
                 })
               } else if (filterMethod === 'average') {
-                // Create one opportunity with average ratio
-                const avgRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length
+                // Create one opportunity with weighted average ratio
+                const avgRatio = calculateWeightedAverage(availableRatios)
                 
                 flattenedOpportunities.push({
                   fixture: fixture,
@@ -2253,8 +2275,8 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with average ratio
-                    const avgRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length
+                    // Create one opportunity with weighted average ratio
+                    const avgRatio = calculateWeightedAverage(availableRatios)
                     
                     flattenedOpportunities.push({
                       fixture: fixture,
@@ -2320,8 +2342,8 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with average ratio
-                    const avgRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length
+                    // Create one opportunity with weighted average ratio
+                    const avgRatio = calculateWeightedAverage(availableRatios)
                     
                     flattenedOpportunities.push({
                       fixture: fixture,
@@ -2395,8 +2417,8 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with average ratio
-                    const avgRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length
+                    // Create one opportunity with weighted average ratio
+                    const avgRatio = calculateWeightedAverage(availableRatios)
                     
                     flattenedOpportunities.push({
                       fixture: fixture,
@@ -2462,8 +2484,8 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with average ratio
-                    const avgRatio = availableRatios.reduce((sum, r) => sum + r.ratio, 0) / availableRatios.length
+                    // Create one opportunity with weighted average ratio
+                    const avgRatio = calculateWeightedAverage(availableRatios)
                     
                     flattenedOpportunities.push({
                       fixture: fixture,
@@ -2888,8 +2910,18 @@ function ValuesPageContent() {
     <div className="fixed inset-0 top-[57px] left-0 right-0 bottom-0 bg-black overflow-auto">
       <div className="w-full px-4">
         {/* Filter Controls */}
-        <div className="mb-2">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-mono text-gray-400">FILTERS</span>
+            <button
+              onClick={() => setFiltersExpanded(!filtersExpanded)}
+              className="text-xs text-gray-400 hover:text-gray-300 font-mono transition-colors"
+            >
+              {filtersExpanded ? '▼' : '▶'}
+            </button>
+          </div>
+          {filtersExpanded && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {/* Fair Odds Bookies */}
               <div>
                 <label className="block text-xs font-mono text-gray-400 mb-0.5">
@@ -2914,31 +2946,57 @@ function ValuesPageContent() {
                                   setFairOddsBookies(prev => prev.filter(config => config.bookie !== bookie))
                                 } else {
                                   // Add bookie
-                                  setFairOddsBookies(prev => [...prev, { bookie, required: false }])
+                                  setFairOddsBookies(prev => [...prev, { bookie, required: false, multiplier: 1 }])
                                 }
                               }}
                               className="rounded border-gray-500 text-blue-600 focus:ring-blue-500"
                             />
                             <span className="text-gray-300 font-mono">{bookie}</span>
                           </label>
-                          {isSelected && (
-                            <label className="flex items-center space-x-1 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={isRequired}
-                                onChange={() => {
-                                  setFairOddsBookies(prev =>
-                                    prev.map(config =>
-                                      config.bookie === bookie
-                                        ? { ...config, required: !config.required }
-                                        : config
+                          {isSelected && (filterMethod === 'above_all' || filterMethod === 'average') && (
+                            <div className="flex items-center space-x-1">
+                              <label className="flex items-center space-x-1 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={isRequired}
+                                  onChange={() => {
+                                    setFairOddsBookies(prev =>
+                                      prev.map(config =>
+                                        config.bookie === bookie
+                                          ? { ...config, required: !config.required }
+                                          : config
+                                      )
                                     )
-                                  )
-                                }}
-                                className="rounded border-gray-500 text-orange-600 focus:ring-orange-500"
-                              />
-                              <span className="text-orange-300 font-mono text-xs">REQ</span>
-                            </label>
+                                  }}
+                                  className="rounded border-gray-500 text-orange-600 focus:ring-orange-500"
+                                />
+                                <span className="text-orange-300 font-mono text-xs">REQ</span>
+                              </label>
+                              {filterMethod === 'average' && (
+                                <div className="flex items-center space-x-1">
+                                  <span className="text-purple-300 font-mono text-xs">MULTP</span>
+                                  <input
+                                    type="number"
+                                    min="0.1"
+                                    max="10"
+                                    step="0.1"
+                                    value={bookieConfig?.multiplier || 1}
+                                    onChange={(e) => {
+                                      const multiplier = parseFloat(e.target.value) || 1
+                                      setFairOddsBookies(prev =>
+                                        prev.map(config =>
+                                          config.bookie === bookie
+                                            ? { ...config, multiplier: Math.max(0.1, Math.min(10, multiplier)) }
+                                            : config
+                                        )
+                                      )
+                                    }}
+                                    className="w-8 h-5 text-xs text-center bg-gray-700 border border-gray-500 rounded text-gray-300 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    style={{ pointerEvents: 'auto' }}
+                                  />
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
                       )
@@ -2987,26 +3045,26 @@ function ValuesPageContent() {
                       />
                       <span className="text-gray-300 font-mono">Average</span>
                     </label>
+
+                    {/* Highest Ratio Per Fixture Toggle */}
+                    <div className="border-t border-gray-600 pt-2 mt-2">
+                      <label className="flex items-center space-x-2 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={showHighestRatioPerFixture}
+                          onChange={(e) => setShowHighestRatioPerFixture(e.target.checked)}
+                          className="rounded border-gray-500 text-green-600 focus:ring-green-500"
+                        />
+                        <span className="text-gray-300 font-mono">Show only highest ratio per fixture</span>
+                      </label>
+                    </div>
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-          </div>
-
-          {/* Highest Ratio Per Fixture Toggle */}
-          <div className="mt-2">
-            <label className="flex items-center space-x-2 text-xs cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showHighestRatioPerFixture}
-                onChange={(e) => setShowHighestRatioPerFixture(e.target.checked)}
-                className="rounded border-gray-500 text-green-600 focus:ring-green-500"
-              />
-              <span className="text-gray-300 font-mono">Show only highest ratio per fixture</span>
-            </label>
-          </div>
-
-          <div className="text-xs text-gray-500 mt-1 mb-1 font-mono">
+          <div className="text-xs text-gray-500 mt-3 font-mono">
             Found {sortedOpportunities.length} value opportunities from {analyzedFixtures} analyzed fixtures ({fixtures.length} total fixtures) • Page {currentPage} of {totalPages}
             {Object.keys(currentFilters).length > 0 && ` (${Object.keys(currentFilters).length} filter${Object.keys(currentFilters).length > 1 ? 's' : ''} applied)`}
           </div>
