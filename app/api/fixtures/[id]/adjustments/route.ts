@@ -3,7 +3,7 @@ import pool from '@/lib/database/db.ts';
 import { calculateOddsFromPredictions } from '@/calculators/prediction-odds.js';
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: { id: string } }
 ) {
   try {

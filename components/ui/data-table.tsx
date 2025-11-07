@@ -66,7 +66,7 @@ export interface DataTableProps<T> {
 }
 
 // Helper function to generate proper flex basis from span
-const getFlexBasis = (span: number): string => {
+const getFlexBasis = (_span: number): string => {
   // Use basis-0 and rely on inline styles for flex properties
   return `basis-0`;
 };
@@ -315,13 +315,6 @@ export default function DataTable<T>({
     }
   };
 
-  const expandAllRows = () => {
-    setExpandedRows(new Set(displayData.map(item => getItemId(item))));
-  };
-
-  const collapseAllRows = () => {
-    setExpandedRows(new Set());
-  };
 
   const handleSort = (column: Column<T>) => {
     if (column.sortable === false || !onSortChange) return;

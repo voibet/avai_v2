@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
+import { createSuccessResponse } from '@/lib/utils/api-utils';
 
 
 interface League {
@@ -16,24 +17,8 @@ interface League {
 }
 
 async function getLeagues(_request: Request) {
-  try {
-    const result = await executeQuery<League>('SELECT * FROM football_leagues ORDER BY name');
-
-    return NextResponse.json({
-      success: true,
-      leagues: result.rows
-    });
-
-  } catch (error) {
-    console.error('Failed to fetch leagues:', error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: `Failed to fetch leagues: ${error instanceof Error ? error.message : 'Unknown error'}`
-      },
-      { status: 500 }
-    );
-  }
+  const result = await executeQuery<League>('SELECT * FROM football_leagues ORDER BY name');
+  return createSuccessResponse({ leagues: result.rows });
 }
 
 export const GET = withErrorHandler(getLeagues);

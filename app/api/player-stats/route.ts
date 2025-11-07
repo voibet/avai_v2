@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { withErrorHandler } from '../../../lib/database/db-utils';
 import axios from 'axios';
 
+export const dynamic = 'force-dynamic';
+
 async function getPlayerStats(request: Request) {
   const { searchParams } = new URL(request.url);
   const playerId = searchParams.get('player_id');

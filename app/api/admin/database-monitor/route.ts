@@ -12,7 +12,6 @@ export interface DatabaseMetrics {
   };
   performance: {
     active_queries: number;
-    average_query_duration_ms: number;
     cache_hit_ratio: number;
     recent_queries: Array<{
       pid: number;
@@ -154,13 +153,6 @@ async function getDatabaseMetrics(): Promise<DatabaseMetrics> {
     waiting_connections: 0
   };
 
-  // Calculate average query duration
-  const activeQueryDurations = activeQueriesResult.rows.map((q: any) => q.duration_seconds);
-  const averageQueryDuration = activeQueryDurations.length > 0
-    ? activeQueryDurations.reduce((sum: number, duration: number) => sum + duration, 0) / activeQueryDurations.length
-    : 0;
-  const averageQueryDurationMs = averageQueryDuration * 1000;
-
   // Calculate cache hit ratio
   const dbStats = databaseStatsResult.rows[0];
   const cacheHitRatio = dbStats && (parseInt(dbStats.blks_read) + parseInt(dbStats.blks_hit)) > 0
@@ -178,7 +170,6 @@ async function getDatabaseMetrics(): Promise<DatabaseMetrics> {
     },
     performance: {
       active_queries: activeQueriesResult.rows.length,
-      average_query_duration_ms: averageQueryDurationMs,
       cache_hit_ratio: cacheHitRatio,
       recent_queries: recentQueriesResult.rows,
       database_stats: databaseStatsResult.rows,
@@ -187,7 +178,7 @@ async function getDatabaseMetrics(): Promise<DatabaseMetrics> {
   };
 }
 
-export const GET = withErrorHandler(async (request: NextRequest) => {
+export const GET = withErrorHandler(async (_request: NextRequest) => {
   try {
     const metrics = await getDatabaseMetrics();
     return NextResponse.json(metrics);

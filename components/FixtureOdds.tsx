@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
-import { BookieOdds } from '@/lib/utils/value-analysis';
+import { calculateWeightedAverage, getOddsDivisor } from '@/lib/utils/value-calculations';
+import type { BookieOdds } from '@/lib/utils/value-analysis';
+
+/**
+ * Checks if all values in an array are valid (not null and greater than 1)
+ * @param values Array of numbers to validate
+ * @returns true if all values are valid, false otherwise
+ */
+function areAllOddsValid(values: number[]): boolean {
+  return values.every(value => value != null && value > 1)
+}
 
 
 interface FixtureOddsProps {
@@ -66,20 +76,6 @@ export function FixtureOdds({
   const [oddsLoading, setOddsLoading] = useState(!propOddsData);
   const [oddsError, setOddsError] = useState<string | null>(null);
 
-  // Helper: Calculate weighted average ratio based on multipliers (same as values page)
-  const calculateWeightedAverage = (availableRatios: Array<{fairBookie: string, ratio: number}>): number => {
-    let totalWeightedSum = 0;
-    let totalWeight = 0;
-
-    availableRatios.forEach(({fairBookie, ratio}) => {
-      const bookieConfig = fairOddsBookies.find(config => config.bookie === fairBookie);
-      const multiplier = bookieConfig?.multiplier || 1;
-      totalWeightedSum += ratio * multiplier;
-      totalWeight += multiplier;
-    });
-
-    return totalWeight > 0 ? totalWeightedSum / totalWeight : 0;
-  };
 
   // Track which cells have flashed and their direction: 'up' (green) or 'down' (red)
   // Key format: "bookie:market:outcome[:line]"
@@ -349,7 +345,7 @@ export function FixtureOdds({
       if (Array.isArray(bookmakerData.odds_ah) && Array.isArray(bookmakerData.lines)) {
         // Historical format
         const linesArray = bookmakerData.lines as Array<{ t: number; ah: number[]; ou: number[] }>;
-        bookmakerData.odds_ah?.forEach((oddsEntry, oddsIndex) => {
+        bookmakerData.odds_ah?.forEach((oddsEntry, _oddsIndex) => {
           // Find the lines data at this timestamp (or the latest available before this timestamp)
           let linesAtTime = null;
           for (let i = 0; i < linesArray.length; i++) {
@@ -404,7 +400,7 @@ export function FixtureOdds({
       if (Array.isArray(bookmakerData.odds_ou) && Array.isArray(bookmakerData.lines)) {
         // Historical format
         const linesArray = bookmakerData.lines as Array<{ t: number; ah: number[]; ou: number[] }>;
-        bookmakerData.odds_ou?.forEach((oddsEntry, oddsIndex) => {
+        bookmakerData.odds_ou?.forEach((oddsEntry, _oddsIndex) => {
           // Find the lines data at this timestamp (or the latest available before this timestamp)
           let linesAtTime = null;
           for (let i = 0; i < linesArray.length; i++) {
@@ -574,7 +570,6 @@ export function FixtureOdds({
 
 
   // Helper function to get divisor based on decimals
-  const getDivisor = (decimals: number) => Math.pow(10, decimals);
 
   // Helper to get flash class for a cell
   const getFlashClass = (bookie: string, market: string, outcome: string, line?: number): string => {
@@ -589,7 +584,7 @@ export function FixtureOdds({
   };
 
   // Helper to get background color class for a bookmaker
-  const getBookieColorClass = (bookie: string, isFairOdds?: boolean): string => {
+  const getBookieColorClass = (bookie: string, _isFairOdds?: boolean): string => {
     const bookieName = bookie.toLowerCase();
     if (bookieName === 'prediction') {
       return 'bg-gray-900'; // Dark gray for Prediction
@@ -622,76 +617,45 @@ export function FixtureOdds({
   };
 
 
-  // Helper to get payout background color class based on payout percentage
-  const getPayoutBgColorClass = (payoutPercentage: number): string => {
-    // Clamp values for better color transitions
-    const clamped = Math.max(90, Math.min(105, payoutPercentage));
-
-    if (clamped < 90) {
-      // Reddish background for values under 90%
-      return 'bg-red-900';
-    } else if (clamped >= 90 && clamped <= 103) {
-      // Transition from red to green background between 90% and 103%
-      const ratio = (clamped - 90) / (103 - 90); // 0 to 1
-      if (ratio < 0.33) {
-        // Dark red
-        return 'bg-red-800';
-      } else if (ratio < 0.66) {
-        // Orange/red
-        return 'bg-orange-900';
-      } else {
-        // Dark green
-        return 'bg-green-900';
-      }
-    } else {
-      // Bright green background for values over 103%
-      return 'bg-green-800';
-    }
-  };
-
-
   // Generic helper function for simple markets (1X2)
   const renderSimpleTable = (marketName: string, outcomes: { label: string; getValue: (odds: any, bm?: any) => string | null }[]) => {
     const hasData = bookmakers.some(bm => outcomes.some(outcome => outcome.getValue(bm.odds, bm) !== null));
     if (!hasData) return null;
 
-    // Get ratio for X12 outcomes - using the exact same logic as Values page filtering
+    // Get ratio for X12 outcomes using Top odds / Fair odds
     const getTopRatio = (outcomeIndex: number) => {
-      if (!fixture?.ratios) return null;
+      if (!fixture?.fair_odds) return null;
 
-      // Use the same logic as values page: pick the odds bookie with the best odds for this outcome
-      // Find which odds bookie has the best odds for this outcome
-      let bestOddsBookie = '';
-      let bestOdds = 0;
+      // Find the bookie with the top odds for this outcome
+      const topOddsData = getTopOdds(outcomeIndex);
+      if (!topOddsData) return null;
 
-      fixture.odds.forEach((oddsData: BookieOdds) => {
-        if (oddsData.odds_x12 && oddsData.odds_x12[0]?.x12?.[outcomeIndex]) {
-          const odds = oddsData.odds_x12[0].x12[outcomeIndex] / Math.pow(10, oddsData.decimals);
-          if (odds > bestOdds) {
-            bestOdds = odds;
-            bestOddsBookie = oddsData.bookie;
-          }
-        }
-      });
-
-      if (!bestOddsBookie) return null;
-
-      // Now get ratios for this specific odds bookie using the same logic as values page
+      // Calculate ratios as top odds divided by fair odds for each selected fair odds bookie
       const availableRatios: Array<{fairBookie: string, ratio: number}> = [];
 
-      fixture.ratios.forEach((ratioData: RatioData) => {
-        // Only consider ratios for the best odds bookie
-        if (ratioData.odds_bookie !== bestOddsBookie) return;
-
+      fixture.fair_odds.forEach((fairOddsData: BookieOdds) => {
         // Only consider selected fair odds bookies
-        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === ratioData.fair_odds_bookie);
+        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === fairOddsData.bookie);
         if (!isSelectedFairBookie) return;
 
-        if (ratioData.ratios_x12 && ratioData.ratios_x12[outcomeIndex] > 0) {
-          availableRatios.push({
-            fairBookie: ratioData.fair_odds_bookie,
-            ratio: ratioData.ratios_x12[outcomeIndex]
-          });
+        // Validate fair odds data
+        if (fairOddsData.fair_odds_x12 && areAllOddsValid(fairOddsData.fair_odds_x12.x12) &&
+            (!fairOddsData.odds_x12 || fairOddsData.fair_odds_x12.t === fairOddsData.odds_x12[0].t) &&
+            (!fairOddsData.odds_x12 || areAllOddsValid(fairOddsData.odds_x12[0].x12))) {
+
+          // Get the fair odds for this outcome
+          if (fairOddsData.fair_odds_x12.x12[outcomeIndex] > 0) {
+            const fairOddsDecimal = fairOddsData.fair_odds_x12.x12[outcomeIndex] / Math.pow(10, fairOddsData.decimals);
+            const topOddsDecimal = topOddsData.odds;
+
+            // Calculate ratio as top odds / fair odds
+            const ratio = topOddsDecimal / fairOddsDecimal;
+
+            availableRatios.push({
+              fairBookie: fairOddsData.bookie,
+              ratio: ratio
+            });
+          }
         }
       });
 
@@ -710,7 +674,7 @@ export function FixtureOdds({
       let displayRatio = 0;
 
       if (filterMethod === 'average') {
-        displayRatio = calculateWeightedAverage(availableRatios);
+        displayRatio = calculateWeightedAverage(availableRatios, fairOddsBookies);
       } else if (filterMethod === 'above_all') {
         displayRatio = Math.min(...availableRatios.map(r => r.ratio));
       } else {
@@ -718,10 +682,10 @@ export function FixtureOdds({
         displayRatio = Math.max(...availableRatios.map(r => r.ratio));
       }
 
-      return displayRatio > 0 ? { ratio: displayRatio, bookie: bestOddsBookie } : null;
+      return displayRatio > 0 ? { ratio: displayRatio, bookie: '' } : null;
     };
 
-    // Get top odds for X12 outcomes (excluding Prediction)
+    // Get top odds
     const getTopOdds = (outcomeIndex: number) => {
       let topOdds = 0;
       let topBookie = '';
@@ -794,7 +758,7 @@ export function FixtureOdds({
 
                       return (
                         <span className="font-mono text-xs px-1 text-white">
-                          {topOddsData.odds.toFixed(2)}
+                          {topOddsData.odds.toFixed(3)}
                         </span>
                       );
                     })()}
@@ -802,15 +766,21 @@ export function FixtureOdds({
                   {fixture?.ratios && fixture.ratios.length > 0 && (
                     <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
                       const topRatioData = getTopRatio(index);
-                      return topRatioData ? getBookieColorClass(topRatioData.bookie) : 'bg-black';
+                      if (!topRatioData) return 'bg-black';
+
+                      const ratioColorClass = getRatioTextColorClass(topRatioData.ratio);
+                      // Convert text color classes to background color classes
+                      if (ratioColorClass === 'text-green-400') return 'bg-green-600';
+                      if (ratioColorClass === 'text-yellow-400') return 'bg-yellow-700';
+                      if (ratioColorClass === 'text-red-400') return 'bg-red-600';
+                      return 'bg-black';
                     })()}`}>
                       {(() => {
                         const topRatioData = getTopRatio(index);
                         if (!topRatioData) return <span className="text-gray-500">-</span>;
 
-                        const textColorClass = getRatioTextColorClass(topRatioData.ratio);
                         return (
-                          <span className={`font-mono text-xs px-1 rounded ${textColorClass}`}>
+                          <span className="font-mono text-xs px-1 rounded text-white">
                             {topRatioData.ratio.toFixed(3)}
                           </span>
                         );
@@ -883,90 +853,72 @@ export function FixtureOdds({
       const lineIndex = linesData?.[linesKey]?.indexOf(line);
       if (lineIndex !== undefined && lineIndex >= 0 && bm.odds[oddsKey]?.[lineIndex]) {
         // Odds are in basis points, convert to decimal
-        return (bm.odds[oddsKey][lineIndex] / getDivisor(bm.decimals)).toString();
+        return (bm.odds[oddsKey][lineIndex] / getOddsDivisor(bm.decimals)).toString();
       }
       return null;
     };
 
-    // Helper to get the ratio for a specific line and side - using the exact same logic as Values page filtering
+    // Helper to get the ratio for a specific line and side using Top odds / Fair odds
     const getTopRatio = (line: number, sideKey: 'ratios_ah_a' | 'ratios_ah_h' | 'ratios_ou_o' | 'ratios_ou_u') => {
-      if (!fixture?.ratios) return null;
+      if (!fixture?.fair_odds) return null;
 
-      // Use the same logic as values page: pick the odds bookie with the best odds for this line/side
-      // Find which odds bookie has the best odds for this line and side
-      let bestOddsBookie = '';
-      let bestOdds = 0;
+      // Find the bookie with the top odds for this line and side
+      const oddsKey = linesKey === 'ah'
+        ? (sideKey === 'ratios_ah_h' ? 'ah_h' : 'ah_a')
+        : (sideKey === 'ratios_ou_o' ? 'ou_o' : 'ou_u');
+      const topOddsData = getTopOdds(line, oddsKey);
+      if (!topOddsData) return null;
 
-      fixture.odds.forEach((oddsData: BookieOdds) => {
-        let odds = 0;
-        if (linesKey === 'ah') {
-          const ahData = oddsData.odds_ah?.[0];
-          if (ahData) {
-            const lines = oddsData.lines?.[0]?.ah || [];
-            const lineIndex = lines.indexOf(line);
-            if (lineIndex !== -1) {
-              if (sideKey === 'ratios_ah_a' && ahData.ah_a?.[lineIndex]) {
-                odds = ahData.ah_a[lineIndex] / Math.pow(10, oddsData.decimals);
-              } else if (sideKey === 'ratios_ah_h' && ahData.ah_h?.[lineIndex]) {
-                odds = ahData.ah_h[lineIndex] / Math.pow(10, oddsData.decimals);
-              }
-            }
-          }
-        } else if (linesKey === 'ou') {
-          const ouData = oddsData.odds_ou?.[0];
-          if (ouData) {
-            const lines = oddsData.lines?.[0]?.ou || [];
-            const lineIndex = lines.indexOf(line);
-            if (lineIndex !== -1) {
-              if (sideKey === 'ratios_ou_o' && ouData.ou_o?.[lineIndex]) {
-                odds = ouData.ou_o[lineIndex] / Math.pow(10, oddsData.decimals);
-              } else if (sideKey === 'ratios_ou_u' && ouData.ou_u?.[lineIndex]) {
-                odds = ouData.ou_u[lineIndex] / Math.pow(10, oddsData.decimals);
-              }
-            }
-          }
-        }
-
-        if (odds > bestOdds) {
-          bestOdds = odds;
-          bestOddsBookie = oddsData.bookie;
-        }
-      });
-
-      if (!bestOddsBookie) return null;
-
-      // Now get ratios for this specific odds bookie using the same logic as values page
+      // Calculate ratios as top odds divided by fair odds for each selected fair odds bookie
       const availableRatios: Array<{fairBookie: string, ratio: number}> = [];
 
-      fixture.ratios.forEach((ratioData: RatioData) => {
-        // Only consider ratios for the best odds bookie
-        if (ratioData.odds_bookie !== bestOddsBookie) return;
-
+      fixture.fair_odds.forEach((fairOddsData: BookieOdds) => {
         // Only consider selected fair odds bookies
-        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === ratioData.fair_odds_bookie);
+        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === fairOddsData.bookie);
         if (!isSelectedFairBookie) return;
 
-        const ratioLines = ratioData.ratios_lines?.[linesKey] || [];
-        const lineIndex = ratioLines.indexOf(line);
+        // Validate fair odds data for AH/OU markets
+        let isValidFairOdds = false;
+        if (linesKey === 'ah' && fairOddsData.fair_odds_ah) {
+          isValidFairOdds = fairOddsData.fair_odds_ah.fair_ah_a && areAllOddsValid(fairOddsData.fair_odds_ah.fair_ah_a) &&
+                           fairOddsData.fair_odds_ah.fair_ah_h && areAllOddsValid(fairOddsData.fair_odds_ah.fair_ah_h) &&
+                           (!fairOddsData.odds_ah || fairOddsData.fair_odds_ah.t === fairOddsData.odds_ah[0].t) &&
+                           (!fairOddsData.odds_ah || fairOddsData.odds_ah.length === 0 ||
+                            (areAllOddsValid(fairOddsData.odds_ah[0].ah_a) && areAllOddsValid(fairOddsData.odds_ah[0].ah_h)));
+        } else if (linesKey === 'ou' && fairOddsData.fair_odds_ou) {
+          isValidFairOdds = fairOddsData.fair_odds_ou.fair_ou_o && areAllOddsValid(fairOddsData.fair_odds_ou.fair_ou_o) &&
+                           fairOddsData.fair_odds_ou.fair_ou_u && areAllOddsValid(fairOddsData.fair_odds_ou.fair_ou_u) &&
+                           (!fairOddsData.odds_ou || fairOddsData.fair_odds_ou.t === fairOddsData.odds_ou[0].t) &&
+                           (!fairOddsData.odds_ou || fairOddsData.odds_ou.length === 0 ||
+                            (areAllOddsValid(fairOddsData.odds_ou[0].ou_o) && areAllOddsValid(fairOddsData.odds_ou[0].ou_u)));
+        }
+
+        if (!isValidFairOdds) return;
+
+        // Get the fair odds for this line and side
+        const fairOddsLines = fairOddsData.fair_odds_lines?.[0]?.[linesKey] || [];
+        const lineIndex = fairOddsLines.findIndex((l: number) => Math.abs(l - line) < 0.0001);
 
         if (lineIndex >= 0) {
-          let ratioValue = 0;
-          if (linesKey === 'ah' && ratioData.ratios_ah) {
-            const sideRatios = ratioData.ratios_ah[sideKey as keyof typeof ratioData.ratios_ah];
-            if (Array.isArray(sideRatios) && sideRatios[lineIndex]) {
-              ratioValue = sideRatios[lineIndex];
+          let fairOddsValue = 0;
+          if (linesKey === 'ah' && fairOddsData.fair_odds_ah) {
+            const sideFairOdds = fairOddsData.fair_odds_ah[sideKey.replace('ratios_', 'fair_') as keyof typeof fairOddsData.fair_odds_ah];
+            if (Array.isArray(sideFairOdds) && sideFairOdds[lineIndex] > 0) {
+              fairOddsValue = sideFairOdds[lineIndex] / Math.pow(10, fairOddsData.decimals);
             }
-          } else if (linesKey === 'ou' && ratioData.ratios_ou) {
-            const sideRatios = ratioData.ratios_ou[sideKey as keyof typeof ratioData.ratios_ou];
-            if (Array.isArray(sideRatios) && sideRatios[lineIndex]) {
-              ratioValue = sideRatios[lineIndex];
+          } else if (linesKey === 'ou' && fairOddsData.fair_odds_ou) {
+            const sideFairOdds = fairOddsData.fair_odds_ou[sideKey.replace('ratios_', 'fair_') as keyof typeof fairOddsData.fair_odds_ou];
+            if (Array.isArray(sideFairOdds) && sideFairOdds[lineIndex] > 0) {
+              fairOddsValue = sideFairOdds[lineIndex] / Math.pow(10, fairOddsData.decimals);
             }
           }
 
-          if (ratioValue > 0) {
+          if (fairOddsValue > 0) {
+            // Calculate ratio as top odds / fair odds
+            const ratio = topOddsData.odds / fairOddsValue;
             availableRatios.push({
-              fairBookie: ratioData.fair_odds_bookie,
-              ratio: ratioValue
+              fairBookie: fairOddsData.bookie,
+              ratio: ratio
             });
           }
         }
@@ -987,7 +939,7 @@ export function FixtureOdds({
       let displayRatio = 0;
 
       if (filterMethod === 'average') {
-        displayRatio = calculateWeightedAverage(availableRatios);
+      displayRatio = calculateWeightedAverage(availableRatios, fairOddsBookies);
       } else if (filterMethod === 'above_all') {
         displayRatio = Math.min(...availableRatios.map(r => r.ratio));
       } else {
@@ -995,7 +947,7 @@ export function FixtureOdds({
         displayRatio = Math.max(...availableRatios.map(r => r.ratio));
       }
 
-      return displayRatio > 0 ? { ratio: displayRatio, bookie: bestOddsBookie } : null;
+      return displayRatio > 0 ? { ratio: displayRatio, bookie: '' } : null;
     };
 
     // Helper to get top odds for a specific line and side (excluding Prediction)
@@ -1051,7 +1003,7 @@ export function FixtureOdds({
               </tr>
             </thead>
             <tbody>
-              {linesWithData.map((line, index) => {
+              {linesWithData.map((line, _index) => {
                 const side1TopRatio = getTopRatio(line, linesKey === 'ah' ? 'ratios_ah_h' : 'ratios_ou_o');
                 const side2TopRatio = getTopRatio(line, linesKey === 'ah' ? 'ratios_ah_a' : 'ratios_ou_u');
 
@@ -1094,21 +1046,27 @@ export function FixtureOdds({
 
                         return (
                           <span className="font-mono text-xs px-1 text-white">
-                            {topOddsData.odds.toFixed(2)}
+                            {topOddsData.odds.toFixed(3)}
                           </span>
                         );
                       })()}
                     </td>
                     {fixture?.ratios && fixture.ratios.length > 0 && (
                       <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
-                        return side1TopRatio ? getBookieColorClass(side1TopRatio.bookie) : 'bg-black';
+                        if (!side1TopRatio) return 'bg-black';
+
+                        const ratioColorClass = getRatioTextColorClass(side1TopRatio.ratio);
+                        // Convert text color classes to background color classes
+                        if (ratioColorClass === 'text-green-400') return 'bg-green-600';
+                        if (ratioColorClass === 'text-yellow-400') return 'bg-yellow-700';
+                        if (ratioColorClass === 'text-red-400') return 'bg-red-600';
+                        return 'bg-black';
                       })()}`}>
                         {(() => {
                           if (!side1TopRatio) return <span className="text-gray-500">-</span>;
 
-                          const textColorClass = getRatioTextColorClass(side1TopRatio.ratio);
                           return (
-                            <span className={`font-mono text-xs px-1 rounded ${textColorClass}`}>
+                            <span className="font-mono text-xs px-1 rounded text-white">
                               {side1TopRatio.ratio.toFixed(3)}
                             </span>
                           );
@@ -1152,21 +1110,27 @@ export function FixtureOdds({
 
                         return (
                           <span className="font-mono text-xs px-1 text-white">
-                            {topOddsData.odds.toFixed(2)}
+                            {topOddsData.odds.toFixed(3)}
                           </span>
                         );
                       })()}
                     </td>
                     {fixture?.ratios && fixture.ratios.length > 0 && (
                       <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
-                        return side2TopRatio ? getBookieColorClass(side2TopRatio.bookie) : 'bg-black';
+                        if (!side2TopRatio) return 'bg-black';
+
+                        const ratioColorClass = getRatioTextColorClass(side2TopRatio.ratio);
+                        // Convert text color classes to background color classes
+                        if (ratioColorClass === 'text-green-400') return 'bg-green-600';
+                        if (ratioColorClass === 'text-yellow-400') return 'bg-yellow-700';
+                        if (ratioColorClass === 'text-red-400') return 'bg-red-600';
+                        return 'bg-black';
                       })()}`}>
                         {(() => {
                           if (!side2TopRatio) return <span className="text-gray-500">-</span>;
 
-                          const textColorClass = getRatioTextColorClass(side2TopRatio.ratio);
                           return (
-                            <span className={`font-mono text-xs px-1 rounded ${textColorClass}`}>
+                            <span className="font-mono text-xs px-1 rounded text-white">
                               {side2TopRatio.ratio.toFixed(3)}
                             </span>
                           );
@@ -1192,7 +1156,7 @@ export function FixtureOdds({
           label: 'Home',
           getValue: (odds: any, bm?: any) => {
             // Odds are in basis points
-            const oddsValue = odds.x12?.[0] ? (odds.x12[0] / getDivisor(bm?.decimals || 2)) : null;
+            const oddsValue = odds.x12?.[0] ? (odds.x12[0] / getOddsDivisor(bm?.decimals || 2)) : null;
             return oddsValue?.toString() || null;
           }
         },
@@ -1200,7 +1164,7 @@ export function FixtureOdds({
           label: 'Draw',
           getValue: (odds: any, bm?: any) => {
             // Odds are in basis points
-            const oddsValue = odds.x12?.[1] ? (odds.x12[1] / getDivisor(bm?.decimals || 2)) : null;
+            const oddsValue = odds.x12?.[1] ? (odds.x12[1] / getOddsDivisor(bm?.decimals || 2)) : null;
             return oddsValue?.toString() || null;
           }
         },
@@ -1208,7 +1172,7 @@ export function FixtureOdds({
           label: 'Away',
           getValue: (odds: any, bm?: any) => {
             // Regular odds are in basis points
-            const oddsValue = odds.x12?.[2] ? (odds.x12[2] / getDivisor(bm?.decimals || 2)) : null;
+            const oddsValue = odds.x12?.[2] ? (odds.x12[2] / getOddsDivisor(bm?.decimals || 2)) : null;
             return oddsValue?.toString() || null;
           }
         }

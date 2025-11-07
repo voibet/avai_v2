@@ -68,7 +68,7 @@ export function shouldSkipXGFetch(fixtureId: number, expiryMs: number = DEFAULT_
  * @param fixtureId The fixture ID that was attempted
  * @param success Whether the fetch was successful
  */
-export function recordXGFetchAttempt(fixtureId: number, success: boolean = false): void {
+export function recordXGFetchAttempt(fixtureId: number, _success: boolean = false): void {
   const now = Date.now();
 
   // Initialize cache if it doesn't exist

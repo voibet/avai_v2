@@ -1,7 +1,6 @@
 'use client'
 
 import { usePlayerStats } from '../../lib/hooks/use-football-data'
-import { useState } from 'react'
 
 interface PlayerStatsModalProps {
   playerId: number | null

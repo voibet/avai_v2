@@ -159,7 +159,6 @@ export class FixtureFetcher {
       // Fetch fixtures for each league
       let totalUpdated = 0;
       let totalStatusChangedToPast = 0;
-      const totalLeagues = leaguesToProcess.length;
 
       for (let i = 0; i < leaguesToProcess.length; i++) {
         const leagueInfo = leaguesToProcess[i];

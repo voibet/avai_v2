@@ -29,7 +29,7 @@ function FixturesPageContent() {
   } | null>(null)
 
   // Fetch teams and leagues data for search
-  const { teams, leagues, loading: searchDataLoading } = useFootballSearchData()
+  const { loading: searchDataLoading } = useFootballSearchData()
 
   const currentPage = parseInt(searchParams.get('page') || '1')
 
@@ -99,7 +99,7 @@ function FixturesPageContent() {
   )
 
   // Fetch team ELO ratings when standings are expanded
-  const { data: teamsEloData, loading: teamsEloLoading, error: teamsEloError } = useLeagueTeamsElo(
+  const { data: teamsEloData } = useLeagueTeamsElo(
     standingsExpanded && currentFixtureData ? currentFixtureData.league_id?.toString() : null
   )
 
@@ -1004,7 +1004,7 @@ function FixturesPageContent() {
     return <FixtureOdds key={`odds-${fixture.id}`} fixture={fixture} />;
   }, []);
 
-  const renderStatsSection = useCallback((fixture: any) => {
+  const renderStatsSection = useCallback((_fixture: any) => {
     if (statsLoading) {
       return (
         <div className="px-2 py-4">
@@ -1501,7 +1501,7 @@ function FixturesPageContent() {
           </div>
 
           {/* Data Rows */}
-          {filteredStandings.map((standing, index) => {
+          {filteredStandings.map((standing, _index) => {
             const isHomeTeam = fixture.home_team_id?.toString() === standing.team.id?.toString();
             const isAwayTeam = fixture.away_team_id?.toString() === standing.team.id?.toString();
             const isParticipatingTeam = isHomeTeam || isAwayTeam;

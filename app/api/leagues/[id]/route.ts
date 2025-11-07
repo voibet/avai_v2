@@ -2,7 +2,9 @@ import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
 import { IN_PAST } from '@/lib/constants';
-import { calculateExpectedPoints, calculateWinPercentagesFromProjectedPoints, calculatePositionPercentagesFromProjectedPoints } from '../../../../calculators/market-xg.js';
+import { calculateExpectedPoints, calculatePositionPercentagesFromProjectedPoints } from '../../../../calculators/market-xg.js';
+
+export const dynamic = 'force-dynamic';
 
 interface ApiFootballStanding {
   rank: number;

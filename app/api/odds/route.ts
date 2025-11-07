@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '../../../lib/database/db-utils';
 import { IN_FUTURE } from '../../../lib/constants';
+import {
+  parseFixtureIds,
+  parsePagination,
+  parseBookieFilter,
+  parseBooleanParam,
+  createApiError
+} from '../../../lib/utils/api-utils';
+
+export const dynamic = 'force-dynamic';
 
 // Helper function to filter odds arrays to only include latest timestamp entries
 function filterLatestOdds(oddsArray: any[] | null, latestTimestamp: number | null): any[] | null {
@@ -12,37 +21,15 @@ function filterLatestOdds(oddsArray: any[] | null, latestTimestamp: number | nul
 
 async function getFixtureOdds(request: Request) {
   const { searchParams } = new URL(request.url);
-  const fixtureIdParam = searchParams.get('fixtureId');
-  const limit = searchParams.get('limit');
-  const page = searchParams.get('page');
-  const bookiesParam = searchParams.get('bookies');
-  const fairOddsParam = searchParams.get('fair_odds');
-  const latestParam = searchParams.get('latest');
 
-  // Parse fixture IDs - support both single ID and comma-separated IDs
-  let fixtureIds: number[];
-  if (fixtureIdParam) {
-    if (fixtureIdParam.includes(',')) {
-      // Multiple IDs separated by comma
-      fixtureIds = fixtureIdParam.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-    } else {
-      // Single ID
-      const fixtureId = parseInt(fixtureIdParam);
-      fixtureIds = !isNaN(fixtureId) ? [fixtureId] : [];
-    }
-  } else {
-    // Default: return all upcoming fixtures
-    fixtureIds = [];
-  }
+  // Parse all parameters using utilities
+  const { fixtureIds, error: fixtureError } = parseFixtureIds(searchParams);
+  if (fixtureError) return fixtureError;
 
-  if (fixtureIdParam && fixtureIds.length === 0) {
-    return NextResponse.json({ error: 'Invalid fixture ID(s)' }, { status: 400 });
-  }
-
-  // Parse pagination parameters
-  const limitNum = limit ? parseInt(limit) : null;
-  const pageNum = page ? parseInt(page) : 1;
-  const offset = limitNum && pageNum > 1 ? (pageNum - 1) * limitNum : 0;
+  const { limit: limitNum, page: pageNum, offset } = parsePagination(searchParams);
+  const { bookies: selectedBookies } = parseBookieFilter(searchParams);
+  const useFairOdds = parseBooleanParam(searchParams, 'fair_odds');
+  const useLatest = parseBooleanParam(searchParams, 'latest');
 
   // Build query parameters array in correct order
   let queryParams: any[] = [];
@@ -54,23 +41,14 @@ async function getFixtureOdds(request: Request) {
     paramIndex += 1;
   }
 
-  // Parse fair_odds parameter
-  const useFairOdds = fairOddsParam === 'true' || fairOddsParam === '1';
-  
-  // Parse latest parameter
-  const useLatest = latestParam === 'true' || latestParam === '1';
-
   // Add bookie parameters next
   let bookiePlaceholders = '';
   let bookieFilter = '';
-  if (bookiesParam) {
-    const bookies = bookiesParam.split(',').map(b => b.trim()).filter(b => b.length > 0);
-    if (bookies.length > 0) {
-      bookiePlaceholders = bookies.map((_, i) => `$${paramIndex + i}`).join(',');
-      bookieFilter = `AND fo.bookie IN (${bookiePlaceholders})`;
-      queryParams.push(...bookies);
-      paramIndex += bookies.length;
-    }
+  if (selectedBookies && selectedBookies.length > 0) {
+    bookiePlaceholders = selectedBookies.map((_, i) => `$${paramIndex + i}`).join(',');
+    bookieFilter = `AND fo.bookie IN (${bookiePlaceholders})`;
+    queryParams.push(...selectedBookies);
+    paramIndex += selectedBookies.length;
   }
 
   // Add fixture IDs next
@@ -93,7 +71,7 @@ async function getFixtureOdds(request: Request) {
       WHERE 1=1
         ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
         ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${bookiesParam && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
+        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
     `;
   } else {
     // Regular odds only
@@ -104,7 +82,7 @@ async function getFixtureOdds(request: Request) {
       WHERE 1=1
         ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
         ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${bookiesParam && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
+        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
     `;
   }
 
@@ -140,14 +118,15 @@ async function getFixtureOdds(request: Request) {
         ffo.fair_odds_x12,
         ffo.fair_odds_ah,
         ffo.fair_odds_ou,
-        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines
+        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines,
+        ffo.latest_t as fair_odds_latest_t
       FROM football_fixtures ff
       LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
       LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id AND fo.bookie = ffo.bookie
       WHERE 1=1
         ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
         ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${bookiesParam && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
+        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
         AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
       ORDER BY ff.date, ff.id, COALESCE(fo.bookie, ffo.bookie)
     `;
@@ -182,7 +161,7 @@ async function getFixtureOdds(request: Request) {
       WHERE 1=1
         ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
         ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${bookiesParam && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
+        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
       ORDER BY ff.date, ff.id, fo.bookie
     `;
   }
@@ -300,33 +279,95 @@ async function getFixtureOdds(request: Request) {
       // Add fair odds fields when fair_odds=true
       if (useFairOdds) {
         if (row.bookie === 'Prediction') {
-          // For Prediction, use latest regular odds as fair odds (without timestamps) since they're already calculated without margins
-          oddsObj.fair_odds_x12 = oddsX12 && oddsX12.length > 0 ? oddsX12[oddsX12.length - 1].x12 : null;
+          // For Prediction, use latest regular odds as fair odds with embedded timestamps
+          const latestTimestamp = (oddsX12 && oddsX12.length > 0) ? oddsX12[oddsX12.length - 1].t :
+                                 (oddsAh && oddsAh.length > 0) ? oddsAh[oddsAh.length - 1].t :
+                                 (oddsOu && oddsOu.length > 0) ? oddsOu[oddsOu.length - 1].t :
+                                 (lines && lines.length > 0) ? lines[lines.length - 1].t : null;
+
+          if (oddsX12 && oddsX12.length > 0 && latestTimestamp) {
+            oddsObj.fair_odds_x12 = {
+              t: latestTimestamp,
+              x12: oddsX12[oddsX12.length - 1].x12
+            };
+          } else {
+            oddsObj.fair_odds_x12 = null;
+          }
 
           // Transform AH odds from regular format to fair odds format
           const latestAh = oddsAh && oddsAh.length > 0 ? oddsAh[oddsAh.length - 1] : null;
-          oddsObj.fair_odds_ah = latestAh ? {
-            fair_ah_a: latestAh.ah_a || null,
-            fair_ah_h: latestAh.ah_h || null
-          } : null;
+          if (latestAh && latestTimestamp) {
+            oddsObj.fair_odds_ah = {
+              t: latestTimestamp,
+              fair_ah_a: latestAh.ah_a || null,
+              fair_ah_h: latestAh.ah_h || null
+            };
+          } else {
+            oddsObj.fair_odds_ah = null;
+          }
 
           // Transform OU odds from regular format to fair odds format
           const latestOu = oddsOu && oddsOu.length > 0 ? oddsOu[oddsOu.length - 1] : null;
-          oddsObj.fair_odds_ou = latestOu ? {
-            fair_ou_o: latestOu.ou_o || null,
-            fair_ou_u: latestOu.ou_u || null
-          } : null;
+          if (latestOu && latestTimestamp) {
+            oddsObj.fair_odds_ou = {
+              t: latestTimestamp,
+              fair_ou_o: latestOu.ou_o || null,
+              fair_ou_u: latestOu.ou_u || null
+            };
+          } else {
+            oddsObj.fair_odds_ou = null;
+          }
 
-          oddsObj.fair_odds_lines = lines && lines.length > 0 ? {
-            ah: lines[lines.length - 1].ah || null,
-            ou: lines[lines.length - 1].ou || null
-          } : null;
+          if (lines && lines.length > 0 && latestTimestamp) {
+            oddsObj.fair_odds_lines = [{
+              t: latestTimestamp,
+              ah: lines[lines.length - 1].ah || null,
+              ou: lines[lines.length - 1].ou || null
+            }];
+          } else {
+            oddsObj.fair_odds_lines = null;
+          }
         } else {
-          // For other bookmakers, use calculated fair odds
-          oddsObj.fair_odds_x12 = row.fair_odds_x12 || null;
-          oddsObj.fair_odds_ah = row.fair_odds_ah || null;
-          oddsObj.fair_odds_ou = row.fair_odds_ou || null;
-          oddsObj.fair_odds_lines = row.fair_odds_lines || null;
+          // For other bookmakers, use calculated fair odds with embedded timestamps
+          if (row.fair_odds_x12 && row.fair_odds_latest_t?.x12_ts) {
+            oddsObj.fair_odds_x12 = {
+              t: row.fair_odds_latest_t.x12_ts,
+              x12: row.fair_odds_x12
+            };
+          } else {
+            oddsObj.fair_odds_x12 = null;
+          }
+
+          if (row.fair_odds_ah && row.fair_odds_latest_t?.ah_ts) {
+            oddsObj.fair_odds_ah = {
+              t: row.fair_odds_latest_t.ah_ts,
+              fair_ah_a: row.fair_odds_ah.fair_ah_a,
+              fair_ah_h: row.fair_odds_ah.fair_ah_h
+            };
+          } else {
+            oddsObj.fair_odds_ah = null;
+          }
+
+          if (row.fair_odds_ou && row.fair_odds_latest_t?.ou_ts) {
+            oddsObj.fair_odds_ou = {
+              t: row.fair_odds_latest_t.ou_ts,
+              fair_ou_o: row.fair_odds_ou.fair_ou_o,
+              fair_ou_u: row.fair_odds_ou.fair_ou_u
+            };
+          } else {
+            oddsObj.fair_odds_ou = null;
+          }
+
+          if (row.fair_odds_lines && row.fair_odds_latest_t?.lines_ts) {
+            oddsObj.fair_odds_lines = [{
+              t: row.fair_odds_latest_t.lines_ts,
+              ah: row.fair_odds_lines.ah || [],
+              ou: row.fair_odds_lines.ou || []
+            }];
+          } else {
+            oddsObj.fair_odds_lines = null;
+          }
+          // Remove separate latest_t field for fair odds
         }
       }
 

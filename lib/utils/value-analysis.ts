@@ -21,19 +21,10 @@ export interface BookieOdds {
   odds_ah?: Array<{ t: number; ah_a: number[]; ah_h: number[] }>
   odds_ou?: Array<{ t: number; ou_o: number[]; ou_u: number[] }>
   lines?: Array<{ t: number; ah: number[]; ou: number[] }>
-  fair_odds_x12?: number[]
-  fair_odds_ah?: {
-    fair_ah_a?: number[]
-    fair_ah_h?: number[]
-  }
-  fair_odds_ou?: {
-    fair_ou_o?: number[]
-    fair_ou_u?: number[]
-  }
-  fair_odds_lines?: {
-    ah?: number[]
-    ou?: number[]
-  }
+  fair_odds_x12?: { t: number; x12: number[] }
+  fair_odds_ah?: { t: number; fair_ah_a: number[]; fair_ah_h: number[] }
+  fair_odds_ou?: { t: number; fair_ou_o: number[]; fair_ou_u: number[] }
+  fair_odds_lines?: Array<{ t: number; ah: number[]; ou: number[] }>
 }
 
 export interface BookieRatio {
@@ -69,6 +60,7 @@ export interface ValueOpportunity {
 export interface ValueOpportunityWithRatios {
   fixture: Fixture & {
     ratios: BookieRatio[]
+    fair_odds: BookieOdds[]
   }
 }
 
@@ -81,11 +73,20 @@ export interface ValueAnalysisConfig {
 }
 
 /**
+ * Checks if all values in an array are valid (not null and greater than 1)
+ * @param values Array of numbers to validate
+ * @returns true if all values are valid, false otherwise
+ */
+function areAllOddsValid(values: number[]): boolean {
+  return values.every(value => value != null && value > 1)
+}
+
+/**
  * Analyzes fixtures for all value opportunities by comparing odds ratios between bookies
- * Returns ratios for all markets, outcomes and lines organized by bookie combinations
+ * Returns ratios and fair odds for all markets, outcomes and lines organized by bookie combinations
  * @param fixtures Array of fixtures to analyze
  * @param config Configuration for the analysis
- * @returns Object containing opportunities and analyzed fixtures count
+ * @returns Object containing opportunities with ratios and fair odds, and analyzed fixtures count
  */
 export function analyzeValueOpportunities(
   fixtures: Fixture[],
@@ -138,13 +139,15 @@ export function analyzeValueOpportunities(
 
         // Calculate X12 ratios
         if (oddsBookieData.odds_x12 && oddsBookieData.odds_x12.length > 0 &&
-            fairOddsBookieData.fair_odds_x12) {
+            fairOddsBookieData.fair_odds_x12 && areAllOddsValid(fairOddsBookieData.fair_odds_x12.x12) &&
+            (!fairOddsBookieData.odds_x12 || fairOddsBookieData.fair_odds_x12.t === fairOddsBookieData.odds_x12[0].t) &&
+            (!fairOddsBookieData.odds_x12 || areAllOddsValid(fairOddsBookieData.odds_x12[0].x12))) {
           const oddsBookieX12 = oddsBookieData.odds_x12[0].x12
-          const fairBookieX12 = fairOddsBookieData.fair_odds_x12
+          const fairBookieX12 = fairOddsBookieData.fair_odds_x12.x12
           const ratios_x12: number[] = []
 
           oddsBookieX12.forEach((odds, index) => {
-            if (odds <= 0 || !fairBookieX12[index] || fairBookieX12[index] <= 0) {
+            if (odds <= 0 || !fairBookieX12 || !fairBookieX12[index] || fairBookieX12[index] <= 0) {
               ratios_x12.push(0)
               return
             }
@@ -167,11 +170,16 @@ export function analyzeValueOpportunities(
 
         // Calculate AH ratios with line matching
         if (oddsBookieData.odds_ah && oddsBookieData.odds_ah.length > 0 &&
-            fairOddsBookieData.fair_odds_ah) {
+            fairOddsBookieData.fair_odds_ah &&
+            fairOddsBookieData.fair_odds_ah.fair_ah_a && areAllOddsValid(fairOddsBookieData.fair_odds_ah.fair_ah_a) &&
+            fairOddsBookieData.fair_odds_ah.fair_ah_h && areAllOddsValid(fairOddsBookieData.fair_odds_ah.fair_ah_h) &&
+            (!fairOddsBookieData.odds_ah || fairOddsBookieData.fair_odds_ah.t === fairOddsBookieData.odds_ah[0].t) &&
+            (!fairOddsBookieData.odds_ah || fairOddsBookieData.odds_ah.length === 0 ||
+             (areAllOddsValid(fairOddsBookieData.odds_ah[0].ah_a) && areAllOddsValid(fairOddsBookieData.odds_ah[0].ah_h)))) {
           const oddsBookieAH = oddsBookieData.odds_ah[0]
           const oddsBookieLines = oddsBookieData.lines?.[0]?.ah || []
           const fairBookieAH = fairOddsBookieData.fair_odds_ah
-          const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ah || []
+          const fairBookieLines = fairOddsBookieData.fair_odds_lines?.[0]?.ah || []
 
           const ratios_ah_a: number[] = []
           const ratios_ah_h: number[] = []
@@ -240,11 +248,16 @@ export function analyzeValueOpportunities(
 
         // Calculate OU ratios with line matching
         if (oddsBookieData.odds_ou && oddsBookieData.odds_ou.length > 0 &&
-            fairOddsBookieData.fair_odds_ou) {
+            fairOddsBookieData.fair_odds_ou &&
+            fairOddsBookieData.fair_odds_ou.fair_ou_o && areAllOddsValid(fairOddsBookieData.fair_odds_ou.fair_ou_o) &&
+            fairOddsBookieData.fair_odds_ou.fair_ou_u && areAllOddsValid(fairOddsBookieData.fair_odds_ou.fair_ou_u) &&
+            (!fairOddsBookieData.odds_ou || fairOddsBookieData.fair_odds_ou.t === fairOddsBookieData.odds_ou[0].t) &&
+            (!fairOddsBookieData.odds_ou || fairOddsBookieData.odds_ou.length === 0 ||
+             (areAllOddsValid(fairOddsBookieData.odds_ou[0].ou_o) && areAllOddsValid(fairOddsBookieData.odds_ou[0].ou_u)))) {
           const oddsBookieOU = oddsBookieData.odds_ou[0]
           const oddsBookieLines = oddsBookieData.lines?.[0]?.ou || []
           const fairBookieOU = fairOddsBookieData.fair_odds_ou
-          const fairBookieLines = fairOddsBookieData.fair_odds_lines?.ou || []
+          const fairBookieLines = fairOddsBookieData.fair_odds_lines?.[0]?.ou || []
 
           const ratios_ou_o: number[] = []
           const ratios_ou_u: number[] = []
@@ -318,8 +331,9 @@ export function analyzeValueOpportunities(
     opportunities.push({
       fixture: {
         ...fixture,
-        ratios: fixtureRatios
-      } as Fixture & { ratios: BookieRatio[] }
+        ratios: fixtureRatios,
+        fair_odds: fairOddsBookieDataList
+      } as Fixture & { ratios: BookieRatio[]; fair_odds: BookieOdds[] }
     })
   })
 

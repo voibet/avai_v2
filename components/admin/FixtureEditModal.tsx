@@ -183,18 +183,6 @@ export default function FixtureEditModal({ fixture, onClose, onUpdate, onDelete 
     return JSON.stringify(lines, null, 2)
   }
 
-  // Helper function to convert JSON array to line-by-line text
-  const jsonArrayToText = (jsonString: string): string => {
-    try {
-      const array = JSON.parse(jsonString)
-      if (Array.isArray(array)) {
-        return array.join('\n') + (array.length > 0 ? '\n' : '')
-      }
-      return ''
-    } catch {
-      return ''
-    }
-  }
 
   const handleInputChange = (field: string, value: any) => {
     // Special handling for team mappings - update raw text without conversion

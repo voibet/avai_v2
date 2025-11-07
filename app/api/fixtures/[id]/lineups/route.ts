@@ -41,11 +41,6 @@ interface ApiFootballLineup {
   substitutes: ApiFootballLineupPlayer[];
 }
 
-interface CoachInfo {
-  id: number;
-  name: string;
-  photo: string;
-}
 
 async function getFixtureLineups(_request: Request, { params }: { params: { id: string } }) {
   const fixtureId = parseInt(params.id);

@@ -3,8 +3,60 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { analyzeValueOpportunities, type Fixture, type ValueOpportunity, type ValueOpportunityWithRatios, type ValueAnalysisConfig } from '@/lib/utils/value-analysis'
+import { calculateWeightedAverage, meetsRequiredBookiesCriterion, formatOdds } from '@/lib/utils/value-calculations'
+import { formatDateTimeFull } from '@/lib/utils/date-utils'
+import { IN_FUTURE } from '@/lib/constants'
 import DataTable, { Column } from '../../components/ui/data-table'
 import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches, useLeagueTeamsElo } from '../../lib/hooks/use-football-data'
+
+// Bookie filter renderer component - defined outside to avoid hooks issues
+const BookieFilterRenderer = ({ onFilterChange, availableBookies, localSelectedBookies, setLocalSelectedBookies }: any) => {
+  const toggleBookie = (bookie: string) => {
+    const newSelected = new Set(localSelectedBookies)
+    if (newSelected.has(bookie)) {
+      newSelected.delete(bookie)
+    } else {
+      newSelected.add(bookie)
+    }
+    setLocalSelectedBookies(newSelected)
+    const value = newSelected.size > 0 ? Array.from(newSelected).join(',') : null
+    onFilterChange('bookie_filter', value)
+  }
+
+  return (
+    <div className="p-2 max-h-48 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-mono text-white">Select Bookies</span>
+        {localSelectedBookies.size > 0 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setLocalSelectedBookies(new Set())
+              onFilterChange('bookie_filter', null)
+            }}
+            className="text-xs text-red-400 hover:text-red-300 font-mono"
+            style={{ pointerEvents: 'auto' }}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="space-y-1">
+        {availableBookies.map((bookie: string) => (
+          <label key={bookie} className="flex items-center space-x-2 cursor-pointer hover:bg-gray-700 px-1 py-0.5 rounded">
+            <input
+              type="checkbox"
+              checked={localSelectedBookies.has(bookie)}
+              onChange={() => toggleBookie(bookie)}
+              className="rounded border-gray-500 text-green-600 focus:ring-green-500"
+            />
+            <span className="text-xs text-gray-300 font-mono">{bookie}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
 import FixtureEditModal from '../../components/admin/FixtureEditModal'
 import PlayerStatsModal from '../../components/fixtures/PlayerStatsModal'
@@ -135,7 +187,7 @@ function ValuesPageContent() {
   const [analyzedFixtures, setAnalyzedFixtures] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [streaming, setStreaming] = useState(false)
+  const [, setStreaming] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
   // Store streaming updates separately for efficient updates
   const [streamedFixtures, setStreamedFixtures] = useState<Map<string, any>>(new Map())
@@ -158,31 +210,17 @@ function ValuesPageContent() {
     winPercentage: number | null;
   } | null>(null)
 
-  // Enriched opportunity data for advanced filtering
-  interface EnrichedOpportunity extends ValueOpportunity {
-    // Group key for outcome clustering
-    outcomeKey: string
-
-    // Pre-computed values for different filter methods
-    averageFairRatio?: number
-    minQualifyingRatio?: number
-    allFairRatios: number[]
-
-    // Required bookies status
-    requiredBookiesSatisfied: boolean
-    requiredBookiesRatios: number[]
-
-    // Group information
-    relatedOpportunities: ValueOpportunity[]
-  }
 
   // Filter states
-  const [fairOddsBookies, setFairOddsBookies] = useState<Array<{bookie: string, required: boolean, multiplier: number}>>([{bookie: 'Pinnacle', required: false, multiplier: 1}])
-  const [oddsRatioBookies, setOddsRatioBookies] = useState<string[]>(['Veikkaus'])
+  const [fairOddsBookies, setFairOddsBookies] = useState<Array<{bookie: string, required: boolean, multiplier: number}>>([])
+  const [oddsRatioBookies, setOddsRatioBookies] = useState<string[]>([])
   const [minRatio] = useState(0.9)
   const [filterMethod, setFilterMethod] = useState<'individual' | 'above_all' | 'average'>('individual')
   const [showHighestRatioPerFixture, setShowHighestRatioPerFixture] = useState(false)
   const [filtersExpanded, setFiltersExpanded] = useState(true)
+
+  // Local state for bookie filter dropdown
+  const [localSelectedBookies, setLocalSelectedBookies] = useState<Set<string>>(new Set())
 
   // Sorting state
   const [sortBy, setSortBy] = useState<'ratio' | 'date' | 'updated'>('ratio')
@@ -213,6 +251,12 @@ function ValuesPageContent() {
       filters['fixture_date'] = new Set([dateValue])
     }
 
+    // Check for bookie filter (multiple values)
+    const bookieFilterValue = searchParams.get('bookie_filter')
+    if (bookieFilterValue) {
+      filters['bookie_filter'] = new Set(bookieFilterValue.split(','))
+    }
+
     // Check for odds filter (max odds)
     const oddsValue = searchParams.get('bookie_odds')
     if (oddsValue) {
@@ -225,21 +269,20 @@ function ValuesPageContent() {
       filters['ratio'] = new Set([ratioValue])
     }
 
-    // Check for bookie filter (odds ratio bookies)
-    const bookieValue = searchParams.get('bookie')
-    if (bookieValue) {
-      filters['bookie'] = new Set([bookieValue])
-    }
-
     return filters
   }, [searchParams])
 
+  // Sync local bookie filter state with currentFilters when URL changes externally
+  useEffect(() => {
+    setLocalSelectedBookies(currentFilters['bookie_filter'] || new Set())
+  }, [currentFilters['bookie_filter']])
+
   // Initialize oddsRatioBookies, fairOddsBookies, and filterMethod from URL on component mount
   useEffect(() => {
-    const bookieValue = searchParams.get('bookie')
-    if (bookieValue) {
-      const selectedBookies = bookieValue.split(',')
-      setOddsRatioBookies(selectedBookies.length > 0 ? selectedBookies : ['Veikkaus'])
+    const bookieFilterValue = searchParams.get('bookie_filter')
+    if (bookieFilterValue) {
+      const selectedBookies = bookieFilterValue.split(',')
+      setOddsRatioBookies(selectedBookies)
     }
 
     const fairBookiesValue = searchParams.get('fair_bookies')
@@ -256,7 +299,7 @@ function ValuesPageContent() {
           multiplier: multiplier
         }
       })
-      setFairOddsBookies(selectedFairBookies.length > 0 ? selectedFairBookies : [{bookie: 'Pinnacle', required: false, multiplier: 1}])
+      setFairOddsBookies(selectedFairBookies)
     }
 
     const filterMethodValue = searchParams.get('filter_method')
@@ -270,16 +313,6 @@ function ValuesPageContent() {
     }
   }, []) // Only run on mount
 
-  // Update URL when oddsRatioBookies changes
-  useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString())
-    if (oddsRatioBookies.length > 0) {
-      params.set('bookie', oddsRatioBookies.join(','))
-    } else {
-      params.delete('bookie')
-    }
-    router.replace(`/values?${params.toString()}`)
-  }, [oddsRatioBookies, router, searchParams])
 
   // Update URL when fairOddsBookies changes
   useEffect(() => {
@@ -345,6 +378,16 @@ function ValuesPageContent() {
     // Reset to page 1 when filters change - same as fixtures page
     params.set('page', '1')
 
+    // If bookie_filter changed, also update oddsRatioBookies state
+    if (columnKey === 'bookie_filter') {
+      if (value) {
+        const selectedBookies = value.split(',')
+        setOddsRatioBookies(selectedBookies)
+      } else {
+        setOddsRatioBookies([])
+      }
+    }
+
     router.push(`/values?${params.toString()}`)
   }, [searchParams, router])
 
@@ -364,48 +407,12 @@ function ValuesPageContent() {
       params.set('sort_by', currentSort.key)
       params.set('sort_direction', currentSort.direction)
     }
+    // Reset oddsRatioBookies when clearing all filters
+    setOddsRatioBookies([])
     router.push(`/values?${params.toString()}`)
   }, [router, currentSort])
 
   // Fetch teams and leagues data for search
-  const { teams, leagues, loading: searchDataLoading } = useFootballSearchData()
-
-  // Filter value API for DataTable
-  const getFilterValueApi = useCallback(async (field: string): Promise<string[]> => {
-    if (field === 'fixture.date') {
-      // Return predefined date options for TIME column filtering
-      return ['Today', 'Tomorrow', 'Next 7 Days', 'Next 14 Days']
-    }
-
-    // For other fields, compute from current data
-    const values = new Set<string>()
-    opportunities.forEach(opportunity => {
-      let value: any
-
-      switch (field) {
-        case 'fixture.home_team':
-          value = opportunity.fixture.home_team
-          break
-        case 'fixture.away_team':
-          value = opportunity.fixture.away_team
-          break
-        case 'fixture.league':
-          value = opportunity.fixture.league
-          break
-        case 'bookie':
-          value = opportunity.bookie
-          break
-        default:
-          return []
-      }
-
-      if (value !== null && value !== undefined && value !== '') {
-        values.add(String(value))
-      }
-    })
-
-    return Array.from(values).sort()
-  }, [opportunities])
 
   // Store current fixture data from expanded row
   const [currentFixtureData, setCurrentFixtureData] = useState<any>(null)
@@ -426,7 +433,7 @@ function ValuesPageContent() {
   )
 
   // Fetch team ELO ratings when standings are expanded
-  const { data: teamsEloData, loading: teamsEloLoading, error: teamsEloError } = useLeagueTeamsElo(
+  const { data: teamsEloData } = useLeagueTeamsElo(
     expandedSections.standings && currentFixtureData ? currentFixtureData.league_id?.toString() : null
   )
 
@@ -437,14 +444,7 @@ function ValuesPageContent() {
   const { data: coachesData, loading: coachesLoading, error: coachesError } = useFixtureCoaches(expandedSections.lineups ? expandedOpportunityId : null)
 
   const formatDate = useCallback((dateString: string) => {
-    const date = new Date(dateString);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-
-    return `${day}.${month}.${year} ${hours}.${minutes}`;
+    return formatDateTimeFull(dateString);
   }, [])
 
   const formatInjuryTiming = useCallback((injury: any) => {
@@ -562,64 +562,10 @@ function ValuesPageContent() {
   // Get available bookies from merged fixtures (includes streaming updates)
   const availableBookies = useMemo(() => {
     return mergedFixtures.length > 0
-      ? Array.from(new Set(mergedFixtures.flatMap(f => f.odds.map((o: any) => o.bookie))))
+      ? Array.from(new Set(mergedFixtures.flatMap(f => f.odds.map((o: any) => o.bookie)))).sort()
       : []
   }, [mergedFixtures])
 
-  // Get available odds ratio bookies (Prediction filtered out)
-  const availableOddsRatioBookies = useMemo(() => {
-    return availableBookies.filter(bookie => bookie !== 'Prediction')
-  }, [availableBookies])
-
-  // Custom filter component for BOOKIE - defined inside component to access availableBookies and oddsRatioBookies
-  const BookieFilterRenderer = ({ column, currentFilters, onFilterChange, onClose }: any) => {
-    const handleBookieToggle = (bookie: string) => {
-      setOddsRatioBookies(prev => {
-        const newSelection = prev.includes(bookie)
-          ? prev.filter(b => b !== bookie)
-          : [...prev, bookie]
-
-        // Ensure at least one bookie is selected
-        return newSelection.length === 0 ? [bookie] : newSelection
-      })
-    }
-
-    const clearFilter = () => {
-      setOddsRatioBookies(['Veikkaus'])
-    }
-
-    return (
-      <div className="p-2" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-mono text-white">Odds Ratio Bookies</span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              clearFilter()
-            }}
-            className="text-xs text-red-400 hover:text-red-300 font-mono"
-            style={{ pointerEvents: 'auto' }}
-          >
-            Reset
-          </button>
-        </div>
-        <div className="space-y-1 max-h-48 overflow-y-auto">
-          {availableOddsRatioBookies.map(bookie => (
-            <label key={bookie} className="flex items-center space-x-2 text-xs cursor-pointer">
-              <input
-                type="checkbox"
-                checked={oddsRatioBookies.includes(bookie)}
-                onChange={() => handleBookieToggle(bookie)}
-                className="rounded border-gray-600 text-blue-600 focus:ring-blue-500"
-                style={{ pointerEvents: 'auto' }}
-              />
-              <span className="text-gray-300 font-mono">{bookie}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-    )
-  }
 
   const fairOddsBookiesOptions = useMemo(() => {
     return availableBookies.filter(bookie =>
@@ -629,6 +575,45 @@ function ValuesPageContent() {
     )
   }, [availableBookies, mergedFixtures])
 
+
+  // Filter value API for DataTable
+  const getFilterValueApi = useCallback(async (field: string): Promise<string[]> => {
+    if (field === 'fixture.date') {
+      // Return predefined date options for TIME column filtering
+      return ['Today', 'Tomorrow', 'Next 7 Days', 'Next 14 Days']
+    }
+
+    // For bookie field, use all available bookies from fixtures data
+    if (field === 'bookie') {
+      return availableBookies.sort()
+    }
+
+    // For other fields, compute from current data
+    const values = new Set<string>()
+    opportunities.forEach(opportunity => {
+      let value: any
+
+      switch (field) {
+        case 'fixture.home_team':
+          value = opportunity.fixture.home_team
+          break
+        case 'fixture.away_team':
+          value = opportunity.fixture.away_team
+          break
+        case 'fixture.league':
+          value = opportunity.fixture.league
+          break
+        default:
+          return []
+      }
+
+      if (value !== null && value !== undefined && value !== '') {
+        values.add(String(value))
+      }
+    })
+
+    return Array.from(values).sort()
+  }, [opportunities, availableBookies])
 
   // Column definitions for values table
   const valuesColumns = useMemo<Column<ValueOpportunity>[]>(() => [
@@ -747,7 +732,8 @@ function ValuesPageContent() {
       span: 0.8,
       sortType: 'string',
       filterable: true,
-      customFilterRenderer: BookieFilterRenderer,
+      customFilterRenderer: ({ onFilterChange }: any) =>
+        BookieFilterRenderer({ onFilterChange, availableBookies, localSelectedBookies, setLocalSelectedBookies }),
       render: (opportunity) => (
         <div className="text-gray-300 font-mono">
           {opportunity.bookie}
@@ -758,8 +744,7 @@ function ValuesPageContent() {
       key: 'updated',
       header: 'UPDATED',
       span: 1.0,
-      sortType: 'date',
-      sortable: true,
+      sortable: false,
       filterable: false,
       render: (opportunity) => {
         // Use stream timestamp if available, otherwise fall back to bookie data updated_at
@@ -788,7 +773,7 @@ function ValuesPageContent() {
         )
       }
     }
-  ], [formatDate, OddsFilterRenderer, RatioFilterRenderer, BookieFilterRenderer])
+  ], [formatDate, OddsFilterRenderer, RatioFilterRenderer, availableBookies, localSelectedBookies])
 
   // Create config from current filter state (memoized to prevent unnecessary recreations)
   const config: ValueAnalysisConfig = useMemo(() => ({
@@ -798,9 +783,6 @@ function ValuesPageContent() {
     // maxOdds is now handled by client-side filtering
   }), [fairOddsBookies, oddsRatioBookies, minRatio])
 
-  const handleEditFixture = useCallback((fixture: any) => {
-    setEditingFixture(fixture)
-  }, [])
 
   const handleCloseEditModal = () => {
     setEditingFixture(null)
@@ -1283,7 +1265,7 @@ function ValuesPageContent() {
     />;
   }, [currentRatioFilter, fairOddsBookies, filterMethod]);
 
-  const renderStatsSection = useCallback((fixture: any) => {
+  const renderStatsSection = useCallback((_fixture: any) => {
     if (statsLoading) {
       return (
         <div className="px-2 py-4">
@@ -1769,7 +1751,7 @@ function ValuesPageContent() {
           </div>
 
           {/* Data Rows */}
-          {filteredStandings.map((standing, index) => {
+          {filteredStandings.map((standing, _index) => {
             const isHomeTeam = fixture.home_team_id?.toString() === standing.team.id?.toString();
             const isAwayTeam = fixture.away_team_id?.toString() === standing.team.id?.toString();
             const isParticipatingTeam = isHomeTeam || isAwayTeam;
@@ -2128,30 +2110,7 @@ function ValuesPageContent() {
       return ratios
     }
 
-    // Helper: Calculate weighted average ratio based on multipliers
-    const calculateWeightedAverage = (availableRatios: Array<{fairBookie: string, ratio: number}>): number => {
-      let totalWeightedSum = 0
-      let totalWeight = 0
 
-      availableRatios.forEach(({fairBookie, ratio}) => {
-        const bookieConfig = fairOddsBookies.find(config => config.bookie === fairBookie)
-        const multiplier = bookieConfig?.multiplier || 1
-        totalWeightedSum += ratio * multiplier
-        totalWeight += multiplier
-      })
-
-      return totalWeight > 0 ? totalWeightedSum / totalWeight : 0
-    }
-
-    // Helper: Check if an outcome satisfies the required bookies criterion
-    const meetsRequiredBookiesCriterion = (availableRatios: Array<{fairBookie: string, ratio: number}>): boolean => {
-      if (requiredFairBookies.length === 0) return true
-      
-      // At least ONE required bookie must have data for this outcome
-      return requiredFairBookies.some(requiredBookie =>
-        availableRatios.some(r => r.fairBookie === requiredBookie)
-      )
-    }
 
     // Flatten the new structure into individual opportunities for display
     const flattenedOpportunities: ValueOpportunity[] = []
@@ -2173,7 +2132,7 @@ function ValuesPageContent() {
 
         // Process X12 ratios
         if (bookieRatio.ratios_x12) {
-          bookieRatio.ratios_x12.forEach((ratio, index) => {
+          bookieRatio.ratios_x12.forEach((_ratio, index) => {
             const outcomeKey = `${bookieRatio.odds_bookie}-x12-${index}-0`
             if (outcomesProcessed.has(outcomeKey)) return
             outcomesProcessed.add(outcomeKey)
@@ -2182,19 +2141,19 @@ function ValuesPageContent() {
             const availableRatios = getRatiosForOutcome(fixture, bookieRatio.odds_bookie, 'x12', index, 0)
             
             // Check if required bookies criterion is met
-            if (!meetsRequiredBookiesCriterion(availableRatios)) return
+            if (!meetsRequiredBookiesCriterion(availableRatios, requiredFairBookies)) return
             
             // If no ratios available, skip
             if (availableRatios.length === 0) return
             
             const oddsBookieX12 = oddsBookieData.odds_x12?.[0]?.x12
-            const fairBookieX12 = fairBookieData.fair_odds_x12
+            const fairBookieX12 = fairBookieData.fair_odds_x12?.x12
 
             if (oddsBookieX12?.[index] && fairBookieX12?.[index]) {
               // Create opportunity based on filter method
               if (filterMethod === 'individual') {
                 // Create one opportunity per fair bookie
-                availableRatios.forEach(({fairBookie, ratio}) => {
+                availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
                   flattenedOpportunities.push({
                     fixture: fixture,
                     bookie: bookieRatio.odds_bookie,
@@ -2206,18 +2165,27 @@ function ValuesPageContent() {
                   })
                 })
               } else if (filterMethod === 'average') {
-                // Create one opportunity with weighted average ratio
-                const avgRatio = calculateWeightedAverage(availableRatios)
-                
-                flattenedOpportunities.push({
-                  fixture: fixture,
-                  bookie: bookieRatio.odds_bookie,
-                  type: 'x12',
-                  oddsIndex: index,
-                  oddsBookieOdds: oddsBookieX12[index],
-                  fairOddsBookieOdds: fairBookieX12[index],
-                  ratio: avgRatio
-                })
+                // For average method, check that odds are better than at least one required bookie's fair odds
+                const hasBetterThanRequired = requiredFairBookies.length === 0 ||
+                  requiredFairBookies.some(requiredBookie => {
+                    const requiredRatio = availableRatios.find(r => r.fairBookie === requiredBookie)
+                    return requiredRatio && requiredRatio.ratio > 1.0
+                  })
+
+                if (hasBetterThanRequired) {
+                  // Create one opportunity with weighted average ratio
+                  const avgRatio = calculateWeightedAverage(availableRatios, fairOddsBookies)
+
+                  flattenedOpportunities.push({
+                    fixture: fixture,
+                    bookie: bookieRatio.odds_bookie,
+                    type: 'x12',
+                    oddsIndex: index,
+                    oddsBookieOdds: oddsBookieX12[index],
+                    fairOddsBookieOdds: fairBookieX12[index],
+                    ratio: avgRatio
+                  })
+                }
               } else if (filterMethod === 'above_all') {
                 // Create one opportunity with minimum ratio
                 const minRatio = Math.min(...availableRatios.map(r => r.ratio))
@@ -2243,7 +2211,7 @@ function ValuesPageContent() {
           if (oddsBookieAH && fairBookieAH) {
             // AH Away ratios
             if (bookieRatio.ratios_ah.ratios_ah_a) {
-              bookieRatio.ratios_ah.ratios_ah_a.forEach((ratio, lineIndex) => {
+              bookieRatio.ratios_ah.ratios_ah_a.forEach((_ratio, lineIndex) => {
                 const outcomeKey = `${bookieRatio.odds_bookie}-ah-0-${lineIndex}`
                 if (outcomesProcessed.has(outcomeKey)) return
                 outcomesProcessed.add(outcomeKey)
@@ -2252,7 +2220,7 @@ function ValuesPageContent() {
                 const availableRatios = getRatiosForOutcome(fixture, bookieRatio.odds_bookie, 'ah', 0, lineIndex)
                 
                 // Check if required bookies criterion is met
-                if (!meetsRequiredBookiesCriterion(availableRatios)) return
+                if (!meetsRequiredBookiesCriterion(availableRatios, requiredFairBookies)) return
                 
                 // If no ratios available, skip
                 if (availableRatios.length === 0) return
@@ -2261,7 +2229,7 @@ function ValuesPageContent() {
                   // Create opportunity based on filter method
                   if (filterMethod === 'individual') {
                     // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie, ratio}) => {
+                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
                       flattenedOpportunities.push({
                         fixture: fixture,
                         bookie: bookieRatio.odds_bookie,
@@ -2275,20 +2243,29 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with weighted average ratio
-                    const avgRatio = calculateWeightedAverage(availableRatios)
-                    
-                    flattenedOpportunities.push({
-                      fixture: fixture,
-                      bookie: bookieRatio.odds_bookie,
-                      type: 'ah',
-                      lineIndex: lineIndex,
-                      oddsIndex: 0, // away
-                      oddsBookieOdds: oddsBookieAH.ah_a[lineIndex],
-                      fairOddsBookieOdds: fairBookieAH.fair_ah_a![lineIndex],
-                      ratio: avgRatio,
-                      line: bookieRatio.ratios_lines?.ah?.[lineIndex] === 0 ? 0 : -(bookieRatio.ratios_lines?.ah?.[lineIndex] || 0)
-                    })
+                    // For average method, check that odds are better than at least one required bookie's fair odds
+                    const hasBetterThanRequired = requiredFairBookies.length === 0 ||
+                      requiredFairBookies.some(requiredBookie => {
+                        const requiredRatio = availableRatios.find(r => r.fairBookie === requiredBookie)
+                        return requiredRatio && requiredRatio.ratio > 1.0
+                      })
+
+                    if (hasBetterThanRequired) {
+                      // Create one opportunity with weighted average ratio
+                      const avgRatio = calculateWeightedAverage(availableRatios, fairOddsBookies)
+
+                      flattenedOpportunities.push({
+                        fixture: fixture,
+                        bookie: bookieRatio.odds_bookie,
+                        type: 'ah',
+                        lineIndex: lineIndex,
+                        oddsIndex: 0, // away
+                        oddsBookieOdds: oddsBookieAH.ah_a[lineIndex],
+                        fairOddsBookieOdds: fairBookieAH.fair_ah_a![lineIndex],
+                        ratio: avgRatio,
+                        line: bookieRatio.ratios_lines?.ah?.[lineIndex] === 0 ? 0 : -(bookieRatio.ratios_lines?.ah?.[lineIndex] || 0)
+                      })
+                    }
                   } else if (filterMethod === 'above_all') {
                     // Create one opportunity with minimum ratio
                     const minRatio = Math.min(...availableRatios.map(r => r.ratio))
@@ -2310,7 +2287,7 @@ function ValuesPageContent() {
 
             // AH Home ratios
             if (bookieRatio.ratios_ah.ratios_ah_h) {
-              bookieRatio.ratios_ah.ratios_ah_h.forEach((ratio, lineIndex) => {
+              bookieRatio.ratios_ah.ratios_ah_h.forEach((_ratio, lineIndex) => {
                 const outcomeKey = `${bookieRatio.odds_bookie}-ah-1-${lineIndex}`
                 if (outcomesProcessed.has(outcomeKey)) return
                 outcomesProcessed.add(outcomeKey)
@@ -2319,7 +2296,7 @@ function ValuesPageContent() {
                 const availableRatios = getRatiosForOutcome(fixture, bookieRatio.odds_bookie, 'ah', 1, lineIndex)
                 
                 // Check if required bookies criterion is met
-                if (!meetsRequiredBookiesCriterion(availableRatios)) return
+                if (!meetsRequiredBookiesCriterion(availableRatios, requiredFairBookies)) return
                 
                 // If no ratios available, skip
                 if (availableRatios.length === 0) return
@@ -2328,7 +2305,7 @@ function ValuesPageContent() {
                   // Create opportunity based on filter method
                   if (filterMethod === 'individual') {
                     // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie, ratio}) => {
+                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
                       flattenedOpportunities.push({
                         fixture: fixture,
                         bookie: bookieRatio.odds_bookie,
@@ -2342,20 +2319,29 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with weighted average ratio
-                    const avgRatio = calculateWeightedAverage(availableRatios)
-                    
-                    flattenedOpportunities.push({
-                      fixture: fixture,
-                      bookie: bookieRatio.odds_bookie,
-                      type: 'ah',
-                      lineIndex: lineIndex,
-                      oddsIndex: 1, // home
-                      oddsBookieOdds: oddsBookieAH.ah_h[lineIndex],
-                      fairOddsBookieOdds: fairBookieAH.fair_ah_h![lineIndex],
-                      ratio: avgRatio,
-                      line: bookieRatio.ratios_lines?.ah?.[lineIndex]
-                    })
+                    // For average method, check that odds are better than at least one required bookie's fair odds
+                    const hasBetterThanRequired = requiredFairBookies.length === 0 ||
+                      requiredFairBookies.some(requiredBookie => {
+                        const requiredRatio = availableRatios.find(r => r.fairBookie === requiredBookie)
+                        return requiredRatio && requiredRatio.ratio > 1.0
+                      })
+
+                    if (hasBetterThanRequired) {
+                      // Create one opportunity with weighted average ratio
+                      const avgRatio = calculateWeightedAverage(availableRatios, fairOddsBookies)
+
+                      flattenedOpportunities.push({
+                        fixture: fixture,
+                        bookie: bookieRatio.odds_bookie,
+                        type: 'ah',
+                        lineIndex: lineIndex,
+                        oddsIndex: 1, // home
+                        oddsBookieOdds: oddsBookieAH.ah_h[lineIndex],
+                        fairOddsBookieOdds: fairBookieAH.fair_ah_h![lineIndex],
+                        ratio: avgRatio,
+                        line: bookieRatio.ratios_lines?.ah?.[lineIndex]
+                      })
+                    }
                   } else if (filterMethod === 'above_all') {
                     // Create one opportunity with minimum ratio
                     const minRatio = Math.min(...availableRatios.map(r => r.ratio))
@@ -2385,7 +2371,7 @@ function ValuesPageContent() {
           if (oddsBookieOU && fairBookieOU) {
             // OU Over ratios
             if (bookieRatio.ratios_ou.ratios_ou_o) {
-              bookieRatio.ratios_ou.ratios_ou_o.forEach((ratio, lineIndex) => {
+              bookieRatio.ratios_ou.ratios_ou_o.forEach((_ratio, lineIndex) => {
                 const outcomeKey = `${bookieRatio.odds_bookie}-ou-0-${lineIndex}`
                 if (outcomesProcessed.has(outcomeKey)) return
                 outcomesProcessed.add(outcomeKey)
@@ -2394,7 +2380,7 @@ function ValuesPageContent() {
                 const availableRatios = getRatiosForOutcome(fixture, bookieRatio.odds_bookie, 'ou', 0, lineIndex)
                 
                 // Check if required bookies criterion is met
-                if (!meetsRequiredBookiesCriterion(availableRatios)) return
+                if (!meetsRequiredBookiesCriterion(availableRatios, requiredFairBookies)) return
                 
                 // If no ratios available, skip
                 if (availableRatios.length === 0) return
@@ -2403,7 +2389,7 @@ function ValuesPageContent() {
                   // Create opportunity based on filter method
                   if (filterMethod === 'individual') {
                     // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie, ratio}) => {
+                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
                       flattenedOpportunities.push({
                         fixture: fixture,
                         bookie: bookieRatio.odds_bookie,
@@ -2417,20 +2403,29 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with weighted average ratio
-                    const avgRatio = calculateWeightedAverage(availableRatios)
-                    
-                    flattenedOpportunities.push({
-                      fixture: fixture,
-                      bookie: bookieRatio.odds_bookie,
-                      type: 'ou',
-                      lineIndex: lineIndex,
-                      oddsIndex: 0, // over
-                      oddsBookieOdds: oddsBookieOU.ou_o[lineIndex],
-                      fairOddsBookieOdds: fairBookieOU.fair_ou_o![lineIndex],
-                      ratio: avgRatio,
-                      line: bookieRatio.ratios_lines?.ou?.[lineIndex]
-                    })
+                    // For average method, check that odds are better than at least one required bookie's fair odds
+                    const hasBetterThanRequired = requiredFairBookies.length === 0 ||
+                      requiredFairBookies.some(requiredBookie => {
+                        const requiredRatio = availableRatios.find(r => r.fairBookie === requiredBookie)
+                        return requiredRatio && requiredRatio.ratio > 1.0
+                      })
+
+                    if (hasBetterThanRequired) {
+                      // Create one opportunity with weighted average ratio
+                      const avgRatio = calculateWeightedAverage(availableRatios, fairOddsBookies)
+
+                      flattenedOpportunities.push({
+                        fixture: fixture,
+                        bookie: bookieRatio.odds_bookie,
+                        type: 'ou',
+                        lineIndex: lineIndex,
+                        oddsIndex: 0, // over
+                        oddsBookieOdds: oddsBookieOU.ou_o[lineIndex],
+                        fairOddsBookieOdds: fairBookieOU.fair_ou_o![lineIndex],
+                        ratio: avgRatio,
+                        line: bookieRatio.ratios_lines?.ou?.[lineIndex]
+                      })
+                    }
                   } else if (filterMethod === 'above_all') {
                     // Create one opportunity with minimum ratio
                     const minRatio = Math.min(...availableRatios.map(r => r.ratio))
@@ -2452,7 +2447,7 @@ function ValuesPageContent() {
 
             // OU Under ratios
             if (bookieRatio.ratios_ou.ratios_ou_u) {
-              bookieRatio.ratios_ou.ratios_ou_u.forEach((ratio, lineIndex) => {
+              bookieRatio.ratios_ou.ratios_ou_u.forEach((_ratio, lineIndex) => {
                 const outcomeKey = `${bookieRatio.odds_bookie}-ou-1-${lineIndex}`
                 if (outcomesProcessed.has(outcomeKey)) return
                 outcomesProcessed.add(outcomeKey)
@@ -2461,7 +2456,7 @@ function ValuesPageContent() {
                 const availableRatios = getRatiosForOutcome(fixture, bookieRatio.odds_bookie, 'ou', 1, lineIndex)
                 
                 // Check if required bookies criterion is met
-                if (!meetsRequiredBookiesCriterion(availableRatios)) return
+                if (!meetsRequiredBookiesCriterion(availableRatios, requiredFairBookies)) return
                 
                 // If no ratios available, skip
                 if (availableRatios.length === 0) return
@@ -2470,7 +2465,7 @@ function ValuesPageContent() {
                   // Create opportunity based on filter method
                   if (filterMethod === 'individual') {
                     // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie, ratio}) => {
+                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
                       flattenedOpportunities.push({
                         fixture: fixture,
                         bookie: bookieRatio.odds_bookie,
@@ -2484,20 +2479,29 @@ function ValuesPageContent() {
                       })
                     })
                   } else if (filterMethod === 'average') {
-                    // Create one opportunity with weighted average ratio
-                    const avgRatio = calculateWeightedAverage(availableRatios)
-                    
-                    flattenedOpportunities.push({
-                      fixture: fixture,
-                      bookie: bookieRatio.odds_bookie,
-                      type: 'ou',
-                      lineIndex: lineIndex,
-                      oddsIndex: 1, // under
-                      oddsBookieOdds: oddsBookieOU.ou_u[lineIndex],
-                      fairOddsBookieOdds: fairBookieOU.fair_ou_u![lineIndex],
-                      ratio: avgRatio,
-                      line: bookieRatio.ratios_lines?.ou?.[lineIndex]
-                    })
+                    // For average method, check that odds are better than at least one required bookie's fair odds
+                    const hasBetterThanRequired = requiredFairBookies.length === 0 ||
+                      requiredFairBookies.some(requiredBookie => {
+                        const requiredRatio = availableRatios.find(r => r.fairBookie === requiredBookie)
+                        return requiredRatio && requiredRatio.ratio > 1.0
+                      })
+
+                    if (hasBetterThanRequired) {
+                      // Create one opportunity with weighted average ratio
+                      const avgRatio = calculateWeightedAverage(availableRatios, fairOddsBookies)
+
+                      flattenedOpportunities.push({
+                        fixture: fixture,
+                        bookie: bookieRatio.odds_bookie,
+                        type: 'ou',
+                        lineIndex: lineIndex,
+                        oddsIndex: 1, // under
+                        oddsBookieOdds: oddsBookieOU.ou_u[lineIndex],
+                        fairOddsBookieOdds: fairBookieOU.fair_ou_u![lineIndex],
+                        ratio: avgRatio,
+                        line: bookieRatio.ratios_lines?.ou?.[lineIndex]
+                      })
+                    }
                   } else if (filterMethod === 'above_all') {
                     // Create one opportunity with minimum ratio
                     const minRatio = Math.min(...availableRatios.map(r => r.ratio))
@@ -2521,7 +2525,11 @@ function ValuesPageContent() {
       })
     })
 
-    setOpportunities(flattenedOpportunities)
+    // Only update opportunities if we found some, or if this is the first analysis
+    // This prevents clearing existing opportunities when config changes result in no matches
+    if (flattenedOpportunities.length > 0 || opportunities.length === 0) {
+      setOpportunities(flattenedOpportunities)
+    }
     setAnalyzedFixtures(result.analyzedFixtures)
   }, [config, fairOddsBookies, filterMethod])
 
@@ -2587,54 +2595,9 @@ function ValuesPageContent() {
         
         filtered = filtered.filter(opportunity => {
           // Check if the opportunity's ratio is above the threshold
+          // This uses the same ratio value that is displayed in the Ratio column
           if (opportunity.ratio < minRatioValue) return false
-          
-          // For "Average Fair Odds" method with required bookies:
-          // Also check that at least one required bookie's ratio is above the threshold
-          if (filterMethod === 'average' && requiredFairBookies.length > 0) {
-            const fixtureRatios = (opportunity.fixture as any).ratios || []
-            
-            // Check if at least ONE required bookie has a ratio above threshold for this specific outcome
-            const hasRequiredBookieAboveThreshold = requiredFairBookies.some(requiredBookie => {
-              const ratioEntry = fixtureRatios.find((r: any) =>
-                r.fair_odds_bookie === requiredBookie &&
-                r.odds_bookie === opportunity.bookie
-              )
-              
-              if (!ratioEntry) return false
-              
-              // Get the ratio for this specific outcome
-              let ratio = 0
-              switch (opportunity.type) {
-                case 'x12':
-                  if (ratioEntry.ratios_x12 && ratioEntry.ratios_x12[opportunity.oddsIndex || 0] > 0) {
-                    ratio = ratioEntry.ratios_x12[opportunity.oddsIndex || 0]
-                  }
-                  break
-                case 'ah':
-                  if (ratioEntry.ratios_ah) {
-                    const ahArray = opportunity.oddsIndex === 0 ? ratioEntry.ratios_ah.ratios_ah_a : ratioEntry.ratios_ah.ratios_ah_h
-                    if (ahArray && ahArray[opportunity.lineIndex || 0] > 0) {
-                      ratio = ahArray[opportunity.lineIndex || 0]
-                    }
-                  }
-                  break
-                case 'ou':
-                  if (ratioEntry.ratios_ou) {
-                    const ouArray = opportunity.oddsIndex === 0 ? ratioEntry.ratios_ou.ratios_ou_o : ratioEntry.ratios_ou.ratios_ou_u
-                    if (ouArray && ouArray[opportunity.lineIndex || 0] > 0) {
-                      ratio = ouArray[opportunity.lineIndex || 0]
-                    }
-                  }
-                  break
-              }
-              
-              return ratio >= minRatioValue
-            })
-            
-            return hasRequiredBookieAboveThreshold
-          }
-          
+
           return true
         })
       }
@@ -2748,16 +2711,6 @@ function ValuesPageContent() {
   // Calculate total pages
   const totalPages = Math.ceil(sortedOpportunities.length / pageSize)
 
-  const toggleSort = (newSortBy: 'ratio' | 'date' | 'updated') => {
-    if (sortBy === newSortBy) {
-      // Toggle order if same sort type
-      setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')
-    } else {
-      // New sort type, default to descending for ratio, ascending for date, descending for updated
-      setSortBy(newSortBy)
-      setSortOrder(newSortBy === 'ratio' ? 'desc' : newSortBy === 'updated' ? 'desc' : 'asc')
-    }
-  }
 
   // Efficient update function - stores streaming updates in Map without recreating entire array
   const updateFixtureData = useCallback((fixtureId: string, fixtureData: any) => {
@@ -2774,6 +2727,7 @@ function ValuesPageContent() {
           odds: [...existing.odds, ...fixtureData.odds].reduce((acc: any[], current: any) => {
             const existingIndex = acc.findIndex((o: any) => o.bookie === current.bookie)
             if (existingIndex >= 0) {
+              // Preserve updated_at from existing odds when merging with streaming updates
               acc[existingIndex] = { ...acc[existingIndex], ...current }
             } else {
               acc.push(current)
@@ -2795,6 +2749,7 @@ function ValuesPageContent() {
     // Don't filter by fixtureId - this allows new fixtures to be discovered automatically
     const oddsUrl = new URL('/api/odds/stream', window.location.origin)
     oddsUrl.searchParams.set('fair_odds', 'true')
+    oddsUrl.searchParams.set('latest', 'true')
 
     const oddsEventSource = new EventSource(oddsUrl.toString())
 
@@ -2805,6 +2760,19 @@ function ValuesPageContent() {
         // Handle streaming updates - check for odds_update type
         if (data.type === 'odds_update' && data.fixture_id && data.odds) {
           const fixtureId = data.fixture_id.toString()
+
+          // Check if fixture status has changed and is no longer IN_FUTURE - remove it
+          if (data.status_short && !IN_FUTURE.includes(data.status_short.toLowerCase())) {
+            // Remove fixture from the fixtures list since it's no longer future
+            setFixtures(prev => prev.filter(f => f.fixture_id !== fixtureId))
+            // Also remove from streamedFixtures if it exists
+            setStreamedFixtures(prev => {
+              const newMap = new Map(prev)
+              newMap.delete(fixtureId)
+              return newMap
+            })
+            return // Don't process further updates for this fixture
+          }
 
           // Update fixture data using streamedFixtures Map (for all fixtures)
           const updateData: any = {}
@@ -2822,11 +2790,16 @@ function ValuesPageContent() {
             updateData.league = data.league_name
           }
 
+          // Update status if provided
+          if (data.status_short) {
+            updateData.status_short = data.status_short
+          }
+
           // Update odds data (stream sends odds directly at top level)
           if (data.odds) {
             updateData.odds = data.odds
           }
-          
+
           updateFixtureData(fixtureId, updateData)
         }
       } catch (error) {
@@ -2872,9 +2845,6 @@ function ValuesPageContent() {
 
 
 
-  const formatOdds = (odds: number, decimals: number) => {
-    return (odds / Math.pow(10, decimals)).toFixed(decimals)
-  }
 
   const getTypeLabel = (type: string, oddsIndex?: number, line?: number) => {
     switch (type) {

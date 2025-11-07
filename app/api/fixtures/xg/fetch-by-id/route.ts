@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // For flashlive and sofascore, we need eventId
+    // For flashlive and sofascore sources, we need eventId
     if (['flashlive', 'sofascore'].includes(source) && !eventId) {
       return NextResponse.json(
         { success: false, message: 'eventId is required for flashlive and sofascore sources' },

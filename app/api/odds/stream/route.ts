@@ -16,7 +16,7 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
   // Add bookie filter if provided
   let fullBookieFilter = '';
   if (bookieFilter) {
-    fullBookieFilter = bookieFilter.replace(/\$(\d+)/g, (match, num) => `$${parseInt(num) + params.length}`);
+    fullBookieFilter = bookieFilter.replace(/\$(\d+)/g, (_match, num) => `$${parseInt(num) + params.length}`);
     params.push(...(bookieParams || []));
   }
 
@@ -47,7 +47,8 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
         ffo.fair_odds_x12,
         ffo.fair_odds_ah,
         ffo.fair_odds_ou,
-        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines
+        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines,
+        ffo.latest_t as fair_odds_latest_t
       FROM football_fixtures ff
       LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
       LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id AND fo.bookie = ffo.bookie
@@ -280,19 +281,87 @@ export async function GET(request: Request) {
                         if (useFairOdds) {
                           if (row.bookie === 'Prediction') {
                             // For Prediction, row.odds_x12 is single object (from SQL ->-1), already has latest values
-                            oddsObj.fair_odds_x12 = row.odds_x12 && row.odds_x12.x12 ? row.odds_x12.x12 : null;
-                            oddsObj.fair_odds_ah = row.odds_ah || null;
-                            oddsObj.fair_odds_ou = row.odds_ou || null;
-                            oddsObj.fair_odds_lines = row.lines ? {
-                              ah: row.lines.ah || null,
-                              ou: row.lines.ou || null
-                            } : null;
+                            const latestTimestamp = row.odds_x12?.t || row.odds_ah?.t || row.odds_ou?.t || row.lines?.t;
+
+                            if (row.odds_x12 && row.odds_x12.x12 && latestTimestamp) {
+                              oddsObj.fair_odds_x12 = {
+                                t: latestTimestamp,
+                                x12: row.odds_x12.x12
+                              };
+                            } else {
+                              oddsObj.fair_odds_x12 = null;
+                            }
+
+                            if (row.odds_ah && latestTimestamp) {
+                              oddsObj.fair_odds_ah = {
+                                t: latestTimestamp,
+                                fair_ah_a: row.odds_ah.ah_a || null,
+                                fair_ah_h: row.odds_ah.ah_h || null
+                              };
+                            } else {
+                              oddsObj.fair_odds_ah = null;
+                            }
+
+                            if (row.odds_ou && latestTimestamp) {
+                              oddsObj.fair_odds_ou = {
+                                t: latestTimestamp,
+                                fair_ou_o: row.odds_ou.ou_o || null,
+                                fair_ou_u: row.odds_ou.ou_u || null
+                              };
+                            } else {
+                              oddsObj.fair_odds_ou = null;
+                            }
+
+                            if (row.lines && latestTimestamp) {
+                              oddsObj.fair_odds_lines = [{
+                                t: latestTimestamp,
+                                ah: row.lines.ah || null,
+                                ou: row.lines.ou || null
+                              }];
+                            } else {
+                              oddsObj.fair_odds_lines = null;
+                            }
                           } else {
-                            // For other bookmakers, use calculated fair odds
-                            oddsObj.fair_odds_x12 = row.fair_odds_x12 || null;
-                            oddsObj.fair_odds_ah = row.fair_odds_ah || null;
-                            oddsObj.fair_odds_ou = row.fair_odds_ou || null;
-                            oddsObj.fair_odds_lines = row.fair_odds_lines || null;
+                            // For other bookmakers, use calculated fair odds with embedded timestamps
+                            if (row.fair_odds_x12 && row.fair_odds_latest_t?.x12_ts) {
+                              oddsObj.fair_odds_x12 = {
+                                t: row.fair_odds_latest_t.x12_ts,
+                                x12: row.fair_odds_x12
+                              };
+                            } else {
+                              oddsObj.fair_odds_x12 = null;
+                            }
+
+                            if (row.fair_odds_ah && row.fair_odds_latest_t?.ah_ts) {
+                              oddsObj.fair_odds_ah = {
+                                t: row.fair_odds_latest_t.ah_ts,
+                                fair_ah_a: row.fair_odds_ah.fair_ah_a,
+                                fair_ah_h: row.fair_odds_ah.fair_ah_h
+                              };
+                            } else {
+                              oddsObj.fair_odds_ah = null;
+                            }
+
+                            if (row.fair_odds_ou && row.fair_odds_latest_t?.ou_ts) {
+                              oddsObj.fair_odds_ou = {
+                                t: row.fair_odds_latest_t.ou_ts,
+                                fair_ou_o: row.fair_odds_ou.fair_ou_o,
+                                fair_ou_u: row.fair_odds_ou.fair_ou_u
+                              };
+                            } else {
+                              oddsObj.fair_odds_ou = null;
+                            }
+
+                            if (row.fair_odds_lines && row.fair_odds_latest_t?.lines_ts) {
+                              oddsObj.fair_odds_lines = [{
+                                t: row.fair_odds_latest_t.lines_ts,
+                                ah: row.fair_odds_lines.ah || [],
+                                ou: row.fair_odds_lines.ou || []
+                              }];
+                            } else {
+                              oddsObj.fair_odds_lines = null;
+                            }
+                            // Remove separate latest_t field for fair odds
                           }
                         }
 

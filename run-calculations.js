@@ -1309,6 +1309,7 @@ async function runCalculations() {
                     fair_odds_ah JSONB,
                     fair_odds_ou JSONB,
                     latest_lines JSONB,
+                    latest_t JSONB,
 
                     updated_at TIMESTAMP DEFAULT NOW(),
 
@@ -1435,7 +1436,7 @@ async function runCalculations() {
                 BEGIN
                     -- Insert or update fair odds only when odds data is available and valid
                     -- This preserves existing fair odds when bookmaker odds become empty/unavailable
-                    INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines)
+                    INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines, latest_t)
                     SELECT
                         fo.fixture_id,
                         fo.bookie,
@@ -1454,7 +1455,7 @@ async function runCalculations() {
                                                         SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
                                                         FROM jsonb_array_elements_text(valid_odds.x12_array) elem
                                                         WHERE elem::numeric > 0
-                                                    ) < 0.92 THEN
+                                                    ) >= 0.92 THEN
                                                         (
                                                             SELECT jsonb_agg(
                                                                 ROUND(
@@ -1511,8 +1512,8 @@ async function runCalculations() {
                                                     'fair_ah_h', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
-                                                                     1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                WHEN h_odds::numeric > 100 AND a_odds::numeric > 100 AND
+                                                                     1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
@@ -1536,8 +1537,8 @@ async function runCalculations() {
                                                     'fair_ah_a', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
-                                                                     1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                WHEN h_odds::numeric > 100 AND a_odds::numeric > 100 AND
+                                                                     1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
@@ -1565,31 +1566,31 @@ async function runCalculations() {
                                             SELECT
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-1->>'ah_h')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-2->>'ah_h')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-3->>'ah_h')::jsonb
                                                     ELSE NULL
                                                 END as ah_h_array,
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-1->>'ah_a')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-2->>'ah_a')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-3->>'ah_a')::jsonb
                                                     ELSE NULL
                                                 END as ah_a_array
@@ -1610,8 +1611,8 @@ async function runCalculations() {
                                                     'fair_ou_o', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
-                                                                     1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                WHEN o_odds::numeric > 100 AND u_odds::numeric > 100 AND
+                                                                     1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
@@ -1635,8 +1636,8 @@ async function runCalculations() {
                                                     'fair_ou_u', (
                                                         SELECT jsonb_agg(
                                                             CASE
-                                                                WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
-                                                                     1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                WHEN o_odds::numeric > 100 AND u_odds::numeric > 100 AND
+                                                                     1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                     ROUND(
                                                                         (
                                                                             2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
@@ -1664,31 +1665,31 @@ async function runCalculations() {
                                             SELECT
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-1->>'ou_o')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-2->>'ou_o')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-3->>'ou_o')::jsonb
                                                     ELSE NULL
                                                 END as ou_o_array,
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-1->>'ou_u')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-2->>'ou_u')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-3->>'ou_u')::jsonb
                                                     ELSE NULL
                                                 END as ou_u_array
@@ -1698,22 +1699,27 @@ async function runCalculations() {
                         END as fair_odds_ou,
 
                         -- Latest lines from bookmaker data
-                        (fo.lines->-1) as latest_lines
+                        (fo.lines->-1) as latest_lines,
+
+                        -- Latest timestamps from the odds data used for fair odds calculation
+                        fo.latest_t as latest_t
 
                     FROM football_odds fo
                     WHERE fo.fixture_id = p_fixture_id
                       AND fo.bookie != 'Prediction'
                       AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
                     ON CONFLICT (fixture_id, bookie) DO UPDATE SET
-                        fair_odds_x12 = EXCLUDED.fair_odds_x12,
-                        fair_odds_ah = EXCLUDED.fair_odds_ah,
-                        fair_odds_ou = EXCLUDED.fair_odds_ou,
+                        fair_odds_x12 = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL THEN EXCLUDED.fair_odds_x12 ELSE football_fair_odds.fair_odds_x12 END,
+                        fair_odds_ah = CASE WHEN EXCLUDED.fair_odds_ah IS NOT NULL THEN EXCLUDED.fair_odds_ah ELSE football_fair_odds.fair_odds_ah END,
+                        fair_odds_ou = CASE WHEN EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.fair_odds_ou ELSE football_fair_odds.fair_odds_ou END,
                         latest_lines = EXCLUDED.latest_lines,
-                        updated_at = NOW()
-                    WHERE football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12
-                       OR football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah
-                       OR football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou
-                       OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines;
+                        latest_t = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.latest_t ELSE football_fair_odds.latest_t END,
+                        updated_at = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN NOW() ELSE football_fair_odds.updated_at END
+                    WHERE (EXCLUDED.fair_odds_x12 IS NOT NULL AND football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12)
+                       OR (EXCLUDED.fair_odds_ah IS NOT NULL AND football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah)
+                       OR (EXCLUDED.fair_odds_ou IS NOT NULL AND football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou)
+                       OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
+                       OR ((EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL) AND football_fair_odds.latest_t IS DISTINCT FROM EXCLUDED.latest_t);
                 END;
                 $$ LANGUAGE plpgsql;
 
@@ -1852,7 +1858,7 @@ async function runCalculations() {
                 const placeholders = batch.map((_, idx) => `$${idx + 1}`).join(',');
                 try {
                     await pool.query(`
-                        INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines)
+                        INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines, latest_t)
                         SELECT
                             fo.fixture_id,
                             fo.bookie,
@@ -1871,7 +1877,7 @@ async function runCalculations() {
                                                             SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
                                                             FROM jsonb_array_elements_text(valid_odds.x12_array) elem
                                                             WHERE elem::numeric > 0
-                                                        ) < 0.92 THEN
+                                                        ) >= 0.92 THEN
                                                             (
                                                                 SELECT jsonb_agg(
                                                                     ROUND(
@@ -1928,8 +1934,8 @@ async function runCalculations() {
                                                         'fair_ah_h', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
-                                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                    WHEN h_odds::numeric > 100 AND a_odds::numeric > 100 AND
+                                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
@@ -1953,8 +1959,8 @@ async function runCalculations() {
                                                         'fair_ah_a', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN h_odds::numeric > 0 AND a_odds::numeric > 0 AND
-                                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                    WHEN h_odds::numeric > 100 AND a_odds::numeric > 100 AND
+                                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
@@ -1982,31 +1988,31 @@ async function runCalculations() {
                                             SELECT
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-1->>'ah_h')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-2->>'ah_h')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-3->>'ah_h')::jsonb
                                                     ELSE NULL
                                                 END as ah_h_array,
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ah->-1)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-1)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-1->>'ah_a')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-2)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-2)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-2->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-2->>'ah_a')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ah->-3)->'ah_h') > 0 AND jsonb_array_length((fo.odds_ah->-3)->'ah_a') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_h')::jsonb) h_elem WHERE h_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ah->-3->>'ah_a')::jsonb) a_elem WHERE a_elem::numeric > 100)
                                                     THEN (fo.odds_ah->-3->>'ah_a')::jsonb
                                                     ELSE NULL
                                                 END as ah_a_array
@@ -2027,8 +2033,8 @@ async function runCalculations() {
                                                         'fair_ou_o', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
-                                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                    WHEN o_odds::numeric > 100 AND u_odds::numeric > 100 AND
+                                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
@@ -2052,8 +2058,8 @@ async function runCalculations() {
                                                         'fair_ou_u', (
                                                             SELECT jsonb_agg(
                                                                 CASE
-                                                                    WHEN o_odds::numeric > 0 AND u_odds::numeric > 0 AND
-                                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) < 0.92 THEN
+                                                                    WHEN o_odds::numeric > 100 AND u_odds::numeric > 100 AND
+                                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
                                                                         ROUND(
                                                                             (
                                                                                 2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /
@@ -2081,31 +2087,31 @@ async function runCalculations() {
                                             SELECT
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-1->>'ou_o')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-2->>'ou_o')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-3->>'ou_o')::jsonb
                                                     ELSE NULL
                                                 END as ou_o_array,
                                                 CASE
                                                     WHEN jsonb_array_length((fo.odds_ou->-1)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-1)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-1->>'ou_u')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-2)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-2)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-2->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-2->>'ou_u')::jsonb
                                                     WHEN jsonb_array_length((fo.odds_ou->-3)->'ou_o') > 0 AND jsonb_array_length((fo.odds_ou->-3)->'ou_u') > 0 AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 0) AND
-                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 0)
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_o')::jsonb) o_elem WHERE o_elem::numeric > 100) AND
+                                                         EXISTS (SELECT 1 FROM jsonb_array_elements_text((fo.odds_ou->-3->>'ou_u')::jsonb) u_elem WHERE u_elem::numeric > 100)
                                                     THEN (fo.odds_ou->-3->>'ou_u')::jsonb
                                                     ELSE NULL
                                                 END as ou_u_array
@@ -2115,22 +2121,27 @@ async function runCalculations() {
                             END as fair_odds_ou,
 
                             -- Latest lines from bookmaker data
-                            (fo.lines->-1) as latest_lines
+                            (fo.lines->-1) as latest_lines,
+
+                            -- Latest timestamps from the odds data used for fair odds calculation
+                            fo.latest_t as latest_t
 
                         FROM football_odds fo
                         WHERE fo.fixture_id = ANY(ARRAY[${placeholders}]::BIGINT[])
                           AND fo.bookie != 'Prediction'
                           AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
                         ON CONFLICT (fixture_id, bookie) DO UPDATE SET
-                            fair_odds_x12 = EXCLUDED.fair_odds_x12,
-                            fair_odds_ah = EXCLUDED.fair_odds_ah,
-                            fair_odds_ou = EXCLUDED.fair_odds_ou,
+                            fair_odds_x12 = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL THEN EXCLUDED.fair_odds_x12 ELSE football_fair_odds.fair_odds_x12 END,
+                            fair_odds_ah = CASE WHEN EXCLUDED.fair_odds_ah IS NOT NULL THEN EXCLUDED.fair_odds_ah ELSE football_fair_odds.fair_odds_ah END,
+                            fair_odds_ou = CASE WHEN EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.fair_odds_ou ELSE football_fair_odds.fair_odds_ou END,
                             latest_lines = EXCLUDED.latest_lines,
-                            updated_at = NOW()
-                        WHERE football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12
-                           OR football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah
-                           OR football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou
+                            latest_t = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.latest_t ELSE football_fair_odds.latest_t END,
+                            updated_at = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN NOW() ELSE football_fair_odds.updated_at END
+                        WHERE (EXCLUDED.fair_odds_x12 IS NOT NULL AND football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12)
+                           OR (EXCLUDED.fair_odds_ah IS NOT NULL AND football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah)
+                           OR (EXCLUDED.fair_odds_ou IS NOT NULL AND football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou)
                            OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
+                           OR ((EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL) AND football_fair_odds.latest_t IS DISTINCT FROM EXCLUDED.latest_t)
                     `, batch);
                 } catch (error) {
                     console.error(`❌ Error populating fair_odds batch ${Math.floor(i/50) + 1}:`, error.message);

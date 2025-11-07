@@ -695,7 +695,6 @@ export class XGFetcher {
           
           lastPageSize = pageEvents.length;
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
             // Check if it's a 404 error - if so, the tournament stage ID is invalid, no point trying more pages
             if (axios.isAxiosError(error) && error.response?.status === 404) {

@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
 import { Team } from '@/types/database';
+import { parseLeagueId } from '@/lib/utils/api-utils';
+
+export const dynamic = 'force-dynamic';
 
 async function getTeams(request: Request) {
   try {
     const url = new URL(request.url);
-    const leagueId = url.searchParams.get('league_id');
+    const { leagueId, error: leagueError } = parseLeagueId(url.searchParams);
+    if (leagueError) return leagueError;
 
     // First get teams, optionally filtered by league
     let teamsQuery = 'SELECT id, name, country, venue, mappings FROM football_teams';

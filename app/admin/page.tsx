@@ -111,7 +111,6 @@ export default function AdminPage() {
     connections: { total: number; active: number; idle: number; idle_in_transaction: number; waiting: number; };
     performance: {
       active_queries: number;
-      average_query_duration_ms: number;
       cache_hit_ratio: number;
       recent_queries: any[];
       database_stats: any[];
@@ -1089,16 +1088,6 @@ export default function AdminPage() {
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-400">Avg Query Time:</span>
-                      <span className={`font-mono ${
-                        (monitorData.performance.average_query_duration_ms || 0) < 5 ? 'text-emerald-400' :
-                        (monitorData.performance.average_query_duration_ms || 0) < 100 ? 'text-green-400' :
-                        'text-yellow-400'
-                      }`}>
-                        {Number(monitorData.performance.average_query_duration_ms || 0).toFixed(1)}ms
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
                       <span className="text-gray-400">Active Queries:</span>
                       <span className="text-white font-mono">{monitorData.performance.active_queries}</span>
                     </div>
@@ -1280,15 +1269,6 @@ export default function AdminPage() {
                           if (e.target.checked) {
                             if (testConfig.selectAll) {
                               // Switching from "all selected" to specific selection
-                              const allFeatures = [
-                                'home_advantage',
-                                'adjusted_rolling_xg_home', 'adjusted_rolling_xga_home',
-                                'adjusted_rolling_xg_away', 'adjusted_rolling_xga_away',
-                                'adjusted_rolling_market_xg_home', 'adjusted_rolling_market_xga_home',
-                                'adjusted_rolling_market_xg_away', 'adjusted_rolling_market_xga_away',
-                                'avg_goals_league', 'hours_since_last_match_home', 'hours_since_last_match_away',
-                                'elo_home', 'elo_away', 'league_elo'
-                              ];
                               setTestConfig(prev => ({
                                 ...prev,
                                 selectAll: false,

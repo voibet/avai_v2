@@ -27,7 +27,7 @@
           "activity_regularizer": null,
           "kernel_constraint": null,
           "bias_constraint": null,
-          "name": "d1_3whlgt4x1",
+          "name": "d1_0sn3kvyr5",
           "trainable": true,
           "batch_input_shape": [
             null,
@@ -64,7 +64,7 @@
           "gamma_regularizer": null,
           "beta_constraint": null,
           "gamma_constraint": null,
-          "name": "bn_3whlgt4x1",
+          "name": "bn_0sn3kvyr5",
           "trainable": true
         }
       },
@@ -74,7 +74,7 @@
           "rate": 0.2,
           "noise_shape": null,
           "seed": null,
-          "name": "do_3whlgt4x1",
+          "name": "do_0sn3kvyr5",
           "trainable": true
         }
       },
@@ -102,7 +102,7 @@
           "activity_regularizer": null,
           "kernel_constraint": null,
           "bias_constraint": null,
-          "name": "d2_3whlgt4x1",
+          "name": "d2_0sn3kvyr5",
           "trainable": true
         }
       }

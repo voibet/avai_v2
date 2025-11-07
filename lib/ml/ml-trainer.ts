@@ -109,7 +109,7 @@ export async function trainModel(trainingData: TrainingData[], features = FEATUR
 export async function makePredictions(
   model: any,
   minVals: any,
-  maxVals: any,
+  _maxVals: any,
   range: any,
   features: string[],
   predictionData: any[]
