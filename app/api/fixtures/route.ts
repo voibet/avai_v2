@@ -19,9 +19,11 @@ const FIXTURES_BASE_QUERY = `
     f.score_penalty_home, f.score_penalty_away,
     f.league_id, f.league_name, f.league_country, f.season, f.round,
     f.updated_at,
-    p.home_pred, p.away_pred
+    p.home_pred, p.away_pred,
+    fs.avg_goals_league, fs.home_advantage, fs.elo_home, fs.elo_away, fs.league_elo
   FROM football_fixtures f
   LEFT JOIN football_predictions p ON f.id = p.fixture_id
+  LEFT JOIN football_stats fs ON f.id = fs.fixture_id
 `;
 
 // Column mapping
@@ -32,7 +34,9 @@ const COLUMN_MAPPING = {
   goals_home: 'goals_home', goals_away: 'goals_away',
   xg_home: 'xg_home', xg_away: 'xg_away', market_xg_home: 'market_xg_home', market_xg_away: 'market_xg_away',
   venue_name: 'venue_name', referee: 'referee',
-  home_pred: 'home_pred', away_pred: 'away_pred'
+  home_pred: 'home_pred', away_pred: 'away_pred',
+  avg_goals_league: 'avg_goals_league', home_advantage: 'home_advantage',
+  elo_home: 'elo_home', elo_away: 'elo_away', league_elo: 'league_elo'
 };
 
 // Searchable columns

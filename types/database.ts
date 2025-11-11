@@ -48,14 +48,19 @@ export interface Fixture {
   updated_at: string;
   home_pred?: number;
   away_pred?: number;
+  avg_goals_league?: number;
+  home_advantage?: number;
+  elo_home?: number;
+  elo_away?: number;
+  league_elo?: number;
 }
 
 export interface FixtureStats {
   fixture_id: number;
   created_at: string;
   updated_at: string;
-  hours_since_last_match_home?: number;
-  hours_since_last_match_away?: number;
+  hours_since_last_match_home: number;
+  hours_since_last_match_away: number;
   avg_goals_league?: number;
   elo_home?: number;
   elo_away?: number;

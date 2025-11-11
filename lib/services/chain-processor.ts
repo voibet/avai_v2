@@ -122,8 +122,8 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
   }
 
   // Step 4: Update statistics and predictions if we have meaningful changes or forced update
-  // Trigger calculations if: market XG was calculated OR basic XG was updated OR forced update
-  const hasMeaningfulChanges = marketXGCalculatedFixtureIds.length > 0 || xgUpdatedFixtureIds.length > 0 || forceStatsUpdate;
+  // Trigger calculations if: market XG was calculated OR basic XG was updated OR fixtures were added OR forced update
+  const hasMeaningfulChanges = marketXGCalculatedFixtureIds.length > 0 || xgUpdatedFixtureIds.length > 0 || fixturesUpdated > 0 || forceStatsUpdate;
 
   if (hasMeaningfulChanges) {
     currentStep++;

@@ -6,6 +6,12 @@ const SCHEDULER_INSTANCE_KEY = '__SCHEDULER_INSTANCE__';
 let schedulerInterval: NodeJS.Timeout | null = null;
 
 export function startAutoRefreshScheduler() {
+  // Check if CHAIN environment variable is set to true
+  if (process.env.CHAIN !== 'true') {
+    console.log('CHAIN environment variable not set to true, skipping auto-refresh scheduler');
+    return;
+  }
+
   // Check if scheduler already exists globally
   if ((global as any)[SCHEDULER_INSTANCE_KEY]) {
     console.log('Scheduler already running globally');

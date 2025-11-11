@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
-import { calculateWeightedAverage, getOddsDivisor } from '@/lib/utils/value-calculations';
+import { calculateWeightedAverageFairOdds, getOddsDivisor } from '@/lib/utils/value-calculations';
 import type { BookieOdds } from '@/lib/utils/value-analysis';
 
 /**
@@ -107,6 +107,13 @@ export function FixtureOdds({
     }
   }, [propOddsData]);
 
+  // Update previous odds ref whenever oddsData changes
+  useEffect(() => {
+    if (oddsData) {
+      previousOddsRef.current = oddsData;
+    }
+  }, [oddsData]);
+
   // Fetch odds data when fixture is provided but oddsData prop is not
   useEffect(() => {
     if (fixture && propOddsData === undefined) {
@@ -115,7 +122,7 @@ export function FixtureOdds({
         setOddsLoading(true);
         setOddsError(null);
 
-        fetch(`/api/odds?fixtureId=${fixtureId}e&fair_odds=true`)
+        fetch(`/api/odds?fixtureId=${fixtureId}&fair_odds=true`)
           .then(response => {
             if (!response.ok) {
               throw new Error(`HTTP error! status: ${response.status}`);
@@ -143,14 +150,16 @@ export function FixtureOdds({
 
   // Start streaming odds updates when fixture is provided
   useEffect(() => {
+    // Always close any existing stream first
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    // Only start a new stream if we have a fixture and no propOddsData
     if (fixture && propOddsData === undefined) {
       const fixtureId = fixture.id || fixture.fixture_id;
       if (fixtureId) {
-        // Close any existing stream
-        if (eventSourceRef.current) {
-          eventSourceRef.current.close();
-        }
-
         // Start new stream for this fixture
         const streamUrl = `/api/odds/stream?fixtureId=${fixtureId}&fair_odds=true`;
         const eventSource = new EventSource(streamUrl);
@@ -162,18 +171,59 @@ export function FixtureOdds({
 
             // Handle odds updates
             if (data.type === 'odds_update' && data.odds && data.odds.length > 0) {
-              // Compare with current odds for flashing
-              if (oddsData) {
-                const changes = detectOddsChanges(oddsData, data);
-                if (Object.keys(changes).length > 0) {
-                  setFlashingCells(changes);
-                  setTimeout(() => setFlashingCells({}), 2000);
-                }
-              }
+              // Merge stream updates with existing historical data
+              setOddsData(prevData => {
+                if (!prevData || !prevData.odds) return data;
 
-              // Update odds data
-              setOddsData(data);
-              previousOddsRef.current = data;
+                const mergedData = {
+                  ...data,
+                  odds: data.odds.map((newBookie: any) => {
+                    const existingBookie = prevData.odds.find(b => b.bookie === newBookie.bookie);
+                    if (!existingBookie) return newBookie;
+
+                    // Helper function to merge and deduplicate arrays by timestamp
+                    const mergeArraysByTimestamp = (existing: any[] | any, incoming: any[] | any) => {
+                      const existingArray = Array.isArray(existing) ? existing : (existing ? [existing] : []);
+                      const incomingArray = Array.isArray(incoming) ? incoming : (incoming ? [incoming] : []);
+                      if (existingArray.length === 0 && incomingArray.length === 0) return incoming || existing || [];
+
+                      const combined = [...existingArray, ...incomingArray];
+                      // Deduplicate by timestamp, keeping the latest for each timestamp
+                      const seen = new Set();
+                      return combined.filter(item => {
+                        if (seen.has(item.t)) return false;
+                        seen.add(item.t);
+                        return true;
+                      }).sort((a, b) => a.t - b.t);
+                    };
+
+                    // Merge historical arrays
+                    const mergedBookie = {
+                      ...newBookie,
+                      odds_x12: mergeArraysByTimestamp(existingBookie.odds_x12, newBookie.odds_x12),
+                      odds_ah: mergeArraysByTimestamp(existingBookie.odds_ah, newBookie.odds_ah),
+                      odds_ou: mergeArraysByTimestamp(existingBookie.odds_ou, newBookie.odds_ou),
+                      lines: mergeArraysByTimestamp(existingBookie.lines, newBookie.lines),
+                      ids: mergeArraysByTimestamp(existingBookie.ids, newBookie.ids),
+                      max_stakes: mergeArraysByTimestamp(existingBookie.max_stakes, newBookie.max_stakes)
+                    };
+
+                    return mergedBookie;
+                  })
+                };
+
+                // Compare with current odds for flashing
+                if (prevData) {
+                  const changes = detectOddsChanges(prevData, mergedData);
+                  if (Object.keys(changes).length > 0) {
+                    setFlashingCells(changes);
+                    setTimeout(() => setFlashingCells({}), 2000);
+                  }
+                }
+
+                return mergedData;
+              });
+
               setOddsLoading(false);
               setOddsError(null);
             }
@@ -186,22 +236,17 @@ export function FixtureOdds({
           console.error('EventSource error:', error);
           setOddsError('Streaming connection failed');
         };
-
-        return () => {
-          eventSource.close();
-          eventSourceRef.current = null;
-        };
       }
     }
 
-    // Cleanup when fixture changes or component unmounts
+    // Always return a cleanup function that closes any existing stream
     return () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
     };
-  }, [fixture, propOddsData, oddsData]);
+  }, [fixture, propOddsData]);
 
   // Helper function to detect odds changes
   const detectOddsChanges = (oldData: OddsData, newData: OddsData): Record<string, 'up' | 'down'> => {
@@ -630,8 +675,8 @@ export function FixtureOdds({
       const topOddsData = getTopOdds(outcomeIndex);
       if (!topOddsData) return null;
 
-      // Calculate ratios as top odds divided by fair odds for each selected fair odds bookie
-      const availableRatios: Array<{fairBookie: string, ratio: number}> = [];
+      // Calculate fair odds for each selected fair odds bookie
+      const availableFairOdds: Array<{fairBookie: string, fairOdds: number}> = [];
 
       fixture.fair_odds.forEach((fairOddsData: BookieOdds) => {
         // Only consider selected fair odds bookies
@@ -646,41 +691,41 @@ export function FixtureOdds({
           // Get the fair odds for this outcome
           if (fairOddsData.fair_odds_x12.x12[outcomeIndex] > 0) {
             const fairOddsDecimal = fairOddsData.fair_odds_x12.x12[outcomeIndex] / Math.pow(10, fairOddsData.decimals);
-            const topOddsDecimal = topOddsData.odds;
 
-            // Calculate ratio as top odds / fair odds
-            const ratio = topOddsDecimal / fairOddsDecimal;
-
-            availableRatios.push({
+            availableFairOdds.push({
               fairBookie: fairOddsData.bookie,
-              ratio: ratio
+              fairOdds: fairOddsDecimal
             });
           }
         }
       });
 
-      if (availableRatios.length === 0) return null;
+      if (availableFairOdds.length === 0) return null;
 
       // Check required bookies criterion
       const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
       if (requiredFairBookies.length > 0) {
         const hasRequiredBookie = requiredFairBookies.some(requiredBookie =>
-          availableRatios.some(r => r.fairBookie === requiredBookie)
+          availableFairOdds.some(f => f.fairBookie === requiredBookie)
         );
         if (!hasRequiredBookie) return null;
       }
 
-      // Apply filter method - same as values page
-      let displayRatio = 0;
+      // Apply filter method - calculate average fair odds first, then divide by top odds
+      let avgFairOdds = 0;
 
       if (filterMethod === 'average') {
-        displayRatio = calculateWeightedAverage(availableRatios, fairOddsBookies);
+        avgFairOdds = calculateWeightedAverageFairOdds(availableFairOdds, fairOddsBookies);
       } else if (filterMethod === 'above_all') {
-        displayRatio = Math.min(...availableRatios.map(r => r.ratio));
+        // For above_all, use the highest fair odds (most conservative)
+        avgFairOdds = Math.max(...availableFairOdds.map(f => f.fairOdds));
       } else {
-        // Individual - show the highest
-        displayRatio = Math.max(...availableRatios.map(r => r.ratio));
+        // Individual - use the lowest fair odds (least conservative)
+        avgFairOdds = Math.min(...availableFairOdds.map(f => f.fairOdds));
       }
+
+      const topOddsDecimal = topOddsData.odds;
+      const displayRatio = avgFairOdds > 0 ? topOddsDecimal / avgFairOdds : 0;
 
       return displayRatio > 0 ? { ratio: displayRatio, bookie: '' } : null;
     };
@@ -869,8 +914,8 @@ export function FixtureOdds({
       const topOddsData = getTopOdds(line, oddsKey);
       if (!topOddsData) return null;
 
-      // Calculate ratios as top odds divided by fair odds for each selected fair odds bookie
-      const availableRatios: Array<{fairBookie: string, ratio: number}> = [];
+      // Calculate fair odds for each selected fair odds bookie
+      const availableFairOdds: Array<{fairBookie: string, fairOdds: number}> = [];
 
       fixture.fair_odds.forEach((fairOddsData: BookieOdds) => {
         // Only consider selected fair odds bookies
@@ -914,38 +959,40 @@ export function FixtureOdds({
           }
 
           if (fairOddsValue > 0) {
-            // Calculate ratio as top odds / fair odds
-            const ratio = topOddsData.odds / fairOddsValue;
-            availableRatios.push({
+            availableFairOdds.push({
               fairBookie: fairOddsData.bookie,
-              ratio: ratio
+              fairOdds: fairOddsValue
             });
           }
         }
       });
 
-      if (availableRatios.length === 0) return null;
+      if (availableFairOdds.length === 0) return null;
 
       // Check required bookies criterion
       const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
       if (requiredFairBookies.length > 0) {
         const hasRequiredBookie = requiredFairBookies.some(requiredBookie =>
-          availableRatios.some(r => r.fairBookie === requiredBookie)
+          availableFairOdds.some(f => f.fairBookie === requiredBookie)
         );
         if (!hasRequiredBookie) return null;
       }
 
-      // Apply filter method - same as values page
-      let displayRatio = 0;
+      // Apply filter method - calculate average fair odds first, then divide by top odds
+      let avgFairOdds = 0;
 
       if (filterMethod === 'average') {
-      displayRatio = calculateWeightedAverage(availableRatios, fairOddsBookies);
+        avgFairOdds = calculateWeightedAverageFairOdds(availableFairOdds, fairOddsBookies);
       } else if (filterMethod === 'above_all') {
-        displayRatio = Math.min(...availableRatios.map(r => r.ratio));
+        // For above_all, use the highest fair odds (most conservative)
+        avgFairOdds = Math.max(...availableFairOdds.map(f => f.fairOdds));
       } else {
-        // Individual - show the highest
-        displayRatio = Math.max(...availableRatios.map(r => r.ratio));
+        // Individual - use the lowest fair odds (least conservative)
+        avgFairOdds = Math.min(...availableFairOdds.map(f => f.fairOdds));
       }
+
+      const topOddsDecimal = topOddsData.odds;
+      const displayRatio = avgFairOdds > 0 ? topOddsDecimal / avgFairOdds : 0;
 
       return displayRatio > 0 ? { ratio: displayRatio, bookie: '' } : null;
     };

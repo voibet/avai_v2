@@ -99,6 +99,11 @@ interface Fixture {
   season: number;
   round: string;
   updated_at: string;
+  avg_goals_league: number | null;
+  home_advantage: number | null;
+  elo_home: number | null;
+  elo_away: number | null;
+  league_elo: number | null;
 }
 
 interface ExpectedPointsResult {
@@ -284,6 +289,20 @@ async function getLeagueWithStandings(request: Request, { params }: { params: { 
             // Use predictions for future fixtures
             homeXg = fixture.home_pred;
             awayXg = fixture.away_pred;
+          } else if (!isPastFixture && fixture.avg_goals_league && fixture.home_advantage !== null && fixture.elo_home && fixture.elo_away) {
+            // Use league averages, home advantage, and ELO ratings as fallback for future fixtures without predictions
+            const leagueAvgGoals = fixture.avg_goals_league;
+            const homeAdvantage = fixture.home_advantage;
+            const homeElo = fixture.elo_home;
+            const awayElo = fixture.elo_away;
+
+            // Base calculation using league average and home advantage
+            const baseHomeXg = (leagueAvgGoals / 2) + (homeAdvantage / 2);
+            const baseAwayXg = (leagueAvgGoals / 2) - (homeAdvantage / 2);
+
+            // Adjust by ELO ratio
+            homeXg = baseHomeXg * (homeElo / awayElo);
+            awayXg = baseAwayXg * (awayElo / homeElo);
           } else {
             // Skip if we don't have the required data
             return;

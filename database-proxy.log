@@ -1,0 +1,15 @@
+2025-11-11 17:14:26,254 - INFO - Auto-detected WSL IP: 172.29.253.202
+2025-11-11 17:14:26,255 - INFO - Database Proxy initialized:
+2025-11-11 17:14:26,255 - INFO -   Listening on: 127.0.0.1:5432
+2025-11-11 17:14:26,255 - INFO -   Forwarding to: 172.29.253.202:5432
+2025-11-11 17:14:30,388 - INFO - Auto-detected WSL IP: 172.29.253.202
+2025-11-11 17:14:30,388 - INFO - Database Proxy initialized:
+2025-11-11 17:14:30,388 - INFO -   Listening on: 127.0.0.1:5432
+2025-11-11 17:14:30,388 - INFO -   Forwarding to: 172.29.253.202:5432
+2025-11-11 17:14:30,389 - INFO - Database proxy started on 127.0.0.1:5432
+2025-11-11 17:14:30,389 - INFO - Forwarding to 172.29.253.202:5432
+2025-11-11 17:14:30,389 - INFO - Press Ctrl+C to stop
+2025-11-11 17:17:40,642 - INFO - Auto-detected WSL IP: 172.29.253.202
+2025-11-11 17:17:40,642 - INFO - Database Proxy initialized:
+2025-11-11 17:17:40,642 - INFO -   Listening on: 0.0.0.0:5432
+2025-11-11 17:17:40,643 - INFO -   Forwarding to: 172.29.253.202:5432

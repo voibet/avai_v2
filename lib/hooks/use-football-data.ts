@@ -185,8 +185,8 @@ export function useFixtureStats(fixtureId: string | null) {
   return useApi<{
     stats: {
       updated_at: string;
-      hours_since_last_match_home: number | null;
-      hours_since_last_match_away: number | null;
+      hours_since_last_match_home: number;
+      hours_since_last_match_away: number;
       avg_goals_league: number | null;
       elo_home: number | null;
       elo_away: number | null;

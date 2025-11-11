@@ -18,7 +18,7 @@
  * RUN: $env:DB_USER='postgres'; $env:DB_PASSWORD='NopoONpelle31?'; $env:DB_HOST='172.29.253.202'; $env:DB_PORT='5432'; $env:DB_NAME='mydb'; $env:DB_SSL='false'; npx ts-node run-calculations.js [function] [--fixture-ids=id1,id2,id3] [--views]
  *
  * OPTIONS:
- *   function: '1' or 'hours', '2' or 'goals', '3' or 'elo', '4' or 'home-advantage', '5' or 'xg' or 'rolling-xg', '6' or 'market-xg', '7' or 'prediction-odds' or 'odds', 'all' (default)
+ *   function: '1' or 'hours', '2' or 'goals', '3' or 'elo', '4' or 'home-advantage', '5' or 'xg' or 'rolling-xg', '6' or 'market-xg', '7' or 'prediction-odds' or 'odds', '8' or 'cleanup-odds', 'all' (default)
  *   Multiple functions can be specified comma-separated, e.g., '2,5' to run goals and rolling-xg calculations
  *   --fixture-ids=id1,id2,id3: Process only specific fixture IDs (comma-separated)
  *   --views: Create & populate auto-updating calculated odds tables (payouts, fair_odds) + drop old views
@@ -31,6 +31,7 @@
 import pool from './lib/database/db.ts';
 import { calculateMarketXG } from './calculators/market-xg.js';
 import { calculateOddsFromPredictions } from './calculators/prediction-odds.js';
+import { cleanupPastFixturesOdds } from './calculators/cleanup-odds.js';
 
 
 async function runCalculations() {
@@ -63,14 +64,14 @@ async function runCalculations() {
         SELECT
             f.id,
             CASE
-                WHEN lm_home.hours_diff IS NULL THEN NULL
-                WHEN lm_home.hours_diff < 24 THEN NULL
+                WHEN lm_home.hours_diff IS NULL THEN 168        -- First match ever: 1 week (168 hours)
+                WHEN lm_home.hours_diff < 24 THEN 24             -- Under 24 hours: set to 24 hours minimum
                 WHEN lm_home.hours_diff > 500 THEN 500
                 ELSE lm_home.hours_diff::INTEGER
             END,
             CASE
-                WHEN lm_away.hours_diff IS NULL THEN NULL
-                WHEN lm_away.hours_diff < 24 THEN NULL
+                WHEN lm_away.hours_diff IS NULL THEN 168        -- First match ever: 1 week (168 hours)
+                WHEN lm_away.hours_diff < 24 THEN 24             -- Under 24 hours: set to 24 hours minimum
                 WHEN lm_away.hours_diff > 500 THEN 500
                 ELSE lm_away.hours_diff::INTEGER
             END
@@ -253,7 +254,9 @@ async function runCalculations() {
     $$ LANGUAGE plpgsql;
 
     -- Function to calculate and update ELO ratings with full recalculation
-    -- ELO SYSTEM: Teams start with league base ELO from football_initial_league_elos
+    -- ELO SYSTEM: Teams start with league base ELO from football_initial_league_elos (except World leagues)
+    -- For World leagues: use current league ELO - 100 or 1450 fallback
+    -- For other leagues: use football_initial_league_elos, then league ELO - 100, then 1450
     -- Then evolve individually based on match results across all competitions
     -- Always recalculates ALL fixtures from the beginning for complete data consistency
     -- Calculates team ELOs first (each team has one rating that evolves individually)
@@ -281,7 +284,8 @@ async function runCalculations() {
         new_home_elo INTEGER;
         new_away_elo INTEGER;
     BEGIN
-        -- CORRECT ELO SYSTEM: Teams start with league base ELO from football_initial_league_elos
+        -- CORRECT ELO SYSTEM: Teams start with league base ELO from football_initial_league_elos (except World leagues)
+        -- World leagues skip football_initial_league_elos and go directly to league ELO - 100 or 1450 fallback
         -- Then evolve individually based on match results across all competitions
 
         -- Create temporary table for league ELO ratings
@@ -315,9 +319,36 @@ async function runCalculations() {
             ORDER BY f.date ASC, f.id ASC
         LOOP
             -- Get league base ELO for initialization of new teams
-            SELECT COALESCE(base_elo, 1500) INTO league_base_elo
-            FROM league_elo_ratings
-            WHERE league_id = fixture_record.league_id;
+            -- For World leagues: skip football_initial_league_elos, go directly to league_elo - 100 or 1450
+            -- For other leagues: try football_initial_league_elos first, then league_elo - 100, then 1450
+            SELECT CASE
+                WHEN l.country = 'World' THEN
+                    COALESCE(
+                        (SELECT GREATEST(league_elo - 100, 1000)
+                         FROM football_stats fs
+                         JOIN football_fixtures f ON fs.fixture_id = f.id
+                         WHERE f.league_id = fixture_record.league_id
+                           AND fs.league_elo IS NOT NULL
+                         ORDER BY f.date DESC
+                         LIMIT 1),
+                        1450
+                    )
+                ELSE
+                    COALESCE(
+                        ler.base_elo,
+                        (SELECT GREATEST(league_elo - 100, 1000)
+                         FROM football_stats fs
+                         JOIN football_fixtures f ON fs.fixture_id = f.id
+                         WHERE f.league_id = fixture_record.league_id
+                           AND fs.league_elo IS NOT NULL
+                         ORDER BY f.date DESC
+                         LIMIT 1),
+                        1450
+                    )
+            END INTO league_base_elo
+            FROM football_leagues l
+            LEFT JOIN league_elo_ratings ler ON ler.league_id = fixture_record.league_id
+            WHERE l.id = fixture_record.league_id;
 
             -- Set K-factor based on league country
             -- Default K-factor = 30, but "World" leagues get K-factor = 50 for more volatility
@@ -1109,6 +1140,106 @@ async function runCalculations() {
         RETURN GREATEST(hours_count, goals_count, home_advantage_count, elo_count, xg_count, market_xg_count);
     END;
     $$ LANGUAGE plpgsql;
+
+    -- ============================================
+    -- TRIGGERS FOR AUTOMATIC TIMESTAMPS AND NOTIFICATIONS
+    -- ============================================
+
+    -- Function to update updated_at column for football_odds
+    CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
+    BEGIN NEW.updated_at = now(); RETURN NEW; END; $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_set_updated_at ON football_odds;
+    CREATE TRIGGER trg_set_updated_at
+    BEFORE UPDATE ON football_odds
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+    -- Function to notify SSE listeners when odds are updated
+    CREATE OR REPLACE FUNCTION notify_odds_update() RETURNS trigger AS $$
+    BEGIN
+      PERFORM pg_notify('odds_updates', NEW.fixture_id::text);
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_notify_odds_update ON football_odds;
+    CREATE TRIGGER trg_notify_odds_update
+    AFTER INSERT OR UPDATE ON football_odds
+    FOR EACH ROW EXECUTE FUNCTION notify_odds_update();
+
+    -- Function to notify SSE listeners when fixtures are updated
+    CREATE OR REPLACE FUNCTION notify_fixture_update() RETURNS trigger AS $$
+    BEGIN
+      PERFORM pg_notify('fixture_update_' || NEW.id::text, '');
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_notify_fixture_update ON football_fixtures;
+    CREATE TRIGGER trg_notify_fixture_update
+    AFTER INSERT OR UPDATE ON football_fixtures
+    FOR EACH ROW EXECUTE FUNCTION notify_fixture_update();
+
+    -- Function to update updated_at column
+    CREATE OR REPLACE FUNCTION update_updated_at_column()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        NEW.updated_at = NOW();
+        RETURN NEW;
+    END;
+    $$ language 'plpgsql';
+
+    -- Apply updated_at triggers to all relevant tables
+    CREATE TRIGGER update_football_fixtures_updated_at
+        BEFORE UPDATE ON football_fixtures
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE TRIGGER update_football_odds_updated_at
+        BEFORE UPDATE ON football_odds
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE TRIGGER update_football_predictions_updated_at
+        BEFORE UPDATE ON football_predictions
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE TRIGGER update_football_stats_updated_at
+        BEFORE UPDATE ON football_stats
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+
+    CREATE TRIGGER update_football_initial_league_elos_updated_at
+        BEFORE UPDATE ON football_initial_league_elos
+        FOR EACH ROW
+        EXECUTE FUNCTION update_updated_at_column();
+
+    -- Trigger to update all calculated odds tables when odds change
+    CREATE OR REPLACE FUNCTION update_calculated_odds_data() RETURNS TRIGGER AS $$
+    DECLARE
+        fixture_id BIGINT;
+    BEGIN
+        -- Handle INSERT/UPDATE vs DELETE operations
+        fixture_id := COALESCE(NEW.fixture_id, OLD.fixture_id);
+
+        -- Update all calculated tables for this fixture
+        PERFORM update_payouts_for_fixture(fixture_id);
+        PERFORM update_fair_odds_for_fixture(fixture_id);
+
+        -- Return appropriate value for AFTER trigger
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        ELSE
+            RETURN NEW;
+        END IF;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_update_calculated_odds ON football_odds;
+    CREATE TRIGGER trg_update_calculated_odds
+        AFTER INSERT OR UPDATE OR DELETE ON football_odds
+        FOR EACH ROW EXECUTE FUNCTION update_calculated_odds_data();
     `;
 
     await pool.query(sql);
@@ -2159,42 +2290,6 @@ async function runCalculations() {
         console.log('⏭️  Skipping database setup (use --views to enable)');
     }
 
-    // Create calculated odds trigger (needed regardless of --views flag)
-    console.log('Creating calculated odds trigger...');
-    try {
-        await pool.query(`
-                -- Trigger function to update all calculated odds tables
-            CREATE OR REPLACE FUNCTION update_calculated_odds_data() RETURNS TRIGGER AS $$
-            DECLARE
-                fixture_id BIGINT;
-            BEGIN
-                -- Handle INSERT/UPDATE vs DELETE operations
-                fixture_id := COALESCE(NEW.fixture_id, OLD.fixture_id);
-
-                -- Update all calculated tables for this fixture
-                PERFORM update_payouts_for_fixture(fixture_id);
-                PERFORM update_fair_odds_for_fixture(fixture_id);
-
-                -- Return appropriate value for AFTER trigger
-                IF TG_OP = 'DELETE' THEN
-                    RETURN OLD;
-                ELSE
-                    RETURN NEW;
-                END IF;
-            END;
-            $$ LANGUAGE plpgsql;
-
-            -- Trigger on football_odds to automatically update calculated tables
-            DROP TRIGGER IF EXISTS trg_update_calculated_odds ON football_odds;
-            CREATE TRIGGER trg_update_calculated_odds
-                AFTER INSERT OR UPDATE OR DELETE ON football_odds
-                FOR EACH ROW EXECUTE FUNCTION update_calculated_odds_data();
-        `);
-        console.log('✅ Calculated odds trigger created');
-    } catch (error) {
-        console.error('❌ Error creating calculated odds trigger:', error.message);
-        throw error;
-    }
 
     // Create all statistical functions (needed regardless of --views flag)
     console.log('Creating database functions...');
@@ -2278,6 +2373,13 @@ async function runCalculations() {
             const count = await calculateOddsFromPredictions(fixtureIds);
             totalCount += count;
             console.log(`✅ Prediction odds calculations completed: ${count} fixtures processed`);
+        }
+
+        if (functionsToRun.includes('8') || functionsToRun.includes('cleanup-odds')) {
+            console.log('Running odds cleanup for past fixtures...');
+            const result = await cleanupPastFixturesOdds();
+            totalCount += result.cleanedRecords;
+            console.log(`✅ Odds cleanup completed: ${result.processedFixtures} fixtures processed, ${result.cleanedRecords} records cleaned`);
         }
 
         console.log(`✅ Selected calculations completed: ${totalCount} fixtures processed total`);

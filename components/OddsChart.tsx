@@ -39,7 +39,7 @@ export function OddsChart({
   // Helper function to format odds value
   const formatOdds = (value: number) => {
     const divisor = Math.pow(10, decimals);
-    return (value / divisor).toFixed(2);
+    return (value / divisor).toFixed(3);
   };
 
   // Sort by timestamp (oldest first) to properly filter changes
@@ -278,7 +278,7 @@ export function OddsChart({
                 className="font-mono"
                 textAnchor="start"
               >
-                {value.toFixed(2)}
+                {value.toFixed(3)}
               </text>
             );
           }
