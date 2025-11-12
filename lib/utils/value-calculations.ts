@@ -2,6 +2,8 @@
  * Shared utility functions for value calculations and odds processing
  */
 
+import type { BookieOdds } from './value-analysis';
+
 export interface BookieConfig {
   bookie: string;
   required: boolean;
@@ -247,39 +249,79 @@ export function getFairOddsForOutcome(
 
       if (targetLine !== undefined && fairLines) {
         if (type === 'ah' && fairLines.ah) {
-          fairLineIndex = fairLines.ah.indexOf(targetLine)
+          fairLineIndex = fairLines.ah.findIndex((l: number) => Math.abs(l - targetLine) < 0.0001)
         } else if (type === 'ou' && fairLines.ou) {
-          fairLineIndex = fairLines.ou.indexOf(targetLine)
+          fairLineIndex = fairLines.ou.findIndex((l: number) => Math.abs(l - targetLine) < 0.0001)
         }
       }
 
-      if (fairLineIndex !== -1) {
-        if (type === 'ah') {
-          if (fairOddsEntry.fair_odds_ah) {
-            if (oddsIndex === 0 && fairOddsEntry.fair_odds_ah.fair_ah_a && fairOddsEntry.fair_odds_ah.fair_ah_a[fairLineIndex] > 0) {
-              outcomeFairOdds = fairOddsEntry.fair_odds_ah.fair_ah_a[fairLineIndex] / Math.pow(10, fairOddsEntry.decimals)
-            } else if (oddsIndex === 1 && fairOddsEntry.fair_odds_ah.fair_ah_h && fairOddsEntry.fair_odds_ah.fair_ah_h[fairLineIndex] > 0) {
-              outcomeFairOdds = fairOddsEntry.fair_odds_ah.fair_ah_h[fairLineIndex] / Math.pow(10, fairOddsEntry.decimals)
-            }
-          }
-        } else if (type === 'ou') {
-          if (fairOddsEntry.fair_odds_ou) {
-            if (oddsIndex === 0 && fairOddsEntry.fair_odds_ou.fair_ou_o && fairOddsEntry.fair_odds_ou.fair_ou_o[fairLineIndex] > 0) {
-              outcomeFairOdds = fairOddsEntry.fair_odds_ou.fair_ou_o[fairLineIndex] / Math.pow(10, fairOddsEntry.decimals)
-            } else if (oddsIndex === 1 && fairOddsEntry.fair_odds_ou.fair_ou_u && fairOddsEntry.fair_odds_ou.fair_ou_u[fairLineIndex] > 0) {
-              outcomeFairOdds = fairOddsEntry.fair_odds_ou.fair_ou_u[fairLineIndex] / Math.pow(10, fairOddsEntry.decimals)
-            }
-          }
-        }
-      }
+      outcomeFairOdds = getFairOddsValueForOutcome(fairOddsEntry, type, oddsIndex, targetLine, fairLines);
     }
 
-    if (outcomeFairOdds > 0) {
+    if (outcomeFairOdds > 1) {
       fairOdds.push({fairBookie: fairOddsEntry.bookie, fairOdds: outcomeFairOdds})
     }
   })
 
   return fairOdds
+}
+
+/**
+ * Gets the fair odds value for a specific outcome, with validation for AH/OU
+ * @param fairOddsData The fair odds data for a bookie
+ * @param type The bet type ('x12', 'ah', 'ou')
+ * @param oddsIndex The index within the bet type
+ * @param targetLine The target line value (for AH/OU)
+ * @param fairLines The fair lines array (for AH/OU)
+ * @returns The fair odds value in decimal, or 0 if invalid
+ */
+export function getFairOddsValueForOutcome(
+  fairOddsData: BookieOdds,
+  type: string,
+  oddsIndex: number,
+  targetLine: number | undefined,
+  fairLinesObj: { ah?: number[], ou?: number[] } | undefined
+): number {
+  if (type === 'x12') {
+    if (fairOddsData.fair_odds_x12 && fairOddsData.fair_odds_x12.x12 && fairOddsData.fair_odds_x12.x12[oddsIndex] > 1) {
+      return fairOddsData.fair_odds_x12.x12[oddsIndex] / Math.pow(10, fairOddsData.decimals);
+    }
+  } else {
+    // AH or OU
+    const fairLines = fairLinesObj?.[type === 'ah' ? 'ah' : 'ou'] || [];
+    let fairLineIndex = -1;
+    if (targetLine !== undefined && fairLines.length > 0) {
+      fairLineIndex = fairLines.findIndex((l: number) => Math.abs(l - targetLine) < 0.0001);
+    }
+
+    if (fairLineIndex !== -1) {
+      if (type === 'ah' && fairOddsData.fair_odds_ah) {
+        const fairAhA = fairOddsData.fair_odds_ah.fair_ah_a;
+        const fairAhH = fairOddsData.fair_odds_ah.fair_ah_h;
+        if (Array.isArray(fairAhA) && Array.isArray(fairAhH) &&
+            fairAhA[fairLineIndex] > 1 && fairAhH[fairLineIndex] > 1) {
+          if (oddsIndex === 0 && fairAhA[fairLineIndex] > 1) {
+            return fairAhA[fairLineIndex] / Math.pow(10, fairOddsData.decimals);
+          } else if (oddsIndex === 1 && fairAhH[fairLineIndex] > 1) {
+            return fairAhH[fairLineIndex] / Math.pow(10, fairOddsData.decimals);
+          }
+        }
+      } else if (type === 'ou' && fairOddsData.fair_odds_ou) {
+        const fairOuO = fairOddsData.fair_odds_ou.fair_ou_o;
+        const fairOuU = fairOddsData.fair_odds_ou.fair_ou_u;
+        if (Array.isArray(fairOuO) && Array.isArray(fairOuU) &&
+            fairOuO[fairLineIndex] > 1 && fairOuU[fairLineIndex] > 1) {
+          if (oddsIndex === 0 && fairOuO[fairLineIndex] > 1) {
+            return fairOuO[fairLineIndex] / Math.pow(10, fairOddsData.decimals);
+          } else if (oddsIndex === 1 && fairOuU[fairLineIndex] > 1) {
+            return fairOuU[fairLineIndex] / Math.pow(10, fairOddsData.decimals);
+          }
+        }
+      }
+    }
+  }
+
+  return 0;
 }
 
 /**

@@ -126,4 +126,78 @@ function poissonProbabilities(homeXg, awayXg, overLine = 2.5, maxGoals = 10, use
   return { homeWin, draw, awayWin, over };
 }
 
-export { poissonPMF, poissonProbabilities, dixonColesAdjustment };
+/**
+ * Calculate Asian Handicap probabilities using Dixon-Coles Poisson model with dynamic rho
+ * Mirrors poissonProbabilities but applies handicap and excludes pushes
+ * 
+ * @param {number} homeXg - Home team expected goals
+ * @param {number} awayXg - Away team expected goals
+ * @param {number} handicap - Handicap line applied to home team
+ * @param {number} maxGoals - Max goals to calculate (default 10)
+ * @param {boolean} useDixonColes - Apply Dixon-Coles correction (default true)
+ * @param {number} rho - Base rho value (default -0.1)
+ * @param {number} homeAdjustment - Additional multiplier for home team (default 1)
+ * @param {number} awayAdjustment - Additional multiplier for away team (default 1)
+ * @param {number} userRho - User adjustment to rho (default 0)
+ */
+function poissonAsianHandicapProbabilities(homeXg, awayXg, handicap, maxGoals = 10, useDixonColes = true, rho = -0.1, homeAdjustment = 1, awayAdjustment = 1, userRho = 0) {
+  // Dynamic rho adjustment based on total goals, with user override
+  const totalGoals = homeXg + awayXg;
+  const dynamicRho = useDixonColes ? (-0.05 * totalGoals * 0.42 - userRho) : rho;
+  
+  // Calculate dynamic favorite boost based on goal difference
+  const goalDiff = Math.abs(homeXg - awayXg);
+  const favBoostMultiplier = 0.12;
+  const favouriteBoost = goalDiff * favBoostMultiplier + 1;
+  
+  // Apply favorite boost with additional manual adjustments
+  const finalHomeAdj = (homeXg > awayXg ? favouriteBoost : 2 - favouriteBoost) * homeAdjustment;
+  const finalAwayAdj = (awayXg > homeXg ? favouriteBoost : 2 - favouriteBoost) * awayAdjustment;
+  
+  let homeWinProb = 0;
+  let awayWinProb = 0;
+  let totalProb = 0;
+
+  // Calculate all score probabilities
+  for (let i = 0; i <= maxGoals; i++) {
+    for (let j = 0; j <= maxGoals; j++) {
+      // Basic Poisson probability
+      let prob = poissonPMF(i, homeXg) * poissonPMF(j, awayXg);
+
+      // Apply Dixon-Coles adjustment for low scores
+      if (useDixonColes && (i <= 1 && j <= 1)) {
+        prob *= dixonColesAdjustment(i, j, homeXg, awayXg, dynamicRho);
+      }
+
+      // Apply home/away adjustments based on raw score (pre-handicap)
+      if (i > j) {
+        prob *= finalHomeAdj;
+      } else if (j > i) {
+        prob *= finalAwayAdj;
+      }
+      // Draws get no adjustment (prob remains as is)
+
+      // Apply handicap to home team score
+      const adjustedHomeScore = i + handicap;
+
+      // Classify outcome
+      if (adjustedHomeScore > j) {
+        homeWinProb += prob;
+      } else if (adjustedHomeScore < j) {
+        awayWinProb += prob;
+      }
+      // If equal, it's a push - exclude from totalProb
+    }
+  }
+
+  // Normalize probabilities (exclude push scenarios)
+  totalProb = homeWinProb + awayWinProb;
+  if (totalProb > 0) {
+    homeWinProb /= totalProb;
+    awayWinProb /= totalProb;
+  }
+
+  return { homeWinProb, awayWinProb };
+}
+
+export { poissonPMF, poissonProbabilities, dixonColesAdjustment, poissonAsianHandicapProbabilities };

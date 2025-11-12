@@ -16,7 +16,7 @@
  *
  * USAGE:
  * RUN: $env:DB_USER='postgres'; $env:DB_PASSWORD='NopoONpelle31?'; $env:DB_HOST='172.29.253.202'; $env:DB_PORT='5432'; $env:DB_NAME='mydb'; $env:DB_SSL='false'; npx ts-node run-calculations.js [function] [--fixture-ids=id1,id2,id3] [--views]
- *
+ * 
  * OPTIONS:
  *   function: '1' or 'hours', '2' or 'goals', '3' or 'elo', '4' or 'home-advantage', '5' or 'xg' or 'rolling-xg', '6' or 'market-xg', '7' or 'prediction-odds' or 'odds', '8' or 'cleanup-odds', 'all' (default)
  *   Multiple functions can be specified comma-separated, e.g., '2,5' to run goals and rolling-xg calculations
@@ -1190,26 +1190,31 @@ async function runCalculations() {
     $$ language 'plpgsql';
 
     -- Apply updated_at triggers to all relevant tables
+    DROP TRIGGER IF EXISTS update_football_fixtures_updated_at ON football_fixtures;
     CREATE TRIGGER update_football_fixtures_updated_at
         BEFORE UPDATE ON football_fixtures
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at_column();
 
+    DROP TRIGGER IF EXISTS update_football_odds_updated_at ON football_odds;
     CREATE TRIGGER update_football_odds_updated_at
         BEFORE UPDATE ON football_odds
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at_column();
 
+    DROP TRIGGER IF EXISTS update_football_predictions_updated_at ON football_predictions;
     CREATE TRIGGER update_football_predictions_updated_at
         BEFORE UPDATE ON football_predictions
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at_column();
 
+    DROP TRIGGER IF EXISTS update_football_stats_updated_at ON football_stats;
     CREATE TRIGGER update_football_stats_updated_at
         BEFORE UPDATE ON football_stats
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at_column();
 
+    DROP TRIGGER IF EXISTS update_football_initial_league_elos_updated_at ON football_initial_league_elos;
     CREATE TRIGGER update_football_initial_league_elos_updated_at
         BEFORE UPDATE ON football_initial_league_elos
         FOR EACH ROW

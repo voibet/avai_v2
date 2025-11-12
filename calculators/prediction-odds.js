@@ -6,7 +6,7 @@
  */
 
 import pool from '../lib/database/db.ts';
-import { poissonPMF, poissonProbabilities, dixonColesAdjustment } from './poisson-utils.js';
+import { poissonPMF, poissonProbabilities, dixonColesAdjustment, poissonAsianHandicapProbabilities } from './poisson-utils.js';
 
 /**
  * Calculate Asian Handicap probabilities using Dixon-Coles Poisson
@@ -43,47 +43,8 @@ function calculateAsianHandicap(homeXg, awayXg, handicap, maxGoals = 10, useDixo
     };
   }
 
-  // Non-quarter handicap: calculate normally
-  let homeWinProb = 0;
-  let awayWinProb = 0;
-
-  for (let i = 0; i <= maxGoals; i++) {
-    for (let j = 0; j <= maxGoals; j++) {
-      // Basic Poisson probability
-      let prob = poissonPMF(i, homeXg) * poissonPMF(j, awayXg);
-
-      // Apply Dixon-Coles adjustment
-      if (useDixonColes && (i <= 1 && j <= 1)) {
-        prob *= dixonColesAdjustment(i, j, homeXg, awayXg, rho);
-      }
-
-      // Apply home/away adjustments based on who's leading
-      if (i > j) {
-        prob *= homeAdjustment;
-      } else if (j > i) {
-        prob *= awayAdjustment;
-      }
-
-      // Apply handicap to home team score
-      const adjustedHomeScore = i + handicap;
-
-      if (adjustedHomeScore > j) {
-        homeWinProb += prob;
-      } else if (adjustedHomeScore < j) {
-        awayWinProb += prob;
-      }
-      // If equal, it's a push (refunded) - not counted in either probability
-    }
-  }
-
-  // Normalize probabilities (exclude push scenarios)
-  const totalProb = homeWinProb + awayWinProb;
-  if (totalProb > 0) {
-    homeWinProb /= totalProb;
-    awayWinProb /= totalProb;
-  }
-
-  return { homeWinProb, awayWinProb };
+  // Non-quarter handicap: delegate to utils function
+  return poissonAsianHandicapProbabilities(homeXg, awayXg, handicap, maxGoals, useDixonColes, rho, homeAdjustment, awayAdjustment, userRho);
 }
 
 /**

@@ -171,11 +171,10 @@ export function analyzeValueOpportunities(
         // Calculate AH ratios with line matching
         if (oddsBookieData.odds_ah && oddsBookieData.odds_ah.length > 0 &&
             fairOddsBookieData.fair_odds_ah &&
-            fairOddsBookieData.fair_odds_ah.fair_ah_a && areAllOddsValid(fairOddsBookieData.fair_odds_ah.fair_ah_a) &&
-            fairOddsBookieData.fair_odds_ah.fair_ah_h && areAllOddsValid(fairOddsBookieData.fair_odds_ah.fair_ah_h) &&
+            fairOddsBookieData.fair_odds_ah.fair_ah_a && fairOddsBookieData.fair_odds_ah.fair_ah_h &&
             (!fairOddsBookieData.odds_ah || fairOddsBookieData.fair_odds_ah.t === fairOddsBookieData.odds_ah[0].t) &&
             (!fairOddsBookieData.odds_ah || fairOddsBookieData.odds_ah.length === 0 ||
-             (areAllOddsValid(fairOddsBookieData.odds_ah[0].ah_a) && areAllOddsValid(fairOddsBookieData.odds_ah[0].ah_h)))) {
+             (fairOddsBookieData.odds_ah[0].ah_a && fairOddsBookieData.odds_ah[0].ah_h))) {
           const oddsBookieAH = oddsBookieData.odds_ah[0]
           const oddsBookieLines = oddsBookieData.lines?.[0]?.ah || []
           const fairBookieAH = fairOddsBookieData.fair_odds_ah
@@ -186,7 +185,7 @@ export function analyzeValueOpportunities(
 
           // Find matching lines and calculate ratios
           oddsBookieLines.forEach((oddsLine, oddsIndex) => {
-            const fairIndex = fairBookieLines.indexOf(oddsLine)
+            const fairIndex = fairBookieLines.findIndex((l) => Math.abs(l - oddsLine) < 0.0001)
             if (fairIndex === -1) {
               ratios_ah_a.push(0)
               ratios_ah_h.push(0)
@@ -249,11 +248,10 @@ export function analyzeValueOpportunities(
         // Calculate OU ratios with line matching
         if (oddsBookieData.odds_ou && oddsBookieData.odds_ou.length > 0 &&
             fairOddsBookieData.fair_odds_ou &&
-            fairOddsBookieData.fair_odds_ou.fair_ou_o && areAllOddsValid(fairOddsBookieData.fair_odds_ou.fair_ou_o) &&
-            fairOddsBookieData.fair_odds_ou.fair_ou_u && areAllOddsValid(fairOddsBookieData.fair_odds_ou.fair_ou_u) &&
+            fairOddsBookieData.fair_odds_ou.fair_ou_o && fairOddsBookieData.fair_odds_ou.fair_ou_u &&
             (!fairOddsBookieData.odds_ou || fairOddsBookieData.fair_odds_ou.t === fairOddsBookieData.odds_ou[0].t) &&
             (!fairOddsBookieData.odds_ou || fairOddsBookieData.odds_ou.length === 0 ||
-             (areAllOddsValid(fairOddsBookieData.odds_ou[0].ou_o) && areAllOddsValid(fairOddsBookieData.odds_ou[0].ou_u)))) {
+             (fairOddsBookieData.odds_ou[0].ou_o && fairOddsBookieData.odds_ou[0].ou_u))) {
           const oddsBookieOU = oddsBookieData.odds_ou[0]
           const oddsBookieLines = oddsBookieData.lines?.[0]?.ou || []
           const fairBookieOU = fairOddsBookieData.fair_odds_ou
@@ -264,7 +262,7 @@ export function analyzeValueOpportunities(
 
           // Find matching lines and calculate ratios
           oddsBookieLines.forEach((oddsLine, oddsIndex) => {
-            const fairIndex = fairBookieLines.indexOf(oddsLine)
+            const fairIndex = fairBookieLines.findIndex((l) => Math.abs(l - oddsLine) < 0.0001)
             if (fairIndex === -1) {
               ratios_ou_o.push(0)
               ratios_ou_u.push(0)

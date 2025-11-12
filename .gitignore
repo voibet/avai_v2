@@ -20,6 +20,8 @@
 *.pem
 
 # python
+match-pinnacle-fixtures.py
+database-proxy.py
 __pycache__/
 
 # debug

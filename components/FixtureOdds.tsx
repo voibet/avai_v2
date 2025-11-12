@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
-import { calculateWeightedAverageFairOdds, getOddsDivisor } from '@/lib/utils/value-calculations';
+import { calculateWeightedAverageFairOdds, getOddsDivisor, getFairOddsValueForOutcome } from '@/lib/utils/value-calculations';
 import type { BookieOdds } from '@/lib/utils/value-analysis';
 
 /**
@@ -75,7 +75,6 @@ export function FixtureOdds({
   const [oddsData, setOddsData] = useState<OddsData | null>(propOddsData || null);
   const [oddsLoading, setOddsLoading] = useState(!propOddsData);
   const [oddsError, setOddsError] = useState<string | null>(null);
-
 
   // Track which cells have flashed and their direction: 'up' (green) or 'down' (red)
   // Key format: "bookie:market:outcome[:line]"
@@ -925,40 +924,24 @@ export function FixtureOdds({
         // Validate fair odds data for AH/OU markets
         let isValidFairOdds = false;
         if (linesKey === 'ah' && fairOddsData.fair_odds_ah) {
-          isValidFairOdds = fairOddsData.fair_odds_ah.fair_ah_a && areAllOddsValid(fairOddsData.fair_odds_ah.fair_ah_a) &&
-                           fairOddsData.fair_odds_ah.fair_ah_h && areAllOddsValid(fairOddsData.fair_odds_ah.fair_ah_h) &&
-                           (!fairOddsData.odds_ah || fairOddsData.fair_odds_ah.t === fairOddsData.odds_ah[0].t) &&
-                           (!fairOddsData.odds_ah || fairOddsData.odds_ah.length === 0 ||
-                            (areAllOddsValid(fairOddsData.odds_ah[0].ah_a) && areAllOddsValid(fairOddsData.odds_ah[0].ah_h)));
+          isValidFairOdds = fairOddsData.fair_odds_ah.fair_ah_a && fairOddsData.fair_odds_ah.fair_ah_h &&
+                           (!fairOddsData.odds_ah || fairOddsData.fair_odds_ah.t === fairOddsData.odds_ah[0].t);
         } else if (linesKey === 'ou' && fairOddsData.fair_odds_ou) {
-          isValidFairOdds = fairOddsData.fair_odds_ou.fair_ou_o && areAllOddsValid(fairOddsData.fair_odds_ou.fair_ou_o) &&
-                           fairOddsData.fair_odds_ou.fair_ou_u && areAllOddsValid(fairOddsData.fair_odds_ou.fair_ou_u) &&
-                           (!fairOddsData.odds_ou || fairOddsData.fair_odds_ou.t === fairOddsData.odds_ou[0].t) &&
-                           (!fairOddsData.odds_ou || fairOddsData.odds_ou.length === 0 ||
-                            (areAllOddsValid(fairOddsData.odds_ou[0].ou_o) && areAllOddsValid(fairOddsData.odds_ou[0].ou_u)));
+          isValidFairOdds = fairOddsData.fair_odds_ou.fair_ou_o && fairOddsData.fair_odds_ou.fair_ou_u &&
+                           (!fairOddsData.odds_ou || fairOddsData.fair_odds_ou.t === fairOddsData.odds_ou[0].t);
         }
 
         if (!isValidFairOdds) return;
 
         // Get the fair odds for this line and side
-        const fairOddsLines = fairOddsData.fair_odds_lines?.[0]?.[linesKey] || [];
+        const fairLinesObj = fairOddsData.fair_odds_lines?.[0];
+        const fairOddsLines = fairLinesObj?.[linesKey] || [];
         const lineIndex = fairOddsLines.findIndex((l: number) => Math.abs(l - line) < 0.0001);
 
         if (lineIndex >= 0) {
-          let fairOddsValue = 0;
-          if (linesKey === 'ah' && fairOddsData.fair_odds_ah) {
-            const sideFairOdds = fairOddsData.fair_odds_ah[sideKey.replace('ratios_', 'fair_') as keyof typeof fairOddsData.fair_odds_ah];
-            if (Array.isArray(sideFairOdds) && sideFairOdds[lineIndex] > 0) {
-              fairOddsValue = sideFairOdds[lineIndex] / Math.pow(10, fairOddsData.decimals);
-            }
-          } else if (linesKey === 'ou' && fairOddsData.fair_odds_ou) {
-            const sideFairOdds = fairOddsData.fair_odds_ou[sideKey.replace('ratios_', 'fair_') as keyof typeof fairOddsData.fair_odds_ou];
-            if (Array.isArray(sideFairOdds) && sideFairOdds[lineIndex] > 0) {
-              fairOddsValue = sideFairOdds[lineIndex] / Math.pow(10, fairOddsData.decimals);
-            }
-          }
+          const fairOddsValue = getFairOddsValueForOutcome(fairOddsData, linesKey, sideKey === 'ratios_ah_a' || sideKey === 'ratios_ou_o' ? 0 : 1, line, fairLinesObj);
 
-          if (fairOddsValue > 0) {
+          if (fairOddsValue > 1) {
             availableFairOdds.push({
               fairBookie: fairOddsData.bookie,
               fairOdds: fairOddsValue
