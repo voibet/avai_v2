@@ -78,38 +78,6 @@ export function isSameDay(date1: Date | string, date2: Date | string): boolean {
 }
 
 /**
- * Add days to a date
- * @param date Base date
- * @param days Number of days to add (can be negative)
- * @returns New date with days added
- */
-export function addDays(date: Date, days: number): Date {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-}
-
-/**
- * Get relative date descriptions
- * @param date Date to describe
- * @returns Description like "Today", "Tomorrow", "Yesterday"
- */
-export function getRelativeDateDescription(date: Date): string {
-  const today = startOfDay(new Date());
-  const targetDay = startOfDay(date);
-
-  const diffTime = targetDay.getTime() - today.getTime();
-  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-
-  switch (diffDays) {
-    case 0: return 'Today';
-    case 1: return 'Tomorrow';
-    case -1: return 'Yesterday';
-    default: return targetDay.toLocaleDateString();
-  }
-}
-
-/**
  * Format date range for filtering
  * @param from Start date
  * @param to End date
@@ -130,19 +98,6 @@ export function parseDateRange(from?: string, to?: string): { from?: Date; to?: 
 }
 
 /**
- * Check if a date is within a range
- * @param date Date to check
- * @param from Start of range (inclusive)
- * @param to End of range (inclusive)
- * @returns True if date is within range
- */
-export function isDateInRange(date: Date, from?: Date, to?: Date): boolean {
-  if (from && date < from) return false;
-  if (to && date > to) return false;
-  return true;
-}
-
-/**
  * Format time duration in human readable format
  * @param milliseconds Duration in milliseconds
  * @returns Formatted duration string
@@ -159,13 +114,3 @@ export function formatDuration(milliseconds: number): string {
   return `${seconds}s`;
 }
 
-/**
- * Get time difference in human readable format
- * @param from Start date
- * @param to End date (defaults to now)
- * @returns Formatted time difference
- */
-export function getTimeDifference(from: Date, to: Date = new Date()): string {
-  const diffMs = Math.abs(to.getTime() - from.getTime());
-  return formatDuration(diffMs);
-}

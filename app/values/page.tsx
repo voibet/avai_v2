@@ -7,6 +7,10 @@ import { calculateWeightedAverageFairOdds, meetsRequiredBookiesCriterionWithRati
 import { formatDateTimeFull } from '@/lib/utils/date-utils'
 import { IN_FUTURE } from '@/lib/constants'
 import DataTable, { Column } from '../../components/ui/data-table'
+import { FixtureExtension } from '../../components/FixtureExtension'
+import { LoadingState } from '../../components/ui/LoadingState'
+import { ErrorState } from '../../components/ui/ErrorState'
+import { EmptyState } from '../../components/ui/EmptyState'
 import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches, useLeagueTeamsElo } from '../../lib/hooks/use-football-data'
 
 // Bookie filter renderer component - defined outside to avoid hooks issues
@@ -831,24 +835,11 @@ function ValuesPageContent() {
 
   const renderLineupsSection = useCallback((fixture: any) => {
     if (lineupsLoading || coachesLoading) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-green-400"></div>
-            <span className="ml-2 text-gray-500 text-sm font-mono">Loading lineups...</span>
-          </div>
-        </div>
-      );
+      return <LoadingState message="Loading lineups..." />;
     }
 
     if (lineupsError || coachesError) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <span className="text-red-400 text-sm font-mono">Failed to load lineups: {lineupsError || coachesError}</span>
-          </div>
-        </div>
-      );
+      return <ErrorState message={`lineups: ${lineupsError || coachesError}`} />;
     }
 
     if (!lineupsData) {
@@ -1096,14 +1087,9 @@ function ValuesPageContent() {
           <div className="flex-1">
             <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
             {homeInjuriesLoading ? (
-              <div className="text-center py-1">
-                <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
-                <span className="ml-2 text-gray-400 text-xs font-mono">Loading injuries...</span>
-              </div>
+              <LoadingState message="Loading injuries..." size="sm" className="" />
             ) : homeInjuriesError ? (
-              <div className="text-center py-1">
-                <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
-              </div>
+              <ErrorState message="injuries" className="" />
             ) : homeInjuriesData && homeInjuriesData.length > 0 ? (() => {
               const filteredInjuries = homeInjuriesData.filter((injury) => {
                 // Filter out injuries older than 8 days
@@ -1170,14 +1156,9 @@ function ValuesPageContent() {
           <div className="flex-1">
             <h4 className="text-xs font-bold text-red-400 font-mono mb-1">OUT</h4>
             {awayInjuriesLoading ? (
-              <div className="text-center py-1">
-                <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-green-400"></div>
-                <span className="ml-2 text-gray-400 text-xs font-mono">Loading injuries...</span>
-              </div>
+              <LoadingState message="Loading injuries..." size="sm" className="" />
             ) : awayInjuriesError ? (
-              <div className="text-center py-1">
-                <span className="text-red-400 text-xs font-mono">Failed to load injuries</span>
-              </div>
+              <ErrorState message="injuries" className="" />
             ) : awayInjuriesData && awayInjuriesData.length > 0 ? (() => {
               const filteredInjuries = awayInjuriesData.filter((injury) => {
                 // Filter out injuries older than 8 days
@@ -1259,6 +1240,7 @@ function ValuesPageContent() {
       key={`odds-${fixture.fixture_id}`}
       fixture={fixture}
       oddsData={oddsData}
+      ratios={fixture.ratios}
       minRatio={currentRatioFilter}
       fairOddsBookies={fairOddsBookies}
       filterMethod={filterMethod}
@@ -1267,34 +1249,15 @@ function ValuesPageContent() {
 
   const renderStatsSection = useCallback((_fixture: any) => {
     if (statsLoading) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-green-400"></div>
-            <span className="ml-2 text-gray-400 text-sm font-mono">Loading stats...</span>
-          </div>
-        </div>
-      );
+      return <LoadingState message="Loading stats..." />;
     }
 
     if (statsError) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <span className="text-red-400 text-sm font-mono">Failed to load stats: {statsError}</span>
-          </div>
-        </div>
-      );
+      return <ErrorState message={`stats: ${statsError}`} />;
     }
 
     if (!statsData || !statsData.stats) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <span className="text-gray-500 text-sm font-mono">No stats available</span>
-          </div>
-        </div>
-      );
+      return <EmptyState message="No stats available" />;
     }
 
     const stats = statsData.stats;
@@ -1436,34 +1399,15 @@ function ValuesPageContent() {
 
   const renderStandingsSection = useCallback((fixture: any) => {
     if (standingsLoading) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-green-400"></div>
-            <span className="ml-2 text-gray-400 text-sm font-mono">Loading standings...</span>
-          </div>
-        </div>
-      );
+      return <LoadingState message="Loading standings..." />;
     }
 
     if (standingsError) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <span className="text-red-400 text-sm font-mono">Failed to load standings: {standingsError}</span>
-          </div>
-        </div>
-      );
+      return <ErrorState message={`standings: ${standingsError}`} />;
     }
 
     if (!standingsData || !standingsData.standings?.standings?.length) {
-      return (
-        <div className="px-2 py-4">
-          <div className="text-center py-4">
-            <span className="text-gray-500 text-sm font-mono">No standings available</span>
-          </div>
-        </div>
-      );
+      return <EmptyState message="No standings available" />;
     }
 
     const { standings } = standingsData.standings;
@@ -1882,70 +1826,10 @@ function ValuesPageContent() {
       season: opportunity.fixture.season || '2024' // Default season
     };
 
-    const extendedData = [
-      {
-        id: 'country',
-        label: 'Team Country',
-        home: (fixture as any).home_country || '-',
-        away: (fixture as any).away_country || '-',
-        info: '',
-        show: true
-      },
-      {
-        id: 'venue',
-        label: 'Venue',
-        home: '',
-        away: '',
-        info: (fixture as any).venue_name || '-',
-        show: true
-      },
-      {
-        id: 'referee',
-        label: 'Referee',
-        home: '',
-        away: '',
-        info: (fixture as any).referee || '-',
-        show: true
-      },
-      {
-        id: 'round',
-        label: 'Round',
-        home: '',
-        away: '',
-        info: (fixture as any).round || '-',
-        show: true
-      },
-      {
-        id: 'status',
-        label: 'Status',
-        home: '',
-        away: '',
-        info: (fixture as any).status_long || '-',
-        show: true
-      }
-    ].filter(item => item.show);
-
     return (
       <div className="space-y-0">
         {/* INFO Section */}
-        <div className="mt-2">
-          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
-            {/* Headers */}
-            {extendedData.map((item) => (
-              <div key={`header-${item.id}`} className="border-r border-gray-700 px-1 py-0.5 text-gray-300 font-bold text-[12px] bg-gray-900 font-mono truncate">
-                {item.label}
-              </div>
-            ))}
-          </div>
-          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
-            {/* Values */}
-            {extendedData.map((item) => (
-              <div key={`value-${item.id}`} className="border-r border-gray-700 px-1 py-1 text-gray-100 text-[11px] font-mono truncate">
-                {item.home && item.away ? `${item.home} - ${item.away}` : (item.home || item.away || item.info || '-')}
-              </div>
-            ))}
-          </div>
-        </div>
+        <FixtureExtension fixture={fixture} />
 
         {/* STATS Section */}
         <div className="">

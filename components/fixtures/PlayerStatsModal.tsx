@@ -1,6 +1,9 @@
 'use client'
 
 import { usePlayerStats } from '../../lib/hooks/use-football-data'
+import { LoadingState } from '../ui/LoadingState'
+import { ErrorState } from '../ui/ErrorState'
+import { EmptyState } from '../ui/EmptyState'
 
 interface PlayerStatsModalProps {
   playerId: number | null
@@ -75,20 +78,19 @@ export default function PlayerStatsModal({
         <div className="px-6 py-4">
           {loading && (
             <div className="text-center py-8">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-400"></div>
-              <p className="text-gray-400 text-sm font-mono mt-2">Loading player statistics...</p>
+              <LoadingState message="Loading player statistics..." size="lg" className="" />
             </div>
           )}
 
           {error && (
             <div className="text-center py-8">
-              <p className="text-red-400 text-sm font-mono">Failed to load player statistics: {error}</p>
+              <ErrorState message={`player statistics: ${error}`} className="" />
             </div>
           )}
 
           {!loading && !error && !playerStatsData && (
             <div className="text-center py-8">
-              <p className="text-gray-500 text-sm font-mono">No statistics available for this player</p>
+              <EmptyState message="No statistics available for this player" className="" />
             </div>
           )}
 

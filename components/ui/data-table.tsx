@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
+import { LoadingState } from './LoadingState';
+import { ErrorState } from './ErrorState';
+import { EmptyState } from './EmptyState';
 
 
 export interface Column<T> {
@@ -473,7 +476,7 @@ export default function DataTable<T>({
           <span className="text-gray-400 text-xs font-mono">Loading...</span>
         </div>
         <div className="py-8 text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-green-400"></div>
+          <LoadingState message="" size="lg" className="" />
         </div>
       </div>
     );
@@ -487,7 +490,7 @@ export default function DataTable<T>({
           <span className="text-gray-400 text-xs font-mono">Error</span>
         </div>
         <div className="py-4 border-b border-gray-600">
-          <span className="text-red-400 text-xs font-mono">{error}</span>
+          <ErrorState message={error} className="" />
         </div>
       </div>
     );
@@ -756,7 +759,7 @@ export default function DataTable<T>({
       <div className="space-y-0">
         {displayData.length === 0 ? (
           <div className="py-4 border-b border-gray-600">
-            <span className="text-gray-500 text-xs font-mono">{emptyMessage}</span>
+            <EmptyState message={emptyMessage} className="" />
           </div>
         ) : (
           displayData.map((item, index) => {

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
+import { LoadingState } from './ui/LoadingState';
+import { ErrorState } from './ui/ErrorState';
 import { calculateWeightedAverageFairOdds, getOddsDivisor, getFairOddsValueForOutcome } from '@/lib/utils/value-calculations';
 import type { BookieOdds } from '@/lib/utils/value-analysis';
 
@@ -16,6 +18,7 @@ function areAllOddsValid(values: number[]): boolean {
 interface FixtureOddsProps {
   fixture?: any; // Made flexible to support different fixture formats
   oddsData?: OddsData | null;
+  ratios?: any[]; // For value opportunities that have ratios data
   minRatio?: number;
   fairOddsBookies?: Array<{bookie: string, required: boolean, multiplier: number}>;
   filterMethod?: 'individual' | 'above_all' | 'average';
@@ -68,6 +71,7 @@ interface RatioData {
 export function FixtureOdds({
   fixture,
   oddsData: propOddsData,
+  ratios: propRatios,
   minRatio = 1.0,
   fairOddsBookies = [{bookie: 'Pinnacle', required: false, multiplier: 1}],
   filterMethod = 'individual'
@@ -85,6 +89,9 @@ export function FixtureOdds({
 
   // EventSource ref for streaming
   const eventSourceRef = React.useRef<EventSource | null>(null);
+
+  // Use propRatios if provided, otherwise fall back to fixture.ratios
+  const ratios = propRatios || fixture?.ratios || [];
 
   // Handle odds data updates from props
   useEffect(() => {
@@ -524,24 +531,11 @@ export function FixtureOdds({
   };
 
   if (oddsLoading) {
-    return (
-      <div className="px-2 py-4">
-        <div className="text-center py-4">
-          <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-gray-300"></div>
-          <span className="ml-2 text-gray-400 text-sm font-mono">Loading odds...</span>
-        </div>
-      </div>
-    );
+    return <LoadingState message="Loading odds..." size="sm" className="px-2 py-4" />;
   }
 
   if (oddsError) {
-    return (
-      <div className="px-2 py-4">
-        <div className="text-center py-4">
-          <span className="text-red-400 text-sm font-mono">Failed to load odds: {oddsError}</span>
-        </div>
-      </div>
-    );
+    return <ErrorState message={`odds: ${oddsError}`} className="px-2 py-4" />;
   }
 
   if (!oddsData || !oddsData.odds || oddsData.odds.length === 0) {
@@ -748,7 +742,7 @@ export function FixtureOdds({
       <div className="mb-3">
         <h4 className="text-xs font-bold text-white font-mono mb-2">{marketName}</h4>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs font-mono">
+          <table className="w-full text-[11px] font-mono">
             <thead>
               <tr className="bg-black">
                 <th className="px-1 py-0.5 text-left text-gray-300 border border-gray-600"></th>
@@ -760,7 +754,7 @@ export function FixtureOdds({
                 <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
                   Top
                 </th>
-                {fixture?.ratios && fixture.ratios.length > 0 && (
+                {ratios && ratios.length > 0 && (
                   <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
                     Ratios
                   </th>
@@ -807,7 +801,7 @@ export function FixtureOdds({
                       );
                     })()}
                   </td>
-                  {fixture?.ratios && fixture.ratios.length > 0 && (
+                  {ratios && ratios.length > 0 && (
                     <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
                       const topRatioData = getTopRatio(index);
                       if (!topRatioData) return 'bg-black';
@@ -862,8 +856,8 @@ export function FixtureOdds({
     });
 
     // Also include lines from ratios data
-    if (fixture?.ratios) {
-      fixture.ratios.forEach((ratioData: RatioData) => {
+    if (ratios) {
+      ratios.forEach((ratioData: RatioData) => {
         if (ratioData.ratios_lines?.[linesKey]) {
           ratioData.ratios_lines[linesKey].forEach((line: number) => allLines.add(line));
         }
@@ -999,7 +993,7 @@ export function FixtureOdds({
       <div className="mb-3">
         <h4 className="text-xs font-bold text-white font-mono mb-2">{marketName}</h4>
         <div className="overflow-x-auto">
-          <table className="w-full text-xs font-mono">
+          <table className="w-full text-[11px] font-mono">
             <thead>
               <tr className="bg-black">
                 <th className="px-1 py-0.5 text-left text-bg-black border border-gray-600">{side1.label}</th>
@@ -1011,7 +1005,7 @@ export function FixtureOdds({
                 <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
                   Top
                 </th>
-                {fixture?.ratios && fixture.ratios.length > 0 && (
+                {ratios && ratios.length > 0 && (
                   <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[80px] font-bold">
                     Ratios
                   </th>
@@ -1025,7 +1019,7 @@ export function FixtureOdds({
                 <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
                   Top
                 </th>
-                {fixture?.ratios && fixture.ratios.length > 0 && (
+                {ratios && ratios.length > 0 && (
                   <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[80px] font-bold">
                     Ratios
                   </th>
@@ -1081,7 +1075,7 @@ export function FixtureOdds({
                         );
                       })()}
                     </td>
-                    {fixture?.ratios && fixture.ratios.length > 0 && (
+                    {ratios && ratios.length > 0 && (
                       <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
                         if (!side1TopRatio) return 'bg-black';
 
@@ -1145,7 +1139,7 @@ export function FixtureOdds({
                         );
                       })()}
                     </td>
-                    {fixture?.ratios && fixture.ratios.length > 0 && (
+                    {ratios && ratios.length > 0 && (
                       <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
                         if (!side2TopRatio) return 'bg-black';
 
