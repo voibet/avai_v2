@@ -142,7 +142,9 @@ export function analyzeValueOpportunities(
             fairOddsBookieData.fair_odds_x12 && areAllOddsValid(fairOddsBookieData.fair_odds_x12.x12) &&
             (!fairOddsBookieData.odds_x12 || fairOddsBookieData.fair_odds_x12.t === fairOddsBookieData.odds_x12[0].t) &&
             (!fairOddsBookieData.odds_x12 || areAllOddsValid(fairOddsBookieData.odds_x12[0].x12))) {
-          const oddsBookieX12 = oddsBookieData.odds_x12[0].x12
+          const oddsBookieX12 = oddsBookieData.odds_x12[0]?.x12
+          if (!oddsBookieX12) return
+
           const fairBookieX12 = fairOddsBookieData.fair_odds_x12.x12
           const ratios_x12: number[] = []
 
@@ -176,6 +178,7 @@ export function analyzeValueOpportunities(
             (!fairOddsBookieData.odds_ah || fairOddsBookieData.odds_ah.length === 0 ||
              (fairOddsBookieData.odds_ah[0].ah_a && fairOddsBookieData.odds_ah[0].ah_h))) {
           const oddsBookieAH = oddsBookieData.odds_ah[0]
+          if (!oddsBookieAH) return
           const oddsBookieLines = oddsBookieData.lines?.[0]?.ah || []
           const fairBookieAH = fairOddsBookieData.fair_odds_ah
           const fairBookieLines = fairOddsBookieData.fair_odds_lines?.[0]?.ah || []
@@ -253,6 +256,7 @@ export function analyzeValueOpportunities(
             (!fairOddsBookieData.odds_ou || fairOddsBookieData.odds_ou.length === 0 ||
              (fairOddsBookieData.odds_ou[0].ou_o && fairOddsBookieData.odds_ou[0].ou_u))) {
           const oddsBookieOU = oddsBookieData.odds_ou[0]
+          if (!oddsBookieOU) return
           const oddsBookieLines = oddsBookieData.lines?.[0]?.ou || []
           const fairBookieOU = fairOddsBookieData.fair_odds_ou
           const fairBookieLines = fairOddsBookieData.fair_odds_lines?.[0]?.ou || []

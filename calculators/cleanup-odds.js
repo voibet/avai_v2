@@ -52,7 +52,23 @@ export async function cleanupPastFixturesOdds() {
         const { fixture_id, bookie, odds_x12, odds_ah, odds_ou, lines, ids, max_stakes } = row;
 
 
-        // Helper function to filter odds array to one per hour
+        // Helper function to compare if two odds entries are identical
+        const areOddsEqual = (entry1, entry2) => {
+          if (!entry1 || !entry2) return false;
+
+          // Compare all numeric odds properties (home, draw, away for x12, etc.)
+          const keys = Object.keys(entry1).filter(key => key !== 't' && typeof entry1[key] === 'number');
+
+          for (const key of keys) {
+            if (entry1[key] !== entry2[key]) {
+              return false;
+            }
+          }
+
+          return true;
+        };
+
+        // Helper function to filter odds array to one per hour and remove consecutive duplicates
         const filterOddsArray = (oddsArray) => {
           if (!oddsArray || oddsArray.length <= 2) return oddsArray;
 
@@ -77,9 +93,21 @@ export async function cleanupPastFixturesOdds() {
           });
 
           // Combine first, hourly entries, and last
-          const filtered = [first, ...Array.from(hourlyMap.values()), last];
+          let filtered = [first, ...Array.from(hourlyMap.values()), last];
 
-          return filtered.sort((a, b) => a.t - b.t); // Sort back by timestamp
+          // Sort back by timestamp
+          filtered = filtered.sort((a, b) => a.t - b.t);
+
+          // Remove consecutive entries with identical odds
+          const deduplicated = [filtered[0]]; // Always keep first entry
+
+          for (let i = 1; i < filtered.length; i++) {
+            if (!areOddsEqual(filtered[i], filtered[i - 1])) {
+              deduplicated.push(filtered[i]);
+            }
+          }
+
+          return deduplicated;
         };
 
         // Apply filtering to all odds arrays

@@ -1,5 +1,6 @@
 import pool from '@/lib/database/db';
 import { executeChain } from '@/lib/services/chain-processor';
+import { pinnacleOddsService } from '@/lib/services/pinnacle-odds-service';
 import { IN_PAST, IN_PLAY } from '@/lib/constants';
 import { initializeSchedulers } from '@/lib/scheduler/init-scheduler';
 

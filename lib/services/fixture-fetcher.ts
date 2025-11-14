@@ -114,7 +114,7 @@ export class FixtureFetcher {
   async fetchAndUpdateFixtures(
     onProgress?: (info: string) => void,
     selectedSeasons?: Record<string, string[]>
-  ): Promise<{ success: boolean; message: string; updatedCount?: number; statusChangedToPastCount?: number }> {
+  ): Promise<{ success: boolean; message: string; updatedCount?: number; statusChangedToPastCount?: number; updatedFixtureIds?: number[] }> {
     try {
 
       let leaguesToProcess: Array<{id: number, name: string, season: number}> = [];
@@ -159,6 +159,7 @@ export class FixtureFetcher {
       // Fetch fixtures for each league
       let totalUpdated = 0;
       let totalStatusChangedToPast = 0;
+      const totalUpdatedFixtureIds: number[] = [];
 
       for (let i = 0; i < leaguesToProcess.length; i++) {
         const leagueInfo = leaguesToProcess[i];
@@ -171,6 +172,7 @@ export class FixtureFetcher {
 
           totalUpdated += result.updatedCount;
           totalStatusChangedToPast += result.statusChangedToPastCount;
+          totalUpdatedFixtureIds.push(...(result.updatedFixtureIds || []));
 
           // Call progress callback with fetched count info
           if (onProgress) {
@@ -189,7 +191,8 @@ export class FixtureFetcher {
         success: true,
         message: `Updated ${totalUpdated} fixtures`,
         updatedCount: totalUpdated,
-        statusChangedToPastCount: totalStatusChangedToPast
+        statusChangedToPastCount: totalStatusChangedToPast,
+        updatedFixtureIds: totalUpdatedFixtureIds
       };
     } catch (error) {
       console.error('Fixture fetch process failed:', error instanceof Error ? error.message : error);
@@ -387,11 +390,12 @@ export class FixtureFetcher {
     }
   }
 
-  private async updateDatabaseWithFixtures(apiFixtures: ApiFootballFixture[]): Promise<{ updatedCount: number; statusChangedToPastCount: number }> {
+  private async updateDatabaseWithFixtures(apiFixtures: ApiFootballFixture[]): Promise<{ updatedCount: number; statusChangedToPastCount: number; updatedFixtureIds: number[] }> {
     let updatedCount = 0;
     let statusChangedToPastCount = 0;
+    const updatedFixtureIds: number[] = [];
 
-    if (apiFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0 };
+    if (apiFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0, updatedFixtureIds: [] };
 
     // Filter out fixtures from excluded leagues during July-August. These are european competition qualifiers.
     const nonSummerFixtures = apiFixtures.filter(fixture =>
@@ -423,7 +427,7 @@ export class FixtureFetcher {
       }
     }
 
-    if (validFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0 };
+    if (validFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0, updatedFixtureIds: [] };
 
     // Get all unique team IDs from valid fixtures
     const allTeamIds = Array.from(new Set([
@@ -563,6 +567,7 @@ export class FixtureFetcher {
 
       if (result.rowCount && result.rowCount > 0) {
         updatedCount++;
+        updatedFixtureIds.push(validFixtures[i].fixture.id);
 
         // Check if this fixture changed status to "in past"
         if (fixtureStatusChanges[i]) {
@@ -571,6 +576,6 @@ export class FixtureFetcher {
       }
     }
 
-    return { updatedCount, statusChangedToPastCount };
+    return { updatedCount, statusChangedToPastCount, updatedFixtureIds };
   }
 }

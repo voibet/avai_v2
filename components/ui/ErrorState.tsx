@@ -14,3 +14,4 @@ export function ErrorState({ message, className = 'px-2 py-4' }: ErrorStateProps
     </div>
   );
 }
+

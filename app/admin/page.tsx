@@ -11,9 +11,7 @@ import {
   ResultsPanel
 } from '../../components/admin';
 import { League } from '../../types/database';
-
-
-type AdminTab = 'fetch-fixtures' | 'add-leagues' | 'test' | 'simulate' | 'monitor';
+import { AdminTab } from '../../types/admin';
 
 interface AvailableLeague {
   id: number;
@@ -117,6 +115,7 @@ export default function AdminPage() {
     };
     locks: any[];
   } | null>(null);
+
 
   // Load leagues data
   useEffect(() => {
@@ -488,6 +487,8 @@ export default function AdminPage() {
       return () => clearInterval(interval);
     }
   }, [activeTab]);
+
+
 
   // MLP handlers
   const handleTrainModel = async () => {

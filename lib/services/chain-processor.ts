@@ -25,6 +25,7 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
 
   let fixturesUpdated = 0;
   let statusChangedToPastCount = 0;
+  let fixturesUpdatedIds: number[] = [];
 
   // Calculate total steps based on what we're actually doing
   const totalSteps = 5 - (skipFixtureFetch ? 1 : 0) - (skipXG ? 1 : 0);
@@ -56,6 +57,7 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
     }
     fixturesUpdated = fixtureResult.updatedCount || 0;
     statusChangedToPastCount = fixtureResult.statusChangedToPastCount || 0;
+    fixturesUpdatedIds = fixtureResult.updatedFixtureIds || [];
   }
 
   // Step 2: Calculate market XG for any fixtures that need it (IN_PAST or IN_PLAY with NULL market XG)
@@ -129,9 +131,8 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
     currentStep++;
     onProgress?.(`Step ${currentStep}/${totalSteps}: Updating statistics...`, currentStep, totalSteps);
 
-
     // Collect all fixture IDs that need statistics updates
-    const allAffectedFixtureIds = [...marketXGCalculatedFixtureIds, ...xgUpdatedFixtureIds];
+    const allAffectedFixtureIds = [...marketXGCalculatedFixtureIds, ...xgUpdatedFixtureIds, ...fixturesUpdatedIds];
 
     // If doing forced update for a specific fixture, include that fixture's teams
     if (forceStatsUpdate && fixtureId) {

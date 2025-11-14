@@ -1,4 +1,4 @@
-type AdminTab = 'fetch-fixtures' | 'add-leagues' | 'test' | 'simulate' | 'monitor';
+import { AdminTab } from '../../types/admin';
 
 interface Tab {
   id: AdminTab;
