@@ -159,24 +159,27 @@ export class MonacoOddsService {
           console.log(`Market changes detected for ${fixturesWithChanges.size} fixtures, updating database...`);
 
           // Only update database for fixtures that had changes
-          for (const fixtureId of fixturesWithChanges) {
-            const eventMappings = this.eventIdToMappings.get(this.getEventIdForFixture(fixtureId));
-            if (eventMappings) {
-              // Convert mappings back to MonacoMarket format for ensureFixtureOddsRecord
-              const markets = eventMappings.map(mapping => ({
-                id: mapping.marketId,
-                eventId: mapping.eventId,
-                marketTypeId: mapping.marketTypeId,
-                name: mapping.name,
-                marketOutcomes: mapping.outcomeMappings ? Object.keys(mapping.outcomeMappings).map((outcomeId, index) => ({
-                  id: outcomeId,
-                  title: `Outcome ${index}`,
-                  ordering: mapping.outcomeMappings![outcomeId]
-                })) : [],
-                prices: [] // Prices not needed for lines/IDs comparison
-              }));
+          for (const fixtureId of Array.from(fixturesWithChanges)) {
+            const eventId = this.getEventIdForFixture(fixtureId);
+            if (eventId) {
+              const eventMappings = this.eventIdToMappings.get(eventId);
+              if (eventMappings) {
+                // Convert mappings back to MonacoMarket format for ensureFixtureOddsRecord
+                const markets = eventMappings.map(mapping => ({
+                  id: mapping.marketId,
+                  eventId: mapping.eventId,
+                  marketTypeId: mapping.marketTypeId,
+                  name: mapping.name,
+                  marketOutcomes: mapping.outcomeMappings ? Object.keys(mapping.outcomeMappings).map((outcomeId, index) => ({
+                    id: outcomeId,
+                    title: `Outcome ${index}`,
+                    ordering: mapping.outcomeMappings![outcomeId]
+                  })) : [],
+                  prices: [] // Prices not needed for lines/IDs comparison
+                }));
 
-              await this.ensureFixtureOddsRecord(fixtureId, markets);
+                await this.ensureFixtureOddsRecord(fixtureId, markets);
+              }
             }
           }
         } else {
@@ -1552,7 +1555,7 @@ export class MonacoOddsService {
     const fixturesWithChanges = new Set<number>();
 
     // Check for new or changed markets
-    for (const [mappingKey, newMapping] of this.marketMapping) {
+    for (const [mappingKey, newMapping] of Array.from(this.marketMapping.entries())) {
       const oldMapping = oldMarketMapping.get(mappingKey);
 
       if (!oldMapping) {
@@ -1576,7 +1579,7 @@ export class MonacoOddsService {
     }
 
     // Check for removed markets
-    for (const [mappingKey, oldMapping] of oldMarketMapping) {
+    for (const [mappingKey, oldMapping] of Array.from(oldMarketMapping.entries())) {
       if (!this.marketMapping.has(mappingKey) && oldMapping.fixtureId) {
         fixturesWithChanges.add(oldMapping.fixtureId);
       }
@@ -1589,7 +1592,7 @@ export class MonacoOddsService {
    * Gets the eventId for a given fixtureId from current mappings
    */
   private getEventIdForFixture(fixtureId: number): string | undefined {
-    for (const [eventId, mappings] of this.eventIdToMappings) {
+    for (const [eventId, mappings] of Array.from(this.eventIdToMappings.entries())) {
       if (mappings.some(mapping => mapping.fixtureId === fixtureId)) {
         return eventId;
       }
