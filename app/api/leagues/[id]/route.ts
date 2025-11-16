@@ -150,6 +150,7 @@ interface League {
   pinnacle_league_id?: number;
   betfair_competition_id?: number;
   veikkaus_league_id?: number;
+  monaco_eventGroup?: string;
 }
 
 async function getLeagueWithStandings(request: Request, { params }: { params: { id: string } }) {
@@ -408,7 +409,8 @@ async function getLeagueWithStandings(request: Request, { params }: { params: { 
         updated_at: league.updated_at,
         pinnacle_league_id: league.pinnacle_league_id,
         betfair_competition_id: league.betfair_competition_id,
-        veikkaus_league_id: league.veikkaus_league_id,
+        veikkaus_league_id: league.veikkaus_league_id, 
+        monaco_eventGroup: league.monaco_eventGroup,
         requested_season: requestedSeason,
         season_used: seasonToUse
       },

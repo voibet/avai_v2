@@ -10,6 +10,7 @@ export interface League {
   pinnacle_league_id?: number;
   betfair_competition_id?: number;
   veikkaus_league_id?: number;
+  monaco_eventGroup?: string;
 }
 
 export interface Fixture {

@@ -7,8 +7,8 @@
   },
   "servers": [
     {
-      "url": "https://sandbox.api.monacoprotocol.xyz/",
-      "description": "Sandbox API Server"
+      "url": "https://production.api.monacoprotocol.xyz/",
+      "description": "Production API Server"
     }
   ],
   "paths": {
@@ -187,13 +187,13 @@
           {
             "name": "statuses",
             "in": "query",
-            "description": "statuses to filter by - valid values to choose are as follows:\n\u003cul\u003e\n    \u003cli\u003e Cancelled - Orders that have not matched and have been cancelled either on request or automatically\u003c/li\u003e\n    \u003cli\u003e Matched - Orders that have been matched, either fully or partially, where the remaining unmatched stake has been cancelled, either on request or automatically\u003c/li\u003e\n    \u003cli\u003e PartiallyMatched - Orders that have been partially matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Unmatched - Orders that have not yet been matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Won - Previously Matched orders that have been deemed to have Won at the time of market settlement\u003c/li\u003e\n    \u003cli\u003e Lost - Previously Matched orders that have been deemed to have Lost at the time of market settlement\u003c/li\u003e\n    \u003cli\u003e Voided - All orders belonging to markets that have been voided\u003c/li\u003e\n\u003c/ul\u003e\n",
+            "description": "statuses to filter by - valid values to choose are as follows:\n<ul>\n    <li> Cancelled - Orders that have not matched and have been cancelled either on request or automatically</li>\n    <li> Matched - Orders that have been matched, either fully or partially, where the remaining unmatched stake has been cancelled, either on request or automatically</li>\n    <li> PartiallyMatched - Orders that have been partially matched, and the remaining unmatched portion might still be matched</li>\n    <li> Unmatched - Orders that have not yet been matched, and the remaining unmatched portion might still be matched</li>\n    <li> Won - Previously Matched orders that have been deemed to have Won at the time of market settlement</li>\n    <li> Lost - Previously Matched orders that have been deemed to have Lost at the time of market settlement</li>\n    <li> Voided - All orders belonging to markets that have been voided</li>\n</ul>\n",
             "required": false,
             "schema": {
               "type": "array",
               "items": {
                 "type": "string",
-                "description": "The status of an order can be one of the following\n\u003cul\u003e\n    \u003cli\u003e Cancelled - The order was not matched and has been cancelled either on request or automatically\u003c/li\u003e\n    \u003cli\u003e Matched - The order has been matched, either fully, or partially where the remaining unmatched stake has been cancelled, either on request or automatically\u003c/li\u003e\n    \u003cli\u003e PartiallyMatched - The order has been partially matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Unmatched - The order has not yet been matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Won - The market has been settled and this previously Matched order has been deemed to have Won\u003c/li\u003e\n    \u003cli\u003e Lost - The market has been settled and this previously Matched order has been deemed to have Lost\u003c/li\u003e\n    \u003cli\u003e Voided - The market has been voided so this order has been voided\u003c/li\u003e\n\u003c/ul\u003e\n",
+                "description": "The status of an order can be one of the following\n<ul>\n    <li> Cancelled - The order was not matched and has been cancelled either on request or automatically</li>\n    <li> Matched - The order has been matched, either fully, or partially where the remaining unmatched stake has been cancelled, either on request or automatically</li>\n    <li> PartiallyMatched - The order has been partially matched, and the remaining unmatched portion might still be matched</li>\n    <li> Unmatched - The order has not yet been matched, and the remaining unmatched portion might still be matched</li>\n    <li> Won - The market has been settled and this previously Matched order has been deemed to have Won</li>\n    <li> Lost - The market has been settled and this previously Matched order has been deemed to have Lost</li>\n    <li> Voided - The market has been voided so this order has been voided</li>\n</ul>\n",
                 "enum": [
                   "Cancelled",
                   "Matched",
@@ -247,7 +247,7 @@
           {
             "name": "matchBehavior",
             "in": "query",
-            "description": "Optional - How any unmatched portion of an order is treated:\n\u003cul\u003e\n    \u003cli\u003eRetainUnmatched - unmatched portion persists as an offer (default)\u003c/li\u003e\n    \u003cli\u003eCancelUnmatched - unmatched portion is cancelled\u003c/li\u003e\n\u003c/ul\u003e\n",
+            "description": "Optional - How any unmatched portion of an order is treated:\n<ul>\n    <li>RetainUnmatched - unmatched portion persists as an offer (default)</li>\n    <li>CancelUnmatched - unmatched portion is cancelled</li>\n</ul>\n",
             "required": false,
             "schema": {
               "type": "string",
@@ -2793,7 +2793,7 @@
         "tags": [
           "Orders"
         ],
-        "summary": "Fetch orders settled in date range, filtered by wallet (settled orders are those of status \u0027Won\u0027, \u0027Lost\u0027, or \u0027Voided\u0027). Page size limit 500.",
+        "summary": "Fetch orders settled in date range, filtered by wallet (settled orders are those of status 'Won', 'Lost', or 'Voided'). Page size limit 500.",
         "operationId": "getOrdersSettledBetween",
         "parameters": [
           {
@@ -3022,7 +3022,7 @@
           {
             "name": "includeEmpty",
             "in": "query",
-            "description": "also include any prices that have previously been matched against but don\u0027t currently have any available liquidity",
+            "description": "also include any prices that have previously been matched against but don't currently have any available liquidity",
             "required": false,
             "schema": {
               "type": "boolean",
@@ -3467,7 +3467,7 @@
           {
             "name": "includeEmpty",
             "in": "query",
-            "description": "also include any prices that have been previously matched against but don\u0027t currently have any available liquidity",
+            "description": "also include any prices that have been previously matched against but don't currently have any available liquidity",
             "required": false,
             "deprecated": true,
             "schema": {
@@ -3861,8 +3861,8 @@
               }
             }
           },
-          "404": {
-            "description": "Not Found",
+          "401": {
+            "description": "Session invalid",
             "content": {
               "*/*": {
                 "schema": {
@@ -3871,8 +3871,8 @@
               }
             }
           },
-          "401": {
-            "description": "Session invalid",
+          "404": {
+            "description": "Not Found",
             "content": {
               "*/*": {
                 "schema": {
@@ -4000,129 +4000,6 @@
   },
   "components": {
     "schemas": {
-      "CreateWalletRequest": {
-        "type": "object",
-        "properties": {
-          "reference": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          }
-        }
-      },
-      "Meta": {
-        "type": "object",
-        "properties": {
-          "_primary_document": {
-            "type": "string",
-            "enum": [
-              "apiKeys",
-              "apps",
-              "categories",
-              "commissionRates",
-              "currencies",
-              "depositAddresses",
-              "depositRequests",
-              "events",
-              "eventGroups",
-              "externalReferences",
-              "externalReferenceSources",
-              "heartbeats",
-              "markets",
-              "marketOutcomes",
-              "marketPositions",
-              "marketTypes",
-              "orders",
-              "participants",
-              "prices",
-              "priceLadders",
-              "sessions",
-              "statuses",
-              "subcategories",
-              "trades",
-              "transactions",
-              "wallets",
-              "walletMetrics",
-              "withdrawalRequests"
-            ]
-          },
-          "_count": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "_page": {
-            "$ref": "#/components/schemas/PageMeta"
-          }
-        }
-      },
-      "PageMeta": {
-        "type": "object",
-        "properties": {
-          "_pageNumber": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "_pageSize": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "_totalElements": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "_totalPages": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
-      },
-      "Wallet": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "appId": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "Commission",
-              "MarketEscrow",
-              "System",
-              "User"
-            ]
-          },
-          "reference": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "balances": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WalletBalance"
-            }
-          }
-        }
-      },
-      "WalletBalance": {
-        "type": "object",
-        "properties": {
-          "currencyId": {
-            "type": "string"
-          },
-          "balance": {
-            "type": "number"
-          },
-          "balanceAvailable": {
-            "type": "number"
-          }
-        }
-      },
       "WalletResponse": {
         "type": "object",
         "properties": {
@@ -4133,238 +4010,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Wallet"
-            }
-          }
-        }
-      },
-      "WithdrawalRequestRequest": {
-        "type": "object",
-        "properties": {
-          "currencyId": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "number"
-          },
-          "toAddress": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "currencyId",
-          "toAddress"
-        ]
-      },
-      "WithdrawalRequest": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "walletId": {
-            "type": "string"
-          },
-          "currencyId": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "number"
-          },
-          "destinationAddress": {
-            "type": "string"
-          },
-          "internalStatus": {
-            "type": "string",
-            "enum": [
-              "Pending",
-              "InProgress",
-              "ToBeConfirmed",
-              "Confirming",
-              "Confirmed",
-              "Failed"
-            ]
-          },
-          "externalStatus": {
-            "type": "string",
-            "enum": [
-              "Pending",
-              "InProgress",
-              "ToBeConfirmed",
-              "Confirming",
-              "Confirmed",
-              "Failed"
-            ]
-          }
-        }
-      },
-      "WithdrawalRequestResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "withdrawalRequests": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WithdrawalRequest"
-            }
-          }
-        }
-      },
-      "DepositRequest": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "address": {
-            "type": "string"
-          },
-          "currencyId": {
-            "type": "string"
-          }
-        }
-      },
-      "DepositRequestResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "depositRequests": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DepositRequest"
-            }
-          }
-        }
-      },
-      "CreateSubcategoryRequest": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "categoryId": {
-            "type": "string"
-          }
-        }
-      },
-      "DocumentReference": {
-        "type": "object",
-        "properties": {
-          "_ref": {
-            "type": "string"
-          },
-          "_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "Subcategory": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "category": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "AddParticipantRequest": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "Individual",
-              "Team"
-            ]
-          }
-        }
-      },
-      "AddParticipantsRequest": {
-        "type": "object",
-        "properties": {
-          "participants": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AddParticipantRequest"
-            }
-          }
-        }
-      },
-      "ModifyParticipantsRequest": {
-        "type": "object",
-        "properties": {
-          "participantCodes": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "Participant": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Globally unique ID for this participant across all subcategories"
-          },
-          "code": {
-            "type": "string",
-            "description": "Unique code for this participant across all events in a given subcategory"
-          },
-          "name": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "Individual",
-              "Team"
-            ]
-          },
-          "active": {
-            "type": "boolean"
-          }
-        }
-      },
-      "ParticipantsResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "participants": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Participant"
             }
           }
         }
@@ -4383,25 +4028,6 @@
           "apiKey",
           "appId"
         ]
-      },
-      "Session": {
-        "type": "object",
-        "properties": {
-          "accessToken": {
-            "type": "string"
-          },
-          "refreshToken": {
-            "type": "string"
-          },
-          "accessExpiresAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "refreshExpiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
       },
       "SessionResponse": {
         "type": "object",
@@ -4455,7 +4081,7 @@
           },
           "matchBehavior": {
             "type": "string",
-            "description": "Optional - How any unmatched portion of an order is treated:\n\u003cul\u003e\n    \u003cli\u003eRetainUnmatched - unmatched portion persists as an offer (default)\u003c/li\u003e\n    \u003cli\u003eCancelUnmatched - unmatched portion is cancelled\u003c/li\u003e\n\u003c/ul\u003e\n",
+            "description": "Optional - How any unmatched portion of an order is treated:\n<ul>\n    <li>RetainUnmatched - unmatched portion persists as an offer (default)</li>\n    <li>CancelUnmatched - unmatched portion is cancelled</li>\n</ul>\n",
             "enum": [
               "RetainUnmatched",
               "CancelUnmatched"
@@ -4466,7 +4092,7 @@
           },
           "commissionRateId": {
             "type": "string",
-            "description": "Optional - to use a different commission rate for this order than your app\u0027s\ndefault commission rate. If omitted or set to null, the app\u0027s default\ncommission rate will be used (if it has one).\n"
+            "description": "Optional - to use a different commission rate for this order than your app's\ndefault commission rate. If omitted or set to null, the app's default\ncommission rate will be used (if it has one).\n"
           }
         },
         "required": [
@@ -4477,191 +4103,6 @@
           "side",
           "stake",
           "walletId"
-        ]
-      },
-      "CategorySummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        }
-      },
-      "EventGroupSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "subcategory": {
-            "$ref": "#/components/schemas/DocumentReference"
-          }
-        }
-      },
-      "EventSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "eventGroup": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "name": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "expectedStartTime": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "active": {
-            "type": "boolean"
-          }
-        }
-      },
-      "MarketSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "inPlayStatus": {
-            "type": "string",
-            "enum": [
-              "NotApplicable",
-              "PrePlay",
-              "InPlay"
-            ]
-          },
-          "published": {
-            "type": "boolean"
-          },
-          "suspended": {
-            "type": "boolean"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "Initializing",
-              "Open",
-              "Locked",
-              "Settling",
-              "Settled",
-              "Voiding",
-              "Voided",
-              "Closed"
-            ]
-          },
-          "lockAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "settledAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "event": {
-            "$ref": "#/components/schemas/DocumentReference"
-          }
-        }
-      },
-      "Order": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/OrderResult"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "appId": {
-                "type": "string"
-              },
-              "market": {
-                "$ref": "#/components/schemas/DocumentReference"
-              },
-              "walletId": {
-                "type": "string"
-              },
-              "side": {
-                "type": "string",
-                "enum": [
-                  "For",
-                  "Against"
-                ]
-              },
-              "outcomeId": {
-                "type": "string"
-              },
-              "outcomeTitle": {
-                "type": "string"
-              },
-              "price": {
-                "type": "number"
-              },
-              "stake": {
-                "type": "number"
-              },
-              "stakeUnmatched": {
-                "type": "number"
-              },
-              "stakeVoided": {
-                "type": "number"
-              },
-              "keepWhenInPlay": {
-                "type": "boolean"
-              },
-              "createdAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "modifiedAt": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "commissionRateId": {
-                "type": "string"
-              },
-              "reference": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string",
-                "description": "The status of an order can be one of the following\n\u003cul\u003e\n    \u003cli\u003e Cancelled - The order was not matched and has been cancelled either on request or automatically\u003c/li\u003e\n    \u003cli\u003e Matched - The order has been matched, either fully, or partially where the remaining unmatched stake has been cancelled, either on request or automatically\u003c/li\u003e\n    \u003cli\u003e PartiallyMatched - The order has been partially matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Unmatched - The order has not yet been matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Won - The market has been settled and this previously Matched order has been deemed to have Won\u003c/li\u003e\n    \u003cli\u003e Lost - The market has been settled and this previously Matched order has been deemed to have Lost\u003c/li\u003e\n    \u003cli\u003e Voided - The market has been voided so this order has been voided\u003c/li\u003e\n\u003c/ul\u003e\n",
-                "enum": [
-                  "Cancelled",
-                  "Matched",
-                  "PartiallyMatched",
-                  "Unmatched",
-                  "Won",
-                  "Lost",
-                  "Voided"
-                ]
-              },
-              "matchBehavior": {
-                "type": "string",
-                "description": "Optional - How any unmatched portion of an order is treated:\n\u003cul\u003e\n    \u003cli\u003eRetainUnmatched - unmatched portion persists as an offer (default)\u003c/li\u003e\n    \u003cli\u003eCancelUnmatched - unmatched portion is cancelled\u003c/li\u003e\n\u003c/ul\u003e\n",
-                "enum": [
-                  "RetainUnmatched",
-                  "CancelUnmatched"
-                ]
-              }
-            }
-          }
         ]
       },
       "OrderResponse": {
@@ -4711,41 +4152,6 @@
             "items": {
               "$ref": "#/components/schemas/CategorySummary"
             }
-          }
-        }
-      },
-      "SubcategorySummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "category": {
-            "$ref": "#/components/schemas/DocumentReference"
-          }
-        }
-      },
-      "TradeSummary": {
-        "type": "object",
-        "properties": {
-          "order": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "id": {
-            "type": "string"
-          },
-          "price": {
-            "type": "number"
-          },
-          "stake": {
-            "type": "number"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -4904,30 +4310,6 @@
           }
         }
       },
-      "Error": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/OrderResult"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "errorCode": {
-                "type": "string",
-                "description": "Order operation error code describing type of an error. Possible values:\n    MARKET_NOT_FOUND,\n    INVALID_MARKET_STATUS,\n    SUSPENDED_MARKET,\n    MARKET_OUTCOME_NOT_FOUND,\n    COMMISSION_RATE_NOT_FOUND,\n    WALLET_NOT_FOUND,\n    WALLET_INSUFFICIENT_CREDIT,\n    WALLET_ACCOUNT_NOT_FOUND,\n    WALLET_ACCOUNT_INSUFFICIENT_CREDIT,\n    MARKET_POSITION_NOT_FOUND,\n    ORDER_ALREADY_EXISTS,\n    INTERRUPTED\n"
-              },
-              "errorMessage": {
-                "type": "string",
-                "description": "Order operation error detailed message"
-              }
-            }
-          }
-        ],
-        "description": "Order operation error"
-      },
-      "OrderResult": {
-        "type": "object"
-      },
       "CreateMarketRequest": {
         "type": "object",
         "properties": {
@@ -4982,138 +4364,6 @@
             "items": {
               "type": "string"
             }
-          }
-        }
-      },
-      "ExternalReference": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "source": {
-            "type": "string"
-          },
-          "externalReference": {
-            "type": "string"
-          }
-        }
-      },
-      "Market": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "ownerAppId": {
-            "type": "string"
-          },
-          "event": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "name": {
-            "type": "string"
-          },
-          "marketType": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "marketValue": {
-            "type": "string"
-          },
-          "marketDiscriminator": {
-            "type": "string"
-          },
-          "currencyId": {
-            "type": "string"
-          },
-          "inPlayStatus": {
-            "type": "string",
-            "enum": [
-              "NotApplicable",
-              "PrePlay",
-              "InPlay"
-            ]
-          },
-          "inPlayDelay": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "crossMatchingEnabled": {
-            "type": "boolean"
-          },
-          "published": {
-            "type": "boolean"
-          },
-          "suspended": {
-            "type": "boolean"
-          },
-          "lockAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "settledAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "marketLockAction": {
-            "type": "string",
-            "enum": [
-              "None",
-              "CancelUnmatchedLiquidity"
-            ]
-          },
-          "eventStartAction": {
-            "type": "string",
-            "enum": [
-              "None",
-              "CancelUnmatchedLiquidity"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "Initializing",
-              "Open",
-              "Locked",
-              "Settling",
-              "Settled",
-              "Voiding",
-              "Voided",
-              "Closed"
-            ]
-          },
-          "marketOutcomes": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "externalReferences": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "MarketOutcomeSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "ordering": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "winner": {
-            "type": "boolean"
           }
         }
       },
@@ -5173,140 +4423,6 @@
           }
         }
       },
-      "MarketTypeSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "outcomesRange": {
-            "$ref": "#/components/schemas/Range"
-          },
-          "winnersRange": {
-            "$ref": "#/components/schemas/Range"
-          }
-        }
-      },
-      "Range": {
-        "type": "object",
-        "properties": {
-          "min": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "max": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
-      },
-      "ToggleActionRequest": {
-        "type": "object",
-        "description": "request to toggle cross-matching feature for a given market",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        }
-      },
-      "MarketOutcomeResult": {
-        "type": "object",
-        "properties": {
-          "outcomeId": {
-            "type": "string"
-          },
-          "winner": {
-            "type": "boolean"
-          }
-        }
-      },
-      "MarketResultRequest": {
-        "type": "object",
-        "properties": {
-          "results": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MarketOutcomeResult"
-            }
-          }
-        }
-      },
-      "UpdateReferenceRequest": {
-        "type": "object",
-        "properties": {
-          "source": {
-            "type": "string"
-          },
-          "externalReference": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "externalReference",
-          "source"
-        ]
-      },
-      "UpdateReferencesRequest": {
-        "type": "object",
-        "properties": {
-          "references": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateReferenceRequest"
-            }
-          }
-        },
-        "required": [
-          "references"
-        ]
-      },
-      "UpdateNameRequest": {
-        "type": "object",
-        "description": "request body containing a name field with the new value (cannot be null or blank)",
-        "properties": {
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ]
-      },
-      "MarketUpdateResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "markets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Market"
-            }
-          }
-        }
-      },
-      "AddMarketOutcomeRequest": {
-        "type": "object",
-        "properties": {
-          "title": {
-            "type": "string"
-          }
-        }
-      },
-      "UpdateDateRequest": {
-        "type": "object",
-        "description": "request body containing a date field with the new value (cannot be null)",
-        "properties": {
-          "date": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "date"
-        ]
-      },
       "CreateMarketTypeRequest": {
         "type": "object",
         "properties": {
@@ -5321,28 +4437,6 @@
           }
         }
       },
-      "MarketType": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "outcomesRange": {
-            "$ref": "#/components/schemas/Range"
-          },
-          "winnersRange": {
-            "$ref": "#/components/schemas/Range"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "MarketTypeResponse": {
         "type": "object",
         "properties": {
@@ -5354,25 +4448,6 @@
             "items": {
               "$ref": "#/components/schemas/MarketType"
             }
-          }
-        }
-      },
-      "Heartbeat": {
-        "type": "object",
-        "properties": {
-          "appId": {
-            "type": "string"
-          },
-          "active": {
-            "type": "boolean"
-          },
-          "checkInterval": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "lastReceived": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -5407,34 +4482,6 @@
           "active"
         ]
       },
-      "CreateEventRequest": {
-        "type": "object",
-        "properties": {
-          "eventGroupId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "active": {
-            "type": "boolean"
-          },
-          "expectedStartTime": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "active",
-          "code",
-          "eventGroupId",
-          "expectedStartTime",
-          "name"
-        ]
-      },
       "Category": {
         "type": "object",
         "properties": {
@@ -5451,102 +4498,6 @@
           "modifiedAt": {
             "type": "string",
             "format": "date-time"
-          }
-        }
-      },
-      "Event": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "ownerAppId": {
-            "type": "string"
-          },
-          "eventGroup": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "name": {
-            "type": "string"
-          },
-          "code": {
-            "type": "string"
-          },
-          "active": {
-            "type": "boolean"
-          },
-          "expectedStartTime": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "actualStartTime": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "actualEndTime": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "participants": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "externalReferences": {
-            "$ref": "#/components/schemas/DocumentReference"
-          }
-        }
-      },
-      "EventGroup": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "subcategory": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "EventParticipant": {
-        "type": "object",
-        "deprecated": true,
-        "description": "This model is deprecated and will be removed in future versions. Please use the Participant model instead.\n\nA participant in a given event.",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "Globally unique ID for this participant across all subcategories"
-          },
-          "code": {
-            "type": "string",
-            "description": "Unique code for this participant across all events in a given subcategory"
-          },
-          "name": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "Individual",
-              "Team"
-            ]
           }
         }
       },
@@ -5590,34 +4541,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ExternalReference"
-            }
-          }
-        }
-      },
-      "EventParticipantsResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "participants": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EventParticipant"
-            }
-          }
-        }
-      },
-      "EventUpdateResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EventSummary"
             }
           }
         }
@@ -5684,59 +4607,6 @@
           }
         }
       },
-      "APIKey": {
-        "type": "object",
-        "properties": {
-          "appId": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "active": {
-            "type": "boolean"
-          },
-          "secret": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "App": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "apiKey": {
-            "$ref": "#/components/schemas/APIKey"
-          },
-          "commissionRate": {
-            "type": "number"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "AppResponse": {
         "type": "object",
         "properties": {
@@ -5757,28 +4627,13 @@
           }
         }
       },
-      "CommissionRate": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "rate": {
-            "type": "number"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
       "UpdateAppCommissionRateRequest": {
         "type": "object",
         "properties": {
           "commissionRate": {
             "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0
+            "maximum": 1,
+            "minimum": 0
           }
         }
       },
@@ -5829,20 +4684,6 @@
           }
         }
       },
-      "PagedWalletResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "wallets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Wallet"
-            }
-          }
-        }
-      },
       "PagedTransactionResponse": {
         "type": "object",
         "properties": {
@@ -5853,61 +4694,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Transaction"
-            }
-          }
-        }
-      },
-      "Transaction": {
-        "type": "object",
-        "properties": {
-          "transactionId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "code": {
-            "type": "string",
-            "enum": [
-              "Deposit",
-              "Withdrawal",
-              "TradeCreation",
-              "TradeVoid",
-              "TradeWin",
-              "WalletToWallet",
-              "Commission",
-              "MarketPositionVoid"
-            ]
-          },
-          "walletId": {
-            "type": "string"
-          },
-          "currencyId": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "number"
-          },
-          "description": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "MarketPosition": {
-        "type": "object",
-        "properties": {
-          "market": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "walletId": {
-            "type": "string"
-          },
-          "exposures": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "number"
             }
           }
         }
@@ -5932,46 +4718,6 @@
           }
         }
       },
-      "WalletMetric": {
-        "type": "object",
-        "properties": {
-          "total": {
-            "type": "number",
-            "description": "orders total risked (\u0027stake\u0027 for backers and \u0027stake * (price - 1)\u0027 for layers"
-          },
-          "count": {
-            "type": "integer",
-            "format": "int32",
-            "description": "orders count"
-          }
-        }
-      },
-      "WalletMetrics": {
-        "type": "object",
-        "description": "wallet metric",
-        "properties": {
-          "open": {
-            "$ref": "#/components/schemas/WalletMetric",
-            "description": "metrics for open orders: total equals to a unmatched stake for all orders, count equals to a number all \u0027Unmatched\u0027 and \u0027PartiallyMatched\u0027 orders"
-          },
-          "matched": {
-            "$ref": "#/components/schemas/WalletMetric",
-            "description": "metrics for matched orders: total equals to a matched stake for all \u0027Matched\u0027 orders, count equals to a number all \u0027Matched\u0027 orders"
-          },
-          "cancelled": {
-            "$ref": "#/components/schemas/WalletMetric",
-            "description": "metrics for cancelled orders: total equals to a voided stake for all \u0027Cancelled\u0027 orders, count equals to a number all \u0027Cancelled\u0027 orders"
-          },
-          "settled": {
-            "$ref": "#/components/schemas/WalletMetric",
-            "description": "metrics for settled orders: total equals to a matched stake for all \u0027Matched\u0027 orders, count equals to a number all \u0027Won\u0027 or \u0027Lost\u0027 orders"
-          },
-          "voided": {
-            "$ref": "#/components/schemas/WalletMetric",
-            "description": "metrics for voided orders: total equals to a voided stake for all \u0027Voided\u0027 orders, count equals to a number all \u0027Voided\u0027 orders"
-          }
-        }
-      },
       "WalletMetricsResponse": {
         "type": "object",
         "properties": {
@@ -5981,20 +4727,6 @@
           "walletMetrics": {
             "$ref": "#/components/schemas/WalletMetrics",
             "description": "collection of wallet metrics"
-          }
-        }
-      },
-      "DepositAddress": {
-        "type": "object",
-        "properties": {
-          "networkId": {
-            "type": "string"
-          },
-          "walletId": {
-            "type": "string"
-          },
-          "address": {
-            "type": "string"
           }
         }
       },
@@ -6009,58 +4741,6 @@
             "items": {
               "$ref": "#/components/schemas/DepositAddress"
             }
-          }
-        }
-      },
-      "OrderSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "market": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "side": {
-            "type": "string",
-            "enum": [
-              "For",
-              "Against"
-            ]
-          },
-          "outcomeId": {
-            "type": "string"
-          },
-          "outcomeTitle": {
-            "type": "string"
-          },
-          "price": {
-            "type": "number"
-          },
-          "stake": {
-            "type": "number"
-          },
-          "stakeUnmatched": {
-            "type": "number"
-          },
-          "stakeVoided": {
-            "type": "number"
-          },
-          "status": {
-            "type": "string",
-            "description": "The status of an order can be one of the following\n\u003cul\u003e\n    \u003cli\u003e Cancelled - The order was not matched and has been cancelled either on request or automatically\u003c/li\u003e\n    \u003cli\u003e Matched - The order has been matched, either fully, or partially where the remaining unmatched stake has been cancelled, either on request or automatically\u003c/li\u003e\n    \u003cli\u003e PartiallyMatched - The order has been partially matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Unmatched - The order has not yet been matched, and the remaining unmatched portion might still be matched\u003c/li\u003e\n    \u003cli\u003e Won - The market has been settled and this previously Matched order has been deemed to have Won\u003c/li\u003e\n    \u003cli\u003e Lost - The market has been settled and this previously Matched order has been deemed to have Lost\u003c/li\u003e\n    \u003cli\u003e Voided - The market has been voided so this order has been voided\u003c/li\u003e\n\u003c/ul\u003e\n",
-            "enum": [
-              "Cancelled",
-              "Matched",
-              "PartiallyMatched",
-              "Unmatched",
-              "Won",
-              "Lost",
-              "Voided"
-            ]
-          },
-          "reference": {
-            "type": "string"
           }
         }
       },
@@ -6111,47 +4791,6 @@
             "items": {
               "$ref": "#/components/schemas/CategorySummary"
             }
-          }
-        }
-      },
-      "Trade": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "walletId": {
-            "type": "string"
-          },
-          "market": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "order": {
-            "$ref": "#/components/schemas/DocumentReference"
-          },
-          "side": {
-            "type": "string",
-            "enum": [
-              "For",
-              "Against"
-            ]
-          },
-          "outcomeId": {
-            "type": "string"
-          },
-          "price": {
-            "type": "number"
-          },
-          "stake": {
-            "type": "number"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "modifiedAt": {
-            "type": "string",
-            "format": "date-time"
           }
         }
       },
@@ -6222,20 +4861,6 @@
             "items": {
               "$ref": "#/components/schemas/CategorySummary"
             }
-          }
-        }
-      },
-      "AppStatus": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "lastUpdate": {
-            "type": "string"
           }
         }
       },
@@ -6359,56 +4984,11 @@
           }
         }
       },
-      "MarketLiquidity": {
-        "type": "object",
-        "properties": {
-          "side": {
-            "type": "string",
-            "enum": [
-              "For",
-              "Against"
-            ]
-          },
-          "outcomeId": {
-            "type": "string"
-          },
-          "price": {
-            "type": "number"
-          },
-          "amount": {
-            "type": "number"
-          },
-          "matched": {
-            "type": "number",
-            "deprecated": true
-          }
-        }
-      },
       "MarketLiquidityResponse": {
         "type": "object",
         "properties": {
           "_meta": {
             "$ref": "#/components/schemas/Meta"
-          },
-          "prices": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MarketLiquidity"
-            }
-          }
-        }
-      },
-      "MarketLiquidities": {
-        "type": "object",
-        "properties": {
-          "marketId": {
-            "type": "string"
-          },
-          "liquidity": {
-            "type": "number"
-          },
-          "traded": {
-            "type": "number"
           },
           "prices": {
             "type": "array",
@@ -6432,17 +5012,6 @@
           }
         }
       },
-      "MarketPriceLadder": {
-        "type": "object",
-        "properties": {
-          "prices": {
-            "type": "array",
-            "items": {
-              "type": "number"
-            }
-          }
-        }
-      },
       "MarketPriceLadderResponse": {
         "type": "object",
         "properties": {
@@ -6454,31 +5023,6 @@
             "items": {
               "$ref": "#/components/schemas/MarketPriceLadder"
             }
-          }
-        }
-      },
-      "TransferResponse": {
-        "type": "object",
-        "properties": {
-          "_meta": {
-            "$ref": "#/components/schemas/Meta"
-          },
-          "transactionId": {
-            "type": "string"
-          },
-          "wallet": {
-            "$ref": "#/components/schemas/Wallet"
-          }
-        }
-      },
-      "ExternalReferenceSource": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
           }
         }
       },
@@ -6537,33 +5081,6 @@
             "items": {
               "$ref": "#/components/schemas/ExternalReference"
             }
-          }
-        }
-      },
-      "Currency": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "networkId": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "Crypto",
-              "Fiat"
-            ]
-          },
-          "name": {
-            "type": "string"
-          },
-          "symbol": {
-            "type": "string"
-          },
-          "mint": {
-            "type": "string"
           }
         }
       },

@@ -20,6 +20,21 @@ export async function register() {
     } else {
       console.log('Pinnacle odds fetching disabled');
     }
+
+    // Start Monaco odds fetching if enabled
+    if (process.env.MONACO === 'true') {
+      console.log('Starting Monaco odds continuous fetching...');
+      try {
+        const { MonacoOddsService } = await import('@/lib/services/monaco-odds-service');
+        const monacoOddsService = new MonacoOddsService();
+        await monacoOddsService.startContinuousFetching();
+        console.log('Monaco odds continuous fetching started successfully');
+      } catch (error) {
+        console.error('Failed to start Monaco odds fetching:', error);
+      }
+    } else {
+      console.log('Monaco odds fetching disabled');
+    }
   }
 }
 

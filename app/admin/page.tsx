@@ -479,6 +479,84 @@ export default function AdminPage() {
     }
   };
 
+  const handleVacuumAnalyze = async () => {
+    // Ask user which tables to maintain
+    const maintenanceOptions = [
+      'football_odds (recommended - fixes current lock issues)',
+      'All frequently updated tables (football_odds, football_fixtures, football_stats, football_predictions)',
+      'All football_ tables'
+    ];
+
+    const choice = prompt(
+      'Choose maintenance scope:\n\n1. football_odds (recommended - fixes current lock issues)\n2. All frequently updated tables (football_odds, football_fixtures, football_stats, football_predictions)\n3. All football_ tables\n\nEnter 1, 2, or 3:',
+      '1'
+    );
+
+    if (!choice || !['1', '2', '3'].includes(choice)) {
+      return;
+    }
+
+    let tablesToProcess = [];
+    switch (choice) {
+      case '1':
+        tablesToProcess = ['football_odds'];
+        break;
+      case '2':
+        tablesToProcess = ['football_odds', 'football_fixtures', 'football_stats', 'football_predictions'];
+        break;
+      case '3':
+        tablesToProcess = [
+          'football_leagues', 'football_teams', 'football_fixtures', 'football_odds',
+          'football_payouts', 'football_fair_odds', 'football_predictions', 'football_stats'
+        ];
+        break;
+    }
+
+    if (!confirm(`This will run VACUUM ANALYZE on: ${tablesToProcess.join(', ')}\n\nContinue?`)) {
+      return;
+    }
+
+    setIsLoading(true);
+    setResult(null);
+
+    try {
+      const response = await fetch('/api/admin/vacuum', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'vacuum_analyze',
+          tables: tablesToProcess
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        const details = data.details ? '\n' + data.details.join('\n') : '';
+        setResult({
+          success: true,
+          message: `${data.message}${details}`
+        });
+        // Refresh monitor data to see updated stats
+        loadMonitorData();
+      } else {
+        setResult({
+          success: false,
+          message: data.error || 'VACUUM ANALYZE failed'
+        });
+      }
+    } catch (error: any) {
+      console.error('VACUUM error:', error);
+      setResult({
+        success: false,
+        message: `Network error: ${error.message}`
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
   // Auto-start monitoring when monitor tab is activated
   useEffect(() => {
     if (activeTab === 'monitor') {
@@ -1065,11 +1143,20 @@ export default function AdminPage() {
             {/* Header */}
             <div className="flex justify-between items-center">
               <h2 className="text-lg font-semibold text-red-400 font-mono">DATABASE MONITOR</h2>
-              {monitorData && (
-                <span className="text-xs text-gray-500 font-mono">
-                  {new Date(monitorData.timestamp).toLocaleTimeString()}
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleVacuumAnalyze}
+                  disabled={isLoading}
+                  className="px-3 py-1 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 text-white text-xs font-mono rounded transition-colors"
+                >
+                  {isLoading ? 'VACUUMING...' : 'VACUUM ANALYZE'}
+                </button>
+                {monitorData && (
+                  <span className="text-xs text-gray-500 font-mono">
+                    {new Date(monitorData.timestamp).toLocaleTimeString()}
+                  </span>
+                )}
+              </div>
             </div>
 
             {monitorData ? (

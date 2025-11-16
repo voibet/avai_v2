@@ -633,6 +633,9 @@ export function FixtureOdds({
     if (bookieName.includes('betfair')) {
       return 'bg-yellow-600'; // Yellow for Betfair
     }
+    if (bookieName.includes('monaco')) {
+      return 'bg-orange-600'; // Orange for Monaco
+    }
     if (bookieName.includes('pinnacle')) {
       return 'bg-black'; // Black for Pinnacle
     }

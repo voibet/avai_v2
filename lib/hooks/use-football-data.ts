@@ -16,6 +16,7 @@ export function useLeagueStandings(leagueId: string | null, season?: string | nu
       pinnacle_league_id?: number;
       betfair_competition_id?: number;
       veikkaus_league_id?: number;
+      monaco_eventGroup?: string;
       requested_season: string;
       season_used: string;
     };

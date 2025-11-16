@@ -29,11 +29,14 @@
     "@types/pg": "^8.10.7",
     "@types/react": "^18.2.25",
     "@types/react-dom": "^18.2.11",
+    "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.21",
+    "baseline-browser-mapping": "^2.8.28",
     "eslint": "^8.52.0",
     "eslint-config-next": "14.0.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.13",
+    "tsx": "^4.20.6",
     "typescript": "^5.2.2"
   }
 }

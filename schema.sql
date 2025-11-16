@@ -116,7 +116,8 @@ CREATE TABLE IF NOT EXISTS football_leagues (
     updated_at              TIMESTAMP DEFAULT NOW(),
     pinnacle_league_id      INTEGER,
     betfair_competition_id  INTEGER,
-    veikkaus_league_id      INTEGER
+    veikkaus_league_id      VARCHAR(255),
+    monaco_eventGroup      VARCHAR(255)
 );
 
 -- Team Information
@@ -376,6 +377,11 @@ CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date ON football_fixtures 
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_team_date_away ON football_fixtures (away_team_id, date) WHERE LOWER(status_short) IN ('ft', 'aet', 'pen');
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_league_date_status ON football_fixtures (league_id, date DESC, status_short) WHERE LOWER(status_short) IN ('ft', 'aet', 'pen');
 CREATE INDEX IF NOT EXISTS idx_football_fixtures_market_xg ON football_fixtures (market_xg_home, market_xg_away) WHERE market_xg_home IS NOT NULL;
+
+-- Critical indexes for /api/odds query performance
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_date ON football_fixtures (date);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_date_status ON football_fixtures (date, status_short);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_date_id ON football_fixtures (date, id);
 
 -- Primary composite index for your main query pattern
 CREATE INDEX CONCURRENTLY idx_football_odds_fixture_bookie ON football_odds (fixture_id, bookie);

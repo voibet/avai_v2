@@ -30,6 +30,37 @@ function normalizeTeamName(teamName: string): string {
   return filteredWords.join(' ');
 }
 
+/**
+ * Get team mappings from football_teams table for the given team IDs
+ */
+async function getTeamMappings(teamIds: number[]): Promise<Map<number, string[]>> {
+  if (teamIds.length === 0) {
+    return new Map();
+  }
+
+  const result = await executeQuery(`
+    SELECT id, name, mappings FROM football_teams
+    WHERE id = ANY($1)
+  `, [teamIds]);
+
+  const mappings = new Map<number, string[]>();
+
+  for (const team of result.rows) {
+    // Start with the canonical team name
+    const teamMappings = [team.name].filter((name: any) => name != null && typeof name === 'string');
+
+    // Add all mappings from the JSONB array
+    if (team.mappings && Array.isArray(team.mappings)) {
+      const validMappings = team.mappings.filter((name: any) => name != null && typeof name === 'string');
+      teamMappings.push(...validMappings);
+    }
+
+    mappings.set(team.id, teamMappings);
+  }
+
+  return mappings;
+}
+
 export interface FixtureMatchCriteria {
   startTime: Date;
   homeTeam: string;
@@ -57,7 +88,7 @@ export async function findMatchingFixture(criteria: FixtureMatchCriteria): Promi
 
     // Find fixtures within +/- 12 hours that match teams and league
     const fixtureQuery = `
-      SELECT f.id, f.home_team_name, f.away_team_name, f.date
+      SELECT f.id, f.home_team_name, f.away_team_name, f.home_team_id, f.away_team_id, f.date
       FROM football_fixtures f
       WHERE f.league_id = $1
         AND f.date >= $2::timestamp - INTERVAL '12 hours'
@@ -70,18 +101,52 @@ export async function findMatchingFixture(criteria: FixtureMatchCriteria): Promi
       startTime.toISOString()
     ]);
 
-    // Find best match based on normalized team names
+    if (fixtureResult.rows.length === 0) {
+      return null;
+    }
+
+    // Get team IDs from fixtures to load mappings
+    const teamIds = fixtureResult.rows.flatMap(fixture => [
+      parseInt(fixture.home_team_id.toString()),
+      parseInt(fixture.away_team_id.toString())
+    ]);
+    const uniqueTeamIds = Array.from(new Set(teamIds));
+
+    // Load team mappings for better matching
+    const teamMappings = await getTeamMappings(uniqueTeamIds);
+
+    // Normalize input team names
     const normalizedHomeTeam = normalizeTeamName(homeTeam);
     const normalizedAwayTeam = normalizeTeamName(awayTeam);
 
     for (const fixture of fixtureResult.rows) {
-      const normalizedFixtureHome = normalizeTeamName(fixture.home_team_name);
-      const normalizedFixtureAway = normalizeTeamName(fixture.away_team_name);
+      // Get all possible names for home team (fixture name + mappings)
+      const homeTeamId = parseInt(fixture.home_team_id.toString());
+      const homeTeamNames = [fixture.home_team_name];
+      if (teamMappings.has(homeTeamId)) {
+        homeTeamNames.push(...teamMappings.get(homeTeamId)!);
+      }
 
-      const homeMatch = normalizedHomeTeam && normalizedFixtureHome &&
-        (normalizedFixtureHome.includes(normalizedHomeTeam) || normalizedHomeTeam.includes(normalizedFixtureHome));
-      const awayMatch = normalizedAwayTeam && normalizedFixtureAway &&
-        (normalizedFixtureAway.includes(normalizedAwayTeam) || normalizedAwayTeam.includes(normalizedFixtureAway));
+      // Get all possible names for away team (fixture name + mappings)
+      const awayTeamId = parseInt(fixture.away_team_id.toString());
+      const awayTeamNames = [fixture.away_team_name];
+      if (teamMappings.has(awayTeamId)) {
+        awayTeamNames.push(...teamMappings.get(awayTeamId)!);
+      }
+
+      // Check if input home team matches any home team name/mapping
+      const homeMatch = homeTeamNames.some(teamName => {
+        const normalizedFixtureName = normalizeTeamName(teamName);
+        return normalizedHomeTeam && normalizedFixtureName &&
+          (normalizedFixtureName.includes(normalizedHomeTeam) || normalizedHomeTeam.includes(normalizedFixtureName));
+      });
+
+      // Check if input away team matches any away team name/mapping
+      const awayMatch = awayTeamNames.some(teamName => {
+        const normalizedFixtureName = normalizeTeamName(teamName);
+        return normalizedAwayTeam && normalizedFixtureName &&
+          (normalizedFixtureName.includes(normalizedAwayTeam) || normalizedAwayTeam.includes(normalizedFixtureName));
+      });
 
       if (homeMatch && awayMatch) {
         return fixture.id;
@@ -105,7 +170,7 @@ export async function findPotentialFixtureMatches(criteria: FixtureMatchCriteria
     const { startTime, leagueId } = criteria;
 
     const fixtureQuery = `
-      SELECT f.id, f.home_team_name, f.away_team_name, f.date
+      SELECT f.id, f.home_team_name, f.away_team_name, f.home_team_id, f.away_team_id, f.date
       FROM football_fixtures f
       WHERE f.league_id = $1
         AND f.date >= $2::timestamp - INTERVAL '12 hours'
