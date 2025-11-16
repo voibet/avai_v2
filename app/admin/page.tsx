@@ -496,7 +496,7 @@ export default function AdminPage() {
       return;
     }
 
-    let tablesToProcess = [];
+    let tablesToProcess: string[] = [];
     switch (choice) {
       case '1':
         tablesToProcess = ['football_odds'];

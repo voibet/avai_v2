@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    const { action, table, tables } = await request.json();
+    const { action, table, tables }: { action: string; table?: string; tables?: string[] } = await request.json();
 
     if (action !== 'vacuum_analyze') {
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
