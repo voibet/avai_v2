@@ -1306,7 +1306,6 @@ async function runCalculations() {
                 );
 
                 -- Create indexes for football_predictions table
-                CREATE INDEX IF NOT EXISTS idx_football_predictions_fixture_id ON football_predictions (fixture_id);
                 CREATE INDEX IF NOT EXISTS idx_football_predictions_created_at ON football_predictions (created_at);
             `);
             console.log('✅ football_predictions table created/verified');
@@ -1353,7 +1352,6 @@ async function runCalculations() {
                 );
 
                 -- Create indexes for football_stats table
-                CREATE INDEX IF NOT EXISTS idx_football_stats_fixture_id ON football_stats (fixture_id);
                 CREATE INDEX IF NOT EXISTS idx_football_stats_elos ON football_stats (elo_home, elo_away, league_elo);
                 CREATE INDEX IF NOT EXISTS idx_football_stats_xg ON football_stats (adjusted_rolling_xg_home, adjusted_rolling_xga_home, adjusted_rolling_xg_away, adjusted_rolling_xga_away);
             `);
@@ -1453,10 +1451,7 @@ async function runCalculations() {
                     FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
                 );
 
-                -- Indexes for calculated odds tables
-                CREATE INDEX IF NOT EXISTS idx_football_payouts_fixture_bookie ON football_payouts (fixture_id, bookie);
                 CREATE INDEX IF NOT EXISTS idx_football_payouts_payouts ON football_payouts (payout_x12, payout_ah, payout_ou);
-                CREATE INDEX IF NOT EXISTS idx_football_fair_odds_fixture_bookie ON football_fair_odds (fixture_id, bookie);
             `;
             await pool.query(tablesSQL);
             console.log('✅ Calculated odds tables created');

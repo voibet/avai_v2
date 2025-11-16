@@ -297,10 +297,7 @@ CREATE TABLE IF NOT EXISTS football_fair_odds (
     FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
 );
 
--- Indexes for calculated odds tables
-CREATE INDEX IF NOT EXISTS idx_football_payouts_fixture_bookie ON football_payouts (fixture_id, bookie);
 CREATE INDEX IF NOT EXISTS idx_football_payouts_payouts ON football_payouts (payout_x12, payout_ah, payout_ou);
-CREATE INDEX IF NOT EXISTS idx_football_fair_odds_fixture_bookie ON football_fair_odds (fixture_id, bookie);
 
 -- Predictions table - stores MLP neural network predictions and manual betting adjustments
 -- Contains predicted probabilities for home/away outcomes with optional manual overrides
@@ -382,9 +379,6 @@ CREATE INDEX IF NOT EXISTS idx_football_fixtures_market_xg ON football_fixtures 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_date ON football_fixtures (date);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_date_status ON football_fixtures (date, status_short);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_fixtures_date_id ON football_fixtures (date, id);
-
--- Primary composite index for your main query pattern
-CREATE INDEX CONCURRENTLY idx_football_odds_fixture_bookie ON football_odds (fixture_id, bookie);
 
 -- Index for latest_t queries (if you ever filter by timestamp)
 CREATE INDEX CONCURRENTLY idx_football_odds_latest_t ON football_odds (latest_t);

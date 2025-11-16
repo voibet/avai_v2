@@ -11,14 +11,6 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-// Helper function to filter odds arrays to only include latest timestamp entries
-function filterLatestOdds(oddsArray: any[] | null, latestTimestamp: number | null): any[] | null {
-  if (!oddsArray || !Array.isArray(oddsArray) || latestTimestamp === null) {
-    return oddsArray;
-  }
-  return oddsArray.filter((item: any) => item && item.t === latestTimestamp);
-}
-
 async function getFixtureOdds(request: Request) {
   const { searchParams } = new URL(request.url);
 
@@ -63,27 +55,61 @@ async function getFixtureOdds(request: Request) {
   let countQuery;
   if (useFairOdds) {
     // When fair_odds=true, count fixtures that have data in either table
-    countQuery = `
-      SELECT COUNT(DISTINCT ff.id) as total
-      FROM football_fixtures ff
-      LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
-      LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id
-      WHERE 1=1
-        ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
-        ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
-    `;
+    if (useLatest) {
+      // Optimized count for latest=true - uses idx_football_odds_latest_combined
+      countQuery = `
+        SELECT COUNT(DISTINCT ff.id) as total
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
+          AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
+          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+      `;
+    } else {
+      // Original count query for full historical data
+      countQuery = `
+        SELECT COUNT(DISTINCT ff.id) as total
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
+      `;
+    }
   } else {
     // Regular odds only
-    countQuery = `
-      SELECT COUNT(DISTINCT ff.id) as total
-      FROM football_fixtures ff
-      LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
-      WHERE 1=1
-        ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
-        ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
-    `;
+    if (useLatest) {
+      // Optimized count for latest=true - uses idx_football_odds_latest_combined
+      countQuery = `
+        SELECT COUNT(DISTINCT ff.id) as total
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
+          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+      `;
+    } else {
+      // Original count query for full historical data
+      countQuery = `
+        SELECT COUNT(DISTINCT ff.id) as total
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
+      `;
+    }
   }
 
   const countResult = await executeQuery(countQuery, queryParams);
@@ -93,77 +119,160 @@ async function getFixtureOdds(request: Request) {
   let query;
   if (useFairOdds) {
     // When fair_odds=true, join both tables and return both regular and fair odds
-    query = `
-      SELECT
-        ff.id as fixture_id,
-        ff.home_team_id,
-        ff.home_team_name,
-        ff.away_team_id,
-        ff.away_team_name,
-        ff.date,
-        ff.league_id,
-        ff.league_name,
-        ff.season,
-        ff.status_short,
-        ff.round,
-        COALESCE(fo.bookie, ffo.bookie) as bookie,
-        COALESCE(fo.decimals, ffo.decimals) as decimals,
-        -- Regular odds from football_odds table
-        fo.odds_x12,
-        fo.odds_ah,
-        fo.odds_ou,
-        fo.lines,
-        fo.latest_t,
-        -- Fair odds from football_fair_odds table
-        ffo.fair_odds_x12,
-        ffo.fair_odds_ah,
-        ffo.fair_odds_ou,
-        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines,
-        ffo.latest_t as fair_odds_latest_t
-      FROM football_fixtures ff
-      LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
-      LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id AND fo.bookie = ffo.bookie
-      WHERE 1=1
-        ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
-        ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
-        AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
-      ORDER BY ff.date, ff.id, COALESCE(fo.bookie, ffo.bookie)
-    `;
+    if (useLatest) {
+      // Optimized query for fair_odds=true and latest=true - uses idx_football_odds_latest_combined
+      query = `
+        SELECT
+          ff.id as fixture_id,
+          ff.home_team_id,
+          ff.home_team_name,
+          ff.away_team_id,
+          ff.away_team_name,
+          ff.date,
+          ff.league_id,
+          ff.league_name,
+          ff.season,
+          ff.status_short,
+          ff.round,
+          COALESCE(fo.bookie, ffo.bookie) as bookie,
+          COALESCE(fo.decimals, ffo.decimals) as decimals,
+          -- Regular odds from football_odds table (latest only, uses index)
+          CASE WHEN fo.odds_x12->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_x12->-1) ELSE NULL END as odds_x12,
+          CASE WHEN fo.odds_ah->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ah->-1) ELSE NULL END as odds_ah,
+          CASE WHEN fo.odds_ou->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ou->-1) ELSE NULL END as odds_ou,
+          CASE WHEN fo.lines->-1 IS NOT NULL THEN jsonb_build_array(fo.lines->-1) ELSE NULL END as lines,
+          fo.latest_t,
+          -- Fair odds from football_fair_odds table
+          ffo.fair_odds_x12,
+          ffo.fair_odds_ah,
+          ffo.fair_odds_ou,
+          jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines,
+          ffo.latest_t as fair_odds_latest_t
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id AND fo.bookie = ffo.bookie
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
+          AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
+          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+        ORDER BY ff.date, ff.id, COALESCE(fo.bookie, ffo.bookie)
+      `;
+    } else {
+      // Original query for fair odds with full historical data
+      query = `
+        SELECT
+          ff.id as fixture_id,
+          ff.home_team_id,
+          ff.home_team_name,
+          ff.away_team_id,
+          ff.away_team_name,
+          ff.date,
+          ff.league_id,
+          ff.league_name,
+          ff.season,
+          ff.status_short,
+          ff.round,
+          COALESCE(fo.bookie, ffo.bookie) as bookie,
+          COALESCE(fo.decimals, ffo.decimals) as decimals,
+          -- Regular odds from football_odds table
+          fo.odds_x12,
+          fo.odds_ah,
+          fo.odds_ou,
+          fo.lines,
+          fo.latest_t,
+          -- Fair odds from football_fair_odds table
+          ffo.fair_odds_x12,
+          ffo.fair_odds_ah,
+          ffo.fair_odds_ou,
+          jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines,
+          ffo.latest_t as fair_odds_latest_t
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        LEFT JOIN football_fair_odds ffo ON ff.id = ffo.fixture_id AND fo.bookie = ffo.bookie
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
+          AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
+        ORDER BY ff.date, ff.id, COALESCE(fo.bookie, ffo.bookie)
+      `;
+    }
   } else {
     // Regular odds only
-    query = `
-      SELECT
-        ff.id as fixture_id,
-        ff.home_team_id,
-        ff.home_team_name,
-        ff.away_team_id,
-        ff.away_team_name,
-        ff.date,
-        ff.league_id,
-        ff.league_name,
-        ff.season,
-        ff.status_short,
-        ff.round,
-        fo.bookie,
-        fo.decimals,
-        -- Return full X12 odds array
-        fo.odds_x12,
-        -- Return full AH odds array
-        fo.odds_ah,
-        -- Return full OU odds array
-        fo.odds_ou,
-        -- Return full lines array
-        fo.lines,
-        fo.latest_t
-      FROM football_fixtures ff
-      LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
-      WHERE 1=1
-        ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
-        ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
-        ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
-      ORDER BY ff.date, ff.id, fo.bookie
-    `;
+    if (useLatest) {
+      // Optimized query for latest=true - uses idx_football_odds_latest_combined
+      query = `
+        SELECT
+          ff.id as fixture_id,
+          ff.home_team_id,
+          ff.home_team_name,
+          ff.away_team_id,
+          ff.away_team_name,
+          ff.date,
+          ff.league_id,
+          ff.league_name,
+          ff.season,
+          ff.status_short,
+          ff.round,
+          fo.bookie,
+          fo.decimals,
+          -- Return only latest X12 odds (uses index)
+          CASE WHEN fo.odds_x12->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_x12->-1) ELSE NULL END as odds_x12,
+          -- Return only latest AH odds (uses index)
+          CASE WHEN fo.odds_ah->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ah->-1) ELSE NULL END as odds_ah,
+          -- Return only latest OU odds (uses index)
+          CASE WHEN fo.odds_ou->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ou->-1) ELSE NULL END as odds_ou,
+          -- Return latest lines (uses index)
+          CASE WHEN fo.lines->-1 IS NOT NULL THEN jsonb_build_array(fo.lines->-1) ELSE NULL END as lines,
+          fo.latest_t
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
+          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+        ORDER BY ff.date, ff.id, fo.bookie
+      `;
+    } else {
+      // Original query for full historical data
+      query = `
+        SELECT
+          ff.id as fixture_id,
+          ff.home_team_id,
+          ff.home_team_name,
+          ff.away_team_id,
+          ff.away_team_name,
+          ff.date,
+          ff.league_id,
+          ff.league_name,
+          ff.season,
+          ff.status_short,
+          ff.round,
+          fo.bookie,
+          fo.decimals,
+          -- Return full X12 odds array
+          fo.odds_x12,
+          -- Return full AH odds array
+          fo.odds_ah,
+          -- Return full OU odds array
+          fo.odds_ou,
+          -- Return full lines array
+          fo.lines,
+          fo.latest_t
+        FROM football_fixtures ff
+        LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
+        WHERE 1=1
+          ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
+          ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
+          ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
+        ORDER BY ff.date, ff.id, fo.bookie
+      `;
+    }
   }
 
   // Add pagination parameters and clauses
@@ -205,17 +314,8 @@ async function getFixtureOdds(request: Request) {
 
     // Only add odds if they exist (regular odds or fair odds)
     if (row.odds_x12 || row.odds_ah || row.odds_ou || row.fair_odds_x12 || row.fair_odds_ah || row.fair_odds_ou) {
-      // Parse latest_t if available and filtering is enabled
-      let latestT: any = null;
-      if (useLatest && row.latest_t) {
-        try {
-          latestT = typeof row.latest_t === 'string' ? JSON.parse(row.latest_t) : row.latest_t;
-        } catch (e) {
-          latestT = null;
-        }
-      }
-
       // Parse odds arrays from JSONB if they're strings
+      // When latest=true, database already returns single-element arrays
       let oddsX12 = row.odds_x12 || null;
       let oddsAh = row.odds_ah || null;
       let oddsOu = row.odds_ou || null;
@@ -248,22 +348,6 @@ async function getFixtureOdds(request: Request) {
           lines = JSON.parse(lines);
         } catch (e) {
           lines = null;
-        }
-      }
-
-      // Filter odds arrays if latest=true
-      if (useLatest && latestT) {
-        if (oddsX12 && latestT.x12_ts !== undefined) {
-          oddsX12 = filterLatestOdds(oddsX12, latestT.x12_ts);
-        }
-        if (oddsAh && latestT.ah_ts !== undefined) {
-          oddsAh = filterLatestOdds(oddsAh, latestT.ah_ts);
-        }
-        if (oddsOu && latestT.ou_ts !== undefined) {
-          oddsOu = filterLatestOdds(oddsOu, latestT.ou_ts);
-        }
-        if (lines && latestT.lines_ts !== undefined) {
-          lines = filterLatestOdds(lines, latestT.lines_ts);
         }
       }
 

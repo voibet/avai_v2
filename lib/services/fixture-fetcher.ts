@@ -170,6 +170,13 @@ export class FixtureFetcher {
 
           const result = await this.updateDatabaseWithFixtures(apiFixtures);
 
+          // Remove fixtures from database that are not in the API response (duplicates/outdated)
+          const apiFixtureIds = apiFixtures.map(f => f.fixture.id);
+          const deletedCount = await this.removeOrphanedFixtures(leagueInfo.id, leagueInfo.season, apiFixtureIds);
+          if (deletedCount > 0) {
+            console.log(`Removed ${deletedCount} orphaned fixtures for league ${leagueInfo.id}, season ${leagueInfo.season}`);
+          }
+
           totalUpdated += result.updatedCount;
           totalStatusChangedToPast += result.statusChangedToPastCount;
           totalUpdatedFixtureIds.push(...(result.updatedFixtureIds || []));
@@ -577,5 +584,45 @@ export class FixtureFetcher {
     }
 
     return { updatedCount, statusChangedToPastCount, updatedFixtureIds };
+  }
+
+  /**
+   * Removes fixtures from database that exist for the given league and season
+   * but are not present in the API response (these are duplicates/outdated fixtures)
+   */
+  private async removeOrphanedFixtures(
+    leagueId: number,
+    season: number,
+    apiFixtureIds: number[]
+  ): Promise<number> {
+    if (apiFixtureIds.length === 0) {
+      // If API returned no fixtures, don't delete anything (might be off-season)
+      return 0;
+    }
+
+    try {
+      const result = await executeQuery<{ id: number }>(
+        `SELECT id FROM football_fixtures 
+         WHERE league_id = $1 AND season = $2 AND NOT (id = ANY($3))`,
+        [leagueId, season, apiFixtureIds]
+      );
+
+      const orphanedFixtureIds = result.rows.map(row => row.id);
+
+      if (orphanedFixtureIds.length === 0) {
+        return 0;
+      }
+
+      // Delete orphaned fixtures
+      await executeQuery(
+        'DELETE FROM football_fixtures WHERE id = ANY($1)',
+        [orphanedFixtureIds]
+      );
+
+      return orphanedFixtureIds.length;
+    } catch (error) {
+      console.error(`Error removing orphaned fixtures for league ${leagueId}, season ${season}:`, error);
+      return 0;
+    }
   }
 }
