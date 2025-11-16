@@ -42,7 +42,6 @@ interface OddsData {
     fair_odds_x12?: any;
     fair_odds_ah?: any;
     fair_odds_ou?: any;
-    lines?: any;
   }>;
 }
 
