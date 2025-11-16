@@ -198,7 +198,6 @@ class PinnacleOddsService {
    * Processes odds for a single event
    */
   private async processEventOdds(event: PinnacleEvent): Promise<{ updated: boolean }> {
-    console.log(`Processing event ${event.event_id}: ${event.home} vs ${event.away}`);
 
     const period = event.periods?.num_0;
     if (!period) {
@@ -226,9 +225,8 @@ class PinnacleOddsService {
 
     if (existingOddsResult.rows.length > 0) {
       // Update existing odds - if market closed, send empty odds
-      console.log(`Updating existing odds for event ${event.event_id}`);
-      await this.updateExistingOdds(event.event_id, period, !isMarketOpen);
-      return { updated: true };
+      const wasUpdated = await this.updateExistingOdds(event.event_id, period, !isMarketOpen);
+      return { updated: wasUpdated };
     }
 
     // No existing odds found - only create new if market is open
@@ -302,7 +300,7 @@ class PinnacleOddsService {
   /**
    * Updates existing odds for a Pinnacle event
    */
-  private async updateExistingOdds(eventId: number, period: PinnaclePeriod, marketClosed: boolean = false): Promise<void> {
+  private async updateExistingOdds(eventId: number, period: PinnaclePeriod, marketClosed: boolean = false): Promise<boolean> {
     const timestamp = Math.floor(Date.now() / 1000);
 
     // Transform Pinnacle odds to our format (decimals = 3, multiply by 1000)
@@ -320,7 +318,7 @@ class PinnacleOddsService {
 
     if (existingResult.rows.length === 0) {
       console.error(`No existing odds found for event ${eventId}`);
-      return;
+      return false;
     }
 
     const existing = existingResult.rows[0];
@@ -350,6 +348,24 @@ class PinnacleOddsService {
       latestT.lines_ts = timestamp;
       latestT.ids_ts = timestamp;
       latestT.stakes_ts = timestamp;
+
+      // For market closure, always update the database
+      const { query: updateQuery, params } = this.buildUpdateQuery(existing, {
+        odds_x12: x12Odds,
+        odds_ah: ahOdds,
+        odds_ou: ouOdds,
+        lines,
+        ids,
+        max_stakes: maxStakes,
+        latest_t: latestT
+      }, fixtureId);
+
+      if (updateQuery) {
+        await executeQuery(updateQuery, params);
+        console.log(`Market closed for event ${eventId} - updated closure status`);
+        return true;
+      }
+      return false;
     } else {
       // Market is open, update with new odds
 
@@ -467,8 +483,8 @@ class PinnacleOddsService {
     });
 
     if (!hasChanges) {
-      console.log(`No changes for event ${eventId} - skipping update`);
-      return;
+      // No changes, skip update silently
+      return false;
     }
 
     // Build dynamic UPDATE query for only changed fields
@@ -485,7 +501,10 @@ class PinnacleOddsService {
     if (updateQuery) {
       await executeQuery(updateQuery, params);
       console.log(`Updated changed fields for event ${eventId}`);
+      return true;
     }
+
+    return false;
 
   }
 
