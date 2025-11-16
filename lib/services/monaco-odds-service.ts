@@ -149,7 +149,7 @@ export class MonacoOddsService {
         this.subscribedMarketKeys.clear();
         this.orderBooks.clear();
 
-        await this.fetchAndProcessMarkets();
+        await this.fetchAndProcessMarkets(false); // Don't update database during refetch, only rebuild mappings
         console.log(`Refetched ${this.marketMapping.size} market mappings`);
 
         // Check if lines or IDs changed by comparing market mappings
@@ -188,7 +188,7 @@ export class MonacoOddsService {
       } catch (error) {
         console.error('Error refetching Monaco markets:', error);
       }
-    }, 2 * 60 * 1000);
+    }, 60 * 60 * 1000);
 
     console.log('Monaco odds service started');
   }
@@ -466,7 +466,7 @@ export class MonacoOddsService {
     return [];
   }
 
-  private async processMarkets(markets: MonacoMarket[], events: any[]): Promise<void> {
+  private async processMarkets(markets: MonacoMarket[], events: any[], updateDatabase: boolean = true): Promise<void> {
     const eventMap = new Map(events.map(e => [e.id, e]));
 
     // Group markets by event (fixture)
@@ -541,7 +541,7 @@ export class MonacoOddsService {
           }
           fixturesFound++;
 
-          await this.processFixtureMarkets(fixtureId, eventMarkets);
+          await this.processFixtureMarkets(fixtureId, eventMarkets, updateDatabase);
           fixturesProcessed++;
         })
       );
@@ -550,7 +550,7 @@ export class MonacoOddsService {
     await Promise.all(fixturePromises);
   }
 
-  private async processFixtureMarkets(fixtureId: number, markets: MonacoMarket[]): Promise<void> {
+  private async processFixtureMarkets(fixtureId: number, markets: MonacoMarket[], updateDatabase: boolean = true): Promise<void> {
 
     // Group markets by type and calculate line indices
     const marketsByType: { [key: string]: MonacoMarket[] } = {};
@@ -597,7 +597,10 @@ export class MonacoOddsService {
       }
     }
 
-    await this.ensureFixtureOddsRecord(fixtureId, markets);
+    // Only update database during initial setup or when changes are detected
+    if (updateDatabase) {
+      await this.ensureFixtureOddsRecord(fixtureId, markets);
+    }
 
     // Initialize order books with current market data
     this.initializeOrderBooks(fixtureId, markets);
@@ -868,7 +871,7 @@ export class MonacoOddsService {
     }
   }
 
-  private async fetchAndProcessMarkets(): Promise<void> {
+  private async fetchAndProcessMarkets(updateDatabase: boolean = true): Promise<void> {
     try {
       const { markets, events, eventGroups } = await this.fetchAllMarkets();
       console.log(`Fetched ${markets.length} markets, ${events.length} events, ${eventGroups.length} event groups`);
@@ -884,7 +887,7 @@ export class MonacoOddsService {
         prices: market.prices
       }));
 
-      await this.processMarkets(processedMarkets, events);
+      await this.processMarkets(processedMarkets, events, updateDatabase);
     } catch (error) {
       console.error('Error fetching markets:', error);
     }

@@ -661,6 +661,9 @@ export default function AdminPage() {
       });
 
       console.log('[Admin] Odds response status:', response.status);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       console.log('[Admin] Odds response data:', data);
 
