@@ -74,7 +74,7 @@ async function runTask() {
           console.log(`[Process] Prediction complete`);
           
         } else if (mode === 'test') {
-          // TEST MODE (with metrics)
+          // TEST MODE (with metrics and prediction saving)
           // Redirect ALL console output to stderr so stdout contains only JSON results
           const originalConsoleLog = console.log;
           const originalConsoleError = console.error;
@@ -92,6 +92,10 @@ async function runTask() {
               calculateMetrics: true
             });
 
+            // Save test predictions to database
+            const savedCount = await savePredictions(result.predictions);
+            console.error(`[Process] ✓ Saved ${savedCount} test predictions to database`);
+
             // Output results to parent process via stdout (JSON only)
             const testResults = {
               success: true,
@@ -105,7 +109,8 @@ async function runTask() {
               data: {
                 totalFixtures: trainingData.length + predictionData.length,
                 trainFixtures: trainingData.length,
-                testFixtures: predictionData.length
+                testFixtures: predictionData.length,
+                predictionsSaved: savedCount
               },
               modelStats: result.modelData.stats
             };

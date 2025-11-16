@@ -1908,7 +1908,7 @@ function ValuesPageContent() {
       setLoading(true)
 
       // Fetch odds data (contains all fixture + odds info)
-      const oddsResponse = await fetch('/api/odds?limit=3000&fair_odds=true&latest=true')
+      const oddsResponse = await fetch('/api/odds?limit=4000&fair_odds=true&latest=true')
 
       if (!oddsResponse.ok) {
         throw new Error(`HTTP error! odds: ${oddsResponse.status}`)

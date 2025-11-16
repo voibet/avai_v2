@@ -265,9 +265,10 @@ export function FixtureOdds({
       const newX12 = Array.isArray(newBookie.odds_x12)
         ? newBookie.odds_x12?.[newBookie.odds_x12.length - 1]
         : newBookie.odds_x12;
-      if (oldX12 && newX12) {
+      if (oldX12 && newX12 && oldX12.x12 && newX12.x12) {
         ['Home', 'Draw', 'Away'].forEach((outcome, idx) => {
-          if (oldX12.x12[idx] !== newX12.x12[idx]) {
+          if (oldX12.x12[idx] !== undefined && newX12.x12[idx] !== undefined &&
+              oldX12.x12[idx] !== newX12.x12[idx]) {
             const key = `${newBookie.bookie}:1X2:${outcome}`;
             changes[key] = newX12.x12[idx] > oldX12.x12[idx] ? 'up' : 'down';
           }
@@ -288,20 +289,23 @@ export function FixtureOdds({
         ? newBookie.lines?.[newBookie.lines.length - 1]
         : newBookie.lines;
       
-      if (oldAH && newAH && oldLines && newLines) {
-        newLines.ah?.forEach((line, newLineIdx) => {
+      if (oldAH && newAH && oldLines && newLines && oldLines.ah && newLines.ah &&
+          oldAH.ah_h && oldAH.ah_a && newAH.ah_h && newAH.ah_a) {
+        newLines.ah.forEach((line, newLineIdx) => {
           // Find the same line in old lines by value, not by index
-          const oldLineIdx = oldLines.ah?.indexOf(line);
-          
-          if (oldLineIdx !== undefined && oldLineIdx >= 0) {
-            if (oldAH.ah_h?.[oldLineIdx] !== newAH.ah_h?.[newLineIdx]) {
-              const key = `${newBookie.bookie}:Asian Handicap:Home:${line}`;
-              changes[key] = newAH.ah_h[newLineIdx] > oldAH.ah_h[oldLineIdx] ? 'up' : 'down';
-            }
-            if (oldAH.ah_a?.[oldLineIdx] !== newAH.ah_a?.[newLineIdx]) {
-              const key = `${newBookie.bookie}:Asian Handicap:Away:${line}`;
-              changes[key] = newAH.ah_a[newLineIdx] > oldAH.ah_a[oldLineIdx] ? 'up' : 'down';
-            }
+          const oldLineIdx = oldLines.ah.indexOf(line);
+
+          if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
+              oldAH.ah_h[oldLineIdx] !== undefined && newAH.ah_h[newLineIdx] !== undefined &&
+              oldAH.ah_h[oldLineIdx] !== newAH.ah_h[newLineIdx]) {
+            const key = `${newBookie.bookie}:Asian Handicap:Home:${line}`;
+            changes[key] = newAH.ah_h[newLineIdx] > oldAH.ah_h[oldLineIdx] ? 'up' : 'down';
+          }
+          if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
+              oldAH.ah_a[oldLineIdx] !== undefined && newAH.ah_a[newLineIdx] !== undefined &&
+              oldAH.ah_a[oldLineIdx] !== newAH.ah_a[newLineIdx]) {
+            const key = `${newBookie.bookie}:Asian Handicap:Away:${line}`;
+            changes[key] = newAH.ah_a[newLineIdx] > oldAH.ah_a[oldLineIdx] ? 'up' : 'down';
           }
         });
       }
@@ -314,20 +318,23 @@ export function FixtureOdds({
         ? newBookie.odds_ou?.[newBookie.odds_ou.length - 1]
         : newBookie.odds_ou;
       
-      if (oldOU && newOU && oldLines && newLines) {
-        newLines.ou?.forEach((line, newLineIdx) => {
+      if (oldOU && newOU && oldLines && newLines && oldLines.ou && newLines.ou &&
+          oldOU.ou_o && oldOU.ou_u && newOU.ou_o && newOU.ou_u) {
+        newLines.ou.forEach((line, newLineIdx) => {
           // Find the same line in old lines by value, not by index
-          const oldLineIdx = oldLines.ou?.indexOf(line);
-          
-          if (oldLineIdx !== undefined && oldLineIdx >= 0) {
-            if (oldOU.ou_o?.[oldLineIdx] !== newOU.ou_o?.[newLineIdx]) {
-              const key = `${newBookie.bookie}:Over/Under:Over:${line}`;
-              changes[key] = newOU.ou_o[newLineIdx] > oldOU.ou_o[oldLineIdx] ? 'up' : 'down';
-            }
-            if (oldOU.ou_u?.[oldLineIdx] !== newOU.ou_u?.[newLineIdx]) {
-              const key = `${newBookie.bookie}:Over/Under:Under:${line}`;
-              changes[key] = newOU.ou_u[newLineIdx] > oldOU.ou_u[oldLineIdx] ? 'up' : 'down';
-            }
+          const oldLineIdx = oldLines.ou.indexOf(line);
+
+          if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
+              oldOU.ou_o[oldLineIdx] !== undefined && newOU.ou_o[newLineIdx] !== undefined &&
+              oldOU.ou_o[oldLineIdx] !== newOU.ou_o[newLineIdx]) {
+            const key = `${newBookie.bookie}:Over/Under:Over:${line}`;
+            changes[key] = newOU.ou_o[newLineIdx] > oldOU.ou_o[oldLineIdx] ? 'up' : 'down';
+          }
+          if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
+              oldOU.ou_u[oldLineIdx] !== undefined && newOU.ou_u[newLineIdx] !== undefined &&
+              oldOU.ou_u[oldLineIdx] !== newOU.ou_u[newLineIdx]) {
+            const key = `${newBookie.bookie}:Over/Under:Under:${line}`;
+            changes[key] = newOU.ou_u[newLineIdx] > oldOU.ou_u[oldLineIdx] ? 'up' : 'down';
           }
         });
       }
