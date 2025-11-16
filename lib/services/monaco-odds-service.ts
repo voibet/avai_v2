@@ -1,5 +1,4 @@
 import axios from 'axios';
-import WebSocket from 'ws';
 import { executeQuery } from '../database/db-utils';
 import { findMatchingFixture, FixtureMatchCriteria } from '../utils/fixture-matching';
 
@@ -38,7 +37,7 @@ export class MonacoOddsService {
   private streamUrl: string;
   private appId: string;
   private apiKey: string;
-  private websocket: WebSocket | null = null;
+  private websocket: any = null;
   private isRunning: boolean = false;
   private marketRefetchInterval: NodeJS.Timeout | null = null;
   private tokenRefreshTimeout: NodeJS.Timeout | null = null;
@@ -853,7 +852,9 @@ export class MonacoOddsService {
   }
 
   private async connectWebSocket(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
+      // Dynamically import WebSocket only on server side
+      const { default: WebSocket } = await import('ws');
       this.websocket = new WebSocket(this.streamUrl);
 
       this.websocket.on('open', async () => {
