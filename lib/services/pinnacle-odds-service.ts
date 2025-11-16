@@ -216,8 +216,6 @@ class PinnacleOddsService {
                         cutoffInFuture &&
                         metaOpenFlags;
 
-    console.log(`Event ${event.event_id} - Market ${isMarketOpen ? 'OPEN' : 'CLOSED'} (status: ${period.period_status}, has_odds: ${!!hasOdds}, cutoff_future: ${cutoffInFuture}, meta_open: ${!!metaOpenFlags})`);
-
     // Always check if we already have odds for this Pinnacle event
     const existingOddsQuery = `
       SELECT fixture_id

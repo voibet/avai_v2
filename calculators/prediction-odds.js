@@ -125,6 +125,7 @@ function calculateOverUnder(homeXg, awayXg, line, maxGoals = 10, useDixonColes =
  */
 async function calculateOddsFromPredictions(fixtureIds = null) {
   try {
+
     // Build query to get fixtures with predictions AND adjustments
     let query = `
       SELECT

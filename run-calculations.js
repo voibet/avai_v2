@@ -1241,11 +1241,7 @@ async function runCalculations() {
         FOR EACH ROW
         EXECUTE FUNCTION update_updated_at_column();
 
-    DROP TRIGGER IF EXISTS update_football_predictions_updated_at ON football_predictions;
-    CREATE TRIGGER update_football_predictions_updated_at
-        BEFORE UPDATE ON football_predictions
-        FOR EACH ROW
-        EXECUTE FUNCTION update_updated_at_column();
+    -- Trigger for football_predictions will be created after table creation
 
     DROP TRIGGER IF EXISTS update_football_stats_updated_at ON football_stats;
     CREATE TRIGGER update_football_stats_updated_at
@@ -1345,6 +1341,13 @@ async function runCalculations() {
 
                 -- Create indexes for football_predictions table
                 CREATE INDEX IF NOT EXISTS idx_football_predictions_created_at ON football_predictions (created_at);
+
+                -- Create trigger for football_predictions
+                DROP TRIGGER IF EXISTS update_football_predictions_updated_at ON football_predictions;
+                CREATE TRIGGER update_football_predictions_updated_at
+                    BEFORE UPDATE ON football_predictions
+                    FOR EACH ROW
+                    EXECUTE FUNCTION update_updated_at_column();
             `);
             console.log('✅ football_predictions table created/verified');
         } catch (predictionsError) {
