@@ -124,7 +124,7 @@ async function calculateMarketXG(fixtureIds = null) {
           fair_odds_x12,
           fair_odds_ah,
           fair_odds_ou,
-          latest_lines,
+          lines,
           CASE LOWER(bookie)
             WHEN 'pinnacle' THEN 1
             WHEN 'betfair' THEN 2
@@ -144,7 +144,7 @@ async function calculateMarketXG(fixtureIds = null) {
           fair_odds_x12,
           fair_odds_ah,
           fair_odds_ou,
-          latest_lines
+          lines
         FROM prioritized_fair_odds
         ORDER BY fixture_id, priority
       )
@@ -175,7 +175,7 @@ async function calculateMarketXG(fixtureIds = null) {
             WHEN (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric >= 100 THEN (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / 100
             ELSE (bfo.fair_odds_ou->'fair_ou_o'->>((t.idx-1)::int))::numeric / 10
           END
-          FROM jsonb_array_elements_text(bfo.latest_lines->'ou') WITH ORDINALITY AS t(val, idx)
+          FROM jsonb_array_elements_text(bfo.lines->'ou') WITH ORDINALITY AS t(val, idx)
           WHERE t.val::numeric = 2.5
           LIMIT 1
         ) as over25_odds

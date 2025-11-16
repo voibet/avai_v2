@@ -10,7 +10,6 @@
  *
  * DATABASE TABLES CREATED & POPULATED (when --views is used):
  * - football_odds
- * - payouts: Stores bookmaker payout calculations per fixture/bookie (auto-updating)
  * - fair_odds: Stores fair odds calculations per fixture/bookie (auto-updating)
  * - Automatic triggers keep tables updated when odds change
  *
@@ -21,7 +20,7 @@
  *   function: '1' or 'hours', '2' or 'goals', '3' or 'elo', '4' or 'home-advantage', '5' or 'xg' or 'rolling-xg', '6' or 'market-xg', '7' or 'prediction-odds' or 'odds', '8' or 'cleanup-odds', 'all' (default)
  *   Multiple functions can be specified comma-separated, e.g., '2,5' to run goals and rolling-xg calculations
  *   --fixture-ids=id1,id2,id3: Process only specific fixture IDs (comma-separated)
- *   --views: Create & populate auto-updating calculated odds tables (payouts, fair_odds) + drop old views
+ *   --views: Create & populate auto-updating calculated odds tables (fair_odds) + drop old views
  *
  * LEAGUE-SPECIFIC FILTERING:
  *   - For League matches: Only same-country League matches are used for rolling xG calculations (min: 5 matches)
@@ -54,6 +53,46 @@ async function runCalculations() {
     }
 
     const sql = `
+    -- Create football_stats table if it doesn't exist
+    CREATE TABLE IF NOT EXISTS football_stats (
+        fixture_id              BIGINT PRIMARY KEY,
+        created_at              TIMESTAMP DEFAULT NOW(),
+        updated_at              TIMESTAMP DEFAULT NOW(),
+
+        -- Hours since last match for each team
+        hours_since_last_match_home          INTEGER,
+        hours_since_last_match_away          INTEGER,
+
+        -- League average goals (past 160 fixtures)
+        avg_goals_league                     DECIMAL(4,2),
+
+        -- Team ELO ratings (calculated using xG or actual goals)
+        elo_home                            INTEGER,
+        elo_away                            INTEGER,
+        league_elo                          INTEGER,
+
+        -- Home advantage (average home_xg - away_xg for past 160 matches, capped 0.1-0.6)
+        home_advantage                       DECIMAL(3,2),
+
+        -- Weighted adjusted rolling xG and xGA (across past 32 matches)
+        adjusted_rolling_xg_home                DECIMAL(4,2),
+        adjusted_rolling_xga_home                DECIMAL(4,2),
+        adjusted_rolling_xg_away                DECIMAL(4,2),
+        adjusted_rolling_xga_away                DECIMAL(4,2),
+
+        -- Weighted adjusted rolling market xG and xGA (across past 32 matches)
+        adjusted_rolling_market_xg_home         DECIMAL(4,2),
+        adjusted_rolling_market_xga_home         DECIMAL(4,2),
+        adjusted_rolling_market_xg_away         DECIMAL(4,2),
+        adjusted_rolling_market_xga_away         DECIMAL(4,2),
+
+        -- Constraints
+        FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
+    );
+
+    -- Create indexes for football_stats if they don't exist
+    CREATE INDEX IF NOT EXISTS idx_football_stats_created_at ON football_stats (created_at);
+
     -- Function to populate hours since last match (includes all scheduled matches)
     CREATE OR REPLACE FUNCTION populate_hours_batch(fixture_ids BIGINT[] DEFAULT NULL) RETURNS INTEGER AS $$
     DECLARE
@@ -1229,7 +1268,6 @@ async function runCalculations() {
         fixture_id := COALESCE(NEW.fixture_id, OLD.fixture_id);
 
         -- Update all calculated tables for this fixture
-        PERFORM update_payouts_for_fixture(fixture_id);
         PERFORM update_fair_odds_for_fixture(fixture_id);
 
         -- Return appropriate value for AFTER trigger
@@ -1395,43 +1433,12 @@ async function runCalculations() {
                 throw alterError;
             }
 
-            // Add latest_lines column to football_payouts if it doesn't exist
-            try {
-                await pool.query(`
-                    ALTER TABLE football_payouts
-                    ADD COLUMN IF NOT EXISTS latest_lines JSONB
-                `);
-                console.log('✅ latest_lines column added to football_payouts');
-            } catch (alterError) {
-                console.error('❌ Error adding latest_lines column:', alterError.message);
-                throw alterError;
-            }
         }
 
         // Create calculated odds tables
         console.log('📝 Creating calculated odds tables...');
         try {
             const tablesSQL = `
-
-                -- Payouts table - stores bookmaker payout calculations per fixture/bookie combination
-                CREATE TABLE IF NOT EXISTS football_payouts (
-                    fixture_id BIGINT,
-                    bookie VARCHAR(100),
-                    decimals INTEGER,
-
-                    -- Individual bookie payouts
-                    payout_x12 DECIMAL(5,4),
-                    payout_ah JSONB,
-                    payout_ou JSONB,
-
-                    -- Latest betting lines from bookmaker data
-                    latest_lines JSONB,
-
-                    updated_at TIMESTAMP DEFAULT NOW(),
-
-                    PRIMARY KEY (fixture_id, bookie),
-                    FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
-                );
 
                 -- Fair odds table - stores fair odds calculations per fixture/bookie combination
                 CREATE TABLE IF NOT EXISTS football_fair_odds (
@@ -1442,7 +1449,7 @@ async function runCalculations() {
                     fair_odds_x12 JSONB,
                     fair_odds_ah JSONB,
                     fair_odds_ou JSONB,
-                    latest_lines JSONB,
+                    lines JSONB,
                     latest_t JSONB,
 
                     updated_at TIMESTAMP DEFAULT NOW(),
@@ -1450,8 +1457,6 @@ async function runCalculations() {
                     PRIMARY KEY (fixture_id, bookie),
                     FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
                 );
-
-                CREATE INDEX IF NOT EXISTS idx_football_payouts_payouts ON football_payouts (payout_x12, payout_ah, payout_ou);
             `;
             await pool.query(tablesSQL);
             console.log('✅ Calculated odds tables created');
@@ -1465,109 +1470,13 @@ async function runCalculations() {
         try {
             const functionsSQL = `
 
-                -- Function to update payouts for a fixture
-                CREATE OR REPLACE FUNCTION update_payouts_for_fixture(p_fixture_id BIGINT) RETURNS VOID AS $$
-                BEGIN
-
-                    -- Insert or update calculated payouts for all bookies for this fixture
-                    INSERT INTO football_payouts (
-                        fixture_id, bookie, decimals,
-                        payout_x12, payout_ah, payout_ou, latest_lines
-                    )
-      SELECT
-          fo.fixture_id,
-          fo.bookie,
-          fo.decimals,
-                        -- Individual bookie payouts
-          CASE
-              WHEN fo.odds_x12 IS NOT NULL THEN
-              ROUND(
-                  (
-                      1.0 / (
-                          (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>0)::numeric / POWER(10, fo.decimals), 0)) +
-                          (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>1)::numeric / POWER(10, fo.decimals), 0)) +
-                          (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>2)::numeric / POWER(10, fo.decimals), 0))
-                      )
-                  )::numeric,
-                  4
-              )
-              ELSE NULL
-          END as payout_x12,
-
-          CASE
-              WHEN fo.odds_ah IS NOT NULL THEN
-                  (
-                SELECT jsonb_agg(
-                    CASE
-                        WHEN (ah_h.elem::numeric = 0 OR ah_a.elem::numeric = 0) THEN NULL
-                        ELSE ROUND(
-                            (
-                                1.0 / (
-                                    (1.0 / (ah_h.elem::numeric / POWER(10, fo.decimals))) +
-                                    (1.0 / (ah_a.elem::numeric / POWER(10, fo.decimals)))
-                                )
-                            )::numeric,
-                            4
-                        )
-                                        END ORDER BY ah_h.idx
-                )
-                      FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY ah_h(elem, idx)
-                      JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY ah_a(elem, idx)
-                      ON ah_h.idx = ah_a.idx
-                  )
-              ELSE NULL
-          END as payout_ah,
-
-          CASE
-              WHEN fo.odds_ou IS NOT NULL THEN
-                  (
-                SELECT jsonb_agg(
-                    CASE
-                        WHEN (ou_o.elem::numeric = 0 OR ou_u.elem::numeric = 0) THEN NULL
-                        ELSE ROUND(
-                            (
-                                1.0 / (
-                                    (1.0 / (ou_o.elem::numeric / POWER(10, fo.decimals))) +
-                                    (1.0 / (ou_u.elem::numeric / POWER(10, fo.decimals)))
-                                )
-                            )::numeric,
-                            4
-                        )
-                                        END ORDER BY ou_o.idx
-                )
-                      FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY ou_o(elem, idx)
-                      JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY ou_u(elem, idx)
-                      ON ou_o.idx = ou_u.idx
-                  )
-              ELSE NULL
-          END as payout_ou,
-
-          -- Latest lines from bookmaker data
-          (fo.lines->-1) as latest_lines
-
-                    FROM football_odds fo
-                    WHERE fo.fixture_id = p_fixture_id
-                      AND fo.bookie NOT IN ('Prediction')
-                      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
-                    ON CONFLICT (fixture_id, bookie) DO UPDATE SET
-                        payout_x12 = EXCLUDED.payout_x12,
-                        payout_ah = EXCLUDED.payout_ah,
-                        payout_ou = EXCLUDED.payout_ou,
-                        latest_lines = EXCLUDED.latest_lines,
-                        updated_at = NOW()
-                    WHERE football_payouts.payout_x12 IS DISTINCT FROM EXCLUDED.payout_x12
-                       OR football_payouts.payout_ah IS DISTINCT FROM EXCLUDED.payout_ah
-                       OR football_payouts.payout_ou IS DISTINCT FROM EXCLUDED.payout_ou
-                       OR football_payouts.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines;
-                END;
-                $$ LANGUAGE plpgsql;
 
                 -- Function to update fair odds for a fixture (only update when odds are available and valid)
                 CREATE OR REPLACE FUNCTION update_fair_odds_for_fixture(p_fixture_id BIGINT) RETURNS VOID AS $$
                 BEGIN
                     -- Insert or update fair odds only when odds data is available and valid
                     -- This preserves existing fair odds when bookmaker odds become empty/unavailable
-                    INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines, latest_t)
+                    INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, lines, latest_t)
                     SELECT
                         fo.fixture_id,
                         fo.bookie,
@@ -1830,26 +1739,39 @@ async function runCalculations() {
                         END as fair_odds_ou,
 
                         -- Latest lines from bookmaker data
-                        (fo.lines->-1) as latest_lines,
+                        (fo.lines->-1) as lines,
 
                         -- Latest timestamps from the odds data used for fair odds calculation
                         fo.latest_t as latest_t
 
-                    FROM football_odds fo
-                    WHERE fo.fixture_id = p_fixture_id
-                      AND fo.bookie != 'Prediction'
-                      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+                    FROM (
+                        SELECT DISTINCT ON (fixture_id, bookie)
+                            fixture_id,
+                            bookie,
+                            decimals,
+                            odds_x12,
+                            odds_ah,
+                            odds_ou,
+                            lines,
+                            latest_t,
+                            updated_at
+                        FROM football_odds
+                        WHERE fixture_id = p_fixture_id
+                          AND bookie != 'Prediction'
+                          AND (odds_x12 IS NOT NULL OR odds_ah IS NOT NULL OR odds_ou IS NOT NULL)
+                        ORDER BY fixture_id, bookie, updated_at DESC
+                    ) fo
                     ON CONFLICT (fixture_id, bookie) DO UPDATE SET
                         fair_odds_x12 = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL THEN EXCLUDED.fair_odds_x12 ELSE football_fair_odds.fair_odds_x12 END,
                         fair_odds_ah = CASE WHEN EXCLUDED.fair_odds_ah IS NOT NULL THEN EXCLUDED.fair_odds_ah ELSE football_fair_odds.fair_odds_ah END,
                         fair_odds_ou = CASE WHEN EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.fair_odds_ou ELSE football_fair_odds.fair_odds_ou END,
-                        latest_lines = EXCLUDED.latest_lines,
+                        lines = EXCLUDED.lines,
                         latest_t = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.latest_t ELSE football_fair_odds.latest_t END,
                         updated_at = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN NOW() ELSE football_fair_odds.updated_at END
                     WHERE (EXCLUDED.fair_odds_x12 IS NOT NULL AND football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12)
                        OR (EXCLUDED.fair_odds_ah IS NOT NULL AND football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah)
                        OR (EXCLUDED.fair_odds_ou IS NOT NULL AND football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou)
-                       OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
+                       OR football_fair_odds.lines IS DISTINCT FROM EXCLUDED.lines
                        OR ((EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL) AND football_fair_odds.latest_t IS DISTINCT FROM EXCLUDED.latest_t);
                 END;
                 $$ LANGUAGE plpgsql;
@@ -1880,107 +1802,6 @@ async function runCalculations() {
 
         if (fixtureIds.length > 0) {
 
-            // Populate payouts table
-            console.log('Populating payouts table...');
-            for (let i = 0; i < fixtureIds.length; i += 50) {
-                const batch = fixtureIds.slice(i, i + 50);
-                const placeholders3 = batch.map((_, idx) => `$${idx + 1}`).join(',');
-                try {
-                    await pool.query(`
-                        INSERT INTO football_payouts (
-                            fixture_id, bookie, decimals,
-                            payout_x12, payout_ah, payout_ou, latest_lines
-                        )
-                        SELECT
-                            fo.fixture_id,
-                            fo.bookie,
-                            fo.decimals,
-                            -- Individual bookie payouts
-                            CASE
-                                WHEN fo.odds_x12 IS NOT NULL THEN
-                                ROUND(
-                                    (
-                                        1.0 / (
-                                            (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>0)::numeric / POWER(10, fo.decimals), 0)) +
-                                            (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>1)::numeric / POWER(10, fo.decimals), 0)) +
-                                            (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>2)::numeric / POWER(10, fo.decimals), 0))
-                                        )
-                                    )::numeric,
-                                    4
-                                )
-                                ELSE NULL
-                            END as payout_x12,
-
-                            CASE
-                                WHEN fo.odds_ah IS NOT NULL THEN
-                                    (
-                                    SELECT jsonb_agg(
-                                        CASE
-                                            WHEN (ah_h.elem::numeric = 0 OR ah_a.elem::numeric = 0) THEN NULL
-                                            ELSE ROUND(
-                                                (
-                                                    1.0 / (
-                                                        (1.0 / (ah_h.elem::numeric / POWER(10, fo.decimals))) +
-                                                        (1.0 / (ah_a.elem::numeric / POWER(10, fo.decimals)))
-                                                    )
-                                                )::numeric,
-                                                4
-                                            )
-                                            END ORDER BY ah_h.idx
-                                    )
-                                        FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY ah_h(elem, idx)
-                                        JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY ah_a(elem, idx)
-                                        ON ah_h.idx = ah_a.idx
-                                    )
-                                ELSE NULL
-                            END as payout_ah,
-
-                            CASE
-                                WHEN fo.odds_ou IS NOT NULL THEN
-                                    (
-                                    SELECT jsonb_agg(
-                                        CASE
-                                            WHEN (ou_o.elem::numeric = 0 OR ou_u.elem::numeric = 0) THEN NULL
-                                            ELSE ROUND(
-                                                (
-                                                    1.0 / (
-                                                        (1.0 / (ou_o.elem::numeric / POWER(10, fo.decimals))) +
-                                                        (1.0 / (ou_u.elem::numeric / POWER(10, fo.decimals)))
-                                                    )
-                                                )::numeric,
-                                                4
-                                            )
-                                            END ORDER BY ou_o.idx
-                                    )
-                                        FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY ou_o(elem, idx)
-                                        JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY ou_u(elem, idx)
-                                        ON ou_o.idx = ou_u.idx
-                                    )
-                                ELSE NULL
-                            END as payout_ou,
-
-                            -- Latest lines from bookmaker data
-                            (fo.lines->-1) as latest_lines
-                        FROM football_odds fo
-                        WHERE fo.fixture_id = ANY(ARRAY[${placeholders3}]::BIGINT[])
-                          AND fo.bookie != 'Prediction'
-                          AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
-                        ON CONFLICT (fixture_id, bookie) DO UPDATE SET
-                            payout_x12 = EXCLUDED.payout_x12,
-                            payout_ah = EXCLUDED.payout_ah,
-                            payout_ou = EXCLUDED.payout_ou,
-                            latest_lines = EXCLUDED.latest_lines,
-                            updated_at = NOW()
-                        WHERE football_payouts.payout_x12 IS DISTINCT FROM EXCLUDED.payout_x12
-                           OR football_payouts.payout_ah IS DISTINCT FROM EXCLUDED.payout_ah
-                           OR football_payouts.payout_ou IS DISTINCT FROM EXCLUDED.payout_ou
-                           OR football_payouts.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
-                    `, batch);
-                } catch (error) {
-                    console.error(`❌ Error populating payouts batch ${Math.floor(i/50) + 1}:`, error.message);
-                }
-            }
-            console.log('✅ Payouts table populated successfully');
 
             // Populate fair_odds table
             console.log('Populating fair_odds table...');
@@ -1989,8 +1810,8 @@ async function runCalculations() {
                 const placeholders = batch.map((_, idx) => `$${idx + 1}`).join(',');
                 try {
                     await pool.query(`
-                        INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines, latest_t)
-                        SELECT
+                        INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, lines, latest_t)
+                        SELECT DISTINCT ON (fo.fixture_id, fo.bookie)
                             fo.fixture_id,
                             fo.bookie,
                             fo.decimals,
@@ -2252,7 +2073,7 @@ async function runCalculations() {
                             END as fair_odds_ou,
 
                             -- Latest lines from bookmaker data
-                            (fo.lines->-1) as latest_lines,
+                            (fo.lines->-1) as lines,
 
                             -- Latest timestamps from the odds data used for fair odds calculation
                             fo.latest_t as latest_t
@@ -2261,17 +2082,18 @@ async function runCalculations() {
                         WHERE fo.fixture_id = ANY(ARRAY[${placeholders}]::BIGINT[])
                           AND fo.bookie != 'Prediction'
                           AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+                        ORDER BY fo.fixture_id, fo.bookie, fo.latest_t DESC
                         ON CONFLICT (fixture_id, bookie) DO UPDATE SET
                             fair_odds_x12 = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL THEN EXCLUDED.fair_odds_x12 ELSE football_fair_odds.fair_odds_x12 END,
                             fair_odds_ah = CASE WHEN EXCLUDED.fair_odds_ah IS NOT NULL THEN EXCLUDED.fair_odds_ah ELSE football_fair_odds.fair_odds_ah END,
                             fair_odds_ou = CASE WHEN EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.fair_odds_ou ELSE football_fair_odds.fair_odds_ou END,
-                            latest_lines = EXCLUDED.latest_lines,
+                            lines = EXCLUDED.lines,
                             latest_t = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.latest_t ELSE football_fair_odds.latest_t END,
                             updated_at = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN NOW() ELSE football_fair_odds.updated_at END
                         WHERE (EXCLUDED.fair_odds_x12 IS NOT NULL AND football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12)
                            OR (EXCLUDED.fair_odds_ah IS NOT NULL AND football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah)
                            OR (EXCLUDED.fair_odds_ou IS NOT NULL AND football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou)
-                           OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines
+                           OR football_fair_odds.lines IS DISTINCT FROM EXCLUDED.lines
                            OR ((EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL) AND football_fair_odds.latest_t IS DISTINCT FROM EXCLUDED.latest_t)
                     `, batch);
                 } catch (error) {
@@ -2294,6 +2116,20 @@ async function runCalculations() {
     // Create all statistical functions (needed regardless of --views flag)
     console.log('Creating database functions...');
     await pool.query(sql);
+
+    // Create concurrent indexes separately (cannot run inside transaction)
+    console.log('Creating concurrent indexes...');
+    try {
+        await pool.query('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_stats_fixture_elo ON football_stats (fixture_id, elo_home, elo_away, league_elo, home_advantage)');
+    } catch (error) {
+        console.error('⚠️  Error creating idx_football_stats_fixture_elo index:', error.message);
+    }
+
+    try {
+        await pool.query('CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_football_stats_elos ON football_stats (elo_home, elo_away, league_elo) WHERE elo_home IS NOT NULL AND elo_away IS NOT NULL AND league_elo IS NOT NULL');
+    } catch (error) {
+        console.error('⚠️  Error creating idx_football_stats_elos index:', error.message);
+    }
 
     const startTime = Date.now();
     let totalCount = 0;

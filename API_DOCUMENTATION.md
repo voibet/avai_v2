@@ -250,7 +250,7 @@ Returns detailed information for a specific team including latest ELO rating.
 Returns odds data for fixtures with optional filtering.
 
 **Query Parameters:**
-- `fixtureId` (number|string): Single fixture ID or comma-separated list of IDs
+- `fixture_id` (number|string): Single fixture ID or comma-separated list of IDs
 - `limit` (number): Maximum number of fixtures to return
 - `page` (number): Page number for pagination
 - `bookies` (string): Comma-separated list of bookmakers to filter by

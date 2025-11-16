@@ -138,18 +138,54 @@ export class MonacoOddsService {
 
     this.marketRefetchInterval = setInterval(async () => {
       try {
+        // Store old mappings for comparison
+        const oldMarketMapping = new Map(this.marketMapping);
+        const oldEventIdToMappings = new Map(this.eventIdToMappings);
+
         // Clear market mappings and order books before refetch to rebuild them
         this.marketMapping.clear();
         this.eventIdToMappings.clear();
         this.subscribedMarketIds.clear();
         this.subscribedMarketKeys.clear();
         this.orderBooks.clear();
+
         await this.fetchAndProcessMarkets();
         console.log(`Refetched ${this.marketMapping.size} market mappings`);
+
+        // Check if lines or IDs changed by comparing market mappings
+        const fixturesWithChanges = this.getFixturesWithMarketChanges(oldMarketMapping, oldEventIdToMappings);
+
+        if (fixturesWithChanges.size > 0) {
+          console.log(`Market changes detected for ${fixturesWithChanges.size} fixtures, updating database...`);
+
+          // Only update database for fixtures that had changes
+          for (const fixtureId of fixturesWithChanges) {
+            const eventMappings = this.eventIdToMappings.get(this.getEventIdForFixture(fixtureId));
+            if (eventMappings) {
+              // Convert mappings back to MonacoMarket format for ensureFixtureOddsRecord
+              const markets = eventMappings.map(mapping => ({
+                id: mapping.marketId,
+                eventId: mapping.eventId,
+                marketTypeId: mapping.marketTypeId,
+                name: mapping.name,
+                marketOutcomes: mapping.outcomeMappings ? Object.keys(mapping.outcomeMappings).map((outcomeId, index) => ({
+                  id: outcomeId,
+                  title: `Outcome ${index}`,
+                  ordering: mapping.outcomeMappings![outcomeId]
+                })) : [],
+                prices: [] // Prices not needed for lines/IDs comparison
+              }));
+
+              await this.ensureFixtureOddsRecord(fixtureId, markets);
+            }
+          }
+        } else {
+          console.log('No market changes detected, skipping database updates');
+        }
       } catch (error) {
         console.error('Error refetching Monaco markets:', error);
       }
-    }, 10 * 60 * 1000);
+    }, 2 * 60 * 1000);
 
     console.log('Monaco odds service started');
   }
@@ -1504,5 +1540,60 @@ export class MonacoOddsService {
     }
 
     return merged;
+  }
+
+  /**
+   * Compares old and new market mappings to determine which fixtures had market changes
+   */
+  private getFixturesWithMarketChanges(
+    oldMarketMapping: Map<string, MarketMapping>,
+    oldEventIdToMappings: Map<string, MarketMapping[]>
+  ): Set<number> {
+    const fixturesWithChanges = new Set<number>();
+
+    // Check for new or changed markets
+    for (const [mappingKey, newMapping] of this.marketMapping) {
+      const oldMapping = oldMarketMapping.get(mappingKey);
+
+      if (!oldMapping) {
+        // New market added
+        if (newMapping.fixtureId) {
+          fixturesWithChanges.add(newMapping.fixtureId);
+        }
+        continue;
+      }
+
+      // Check if market properties changed
+      const marketChanged =
+        oldMapping.marketId !== newMapping.marketId ||
+        oldMapping.marketType !== newMapping.marketType ||
+        oldMapping.lineValue !== newMapping.lineValue ||
+        JSON.stringify(oldMapping.outcomeMappings) !== JSON.stringify(newMapping.outcomeMappings);
+
+      if (marketChanged && newMapping.fixtureId) {
+        fixturesWithChanges.add(newMapping.fixtureId);
+      }
+    }
+
+    // Check for removed markets
+    for (const [mappingKey, oldMapping] of oldMarketMapping) {
+      if (!this.marketMapping.has(mappingKey) && oldMapping.fixtureId) {
+        fixturesWithChanges.add(oldMapping.fixtureId);
+      }
+    }
+
+    return fixturesWithChanges;
+  }
+
+  /**
+   * Gets the eventId for a given fixtureId from current mappings
+   */
+  private getEventIdForFixture(fixtureId: number): string | undefined {
+    for (const [eventId, mappings] of this.eventIdToMappings) {
+      if (mappings.some(mapping => mapping.fixtureId === fixtureId)) {
+        return eventId;
+      }
+    }
+    return undefined;
   }
 }

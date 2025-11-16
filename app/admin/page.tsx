@@ -507,7 +507,7 @@ export default function AdminPage() {
       case '3':
         tablesToProcess = [
           'football_leagues', 'football_teams', 'football_fixtures', 'football_odds',
-          'football_payouts', 'football_fair_odds', 'football_predictions', 'football_stats'
+          'football_fair_odds', 'football_predictions', 'football_stats'
         ];
         break;
     }

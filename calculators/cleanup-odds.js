@@ -68,7 +68,28 @@ export async function cleanupPastFixturesOdds() {
           return true;
         };
 
-        // Helper function to filter odds array to one per hour and remove consecutive duplicates
+        // Helper function to get a signature for odds comparison (excluding timestamp)
+        const getOddsSignature = (entry) => {
+          if (!entry) return null;
+
+          // Create a signature based on the odds data (excluding 't' timestamp)
+          const oddsData = { ...entry };
+          delete oddsData.t;
+
+          // Convert arrays to strings for comparison
+          const signature = {};
+          for (const [key, value] of Object.entries(oddsData)) {
+            if (Array.isArray(value)) {
+              signature[key] = JSON.stringify(value);
+            } else {
+              signature[key] = value;
+            }
+          }
+
+          return JSON.stringify(signature);
+        };
+
+        // Helper function to filter odds array to one per hour and remove exact duplicates
         const filterOddsArray = (oddsArray) => {
           if (!oddsArray || oddsArray.length <= 2) return oddsArray;
 
@@ -77,12 +98,35 @@ export async function cleanupPastFixturesOdds() {
           // Sort by timestamp
           const sorted = [...oddsArray].sort((a, b) => a.t - b.t);
 
-          // Always keep first and last
-          const first = sorted[0];
-          const last = sorted[sorted.length - 1];
+          // First, remove exact duplicates - keep only the most recent entry for each unique odds signature
+          const uniqueOdds = new Map();
+
+          sorted.forEach(entry => {
+            const signature = getOddsSignature(entry);
+            if (!uniqueOdds.has(signature)) {
+              uniqueOdds.set(signature, entry);
+            } else {
+              // Keep the more recent entry (higher timestamp)
+              const existing = uniqueOdds.get(signature);
+              if (entry.t > existing.t) {
+                uniqueOdds.set(signature, entry);
+              }
+            }
+          });
+
+          const deduplicated = Array.from(uniqueOdds.values());
+
+          // If we have 2 or fewer unique entries, return them
+          if (deduplicated.length <= 2) {
+            return deduplicated.sort((a, b) => a.t - b.t);
+          }
+
+          // Always keep first and last from the deduplicated set
+          const first = deduplicated[0];
+          const last = deduplicated[deduplicated.length - 1];
 
           // Group middle entries by hour and keep one per hour
-          const middleEntries = sorted.slice(1, -1);
+          const middleEntries = deduplicated.slice(1, -1);
           const hourlyMap = new Map();
 
           middleEntries.forEach(entry => {
@@ -98,16 +142,7 @@ export async function cleanupPastFixturesOdds() {
           // Sort back by timestamp
           filtered = filtered.sort((a, b) => a.t - b.t);
 
-          // Remove consecutive entries with identical odds
-          const deduplicated = [filtered[0]]; // Always keep first entry
-
-          for (let i = 1; i < filtered.length; i++) {
-            if (!areOddsEqual(filtered[i], filtered[i - 1])) {
-              deduplicated.push(filtered[i]);
-            }
-          }
-
-          return deduplicated;
+          return filtered;
         };
 
         // Apply filtering to all odds arrays
@@ -180,8 +215,112 @@ export async function cleanupPastFixturesOdds() {
   }
 }
 
+// Test function for the deduplication logic
+function testDeduplication() {
+  // Test data similar to the user's example
+  const testOddsX12 = [
+    { t: 1762013154, x12: [3477, 3800, 2226] },
+    { t: 1763222884, x12: [3477, 3800, 2226] },
+    { t: 1763223801, x12: [3477, 3800, 2226] },
+    { t: 1763224877, x12: [3477, 3800, 2226] },
+    { t: 1763225008, x12: [3477, 3800, 2226] },
+    { t: 1763225083, x12: [3477, 3800, 2226] }
+  ];
+
+  // Helper function to get a signature for odds comparison (excluding timestamp)
+  const getOddsSignature = (entry) => {
+    if (!entry) return null;
+
+    // Create a signature based on the odds data (excluding 't' timestamp)
+    const oddsData = { ...entry };
+    delete oddsData.t;
+
+    // Convert arrays to strings for comparison
+    const signature = {};
+    for (const [key, value] of Object.entries(oddsData)) {
+      if (Array.isArray(value)) {
+        signature[key] = JSON.stringify(value);
+      } else {
+        signature[key] = value;
+      }
+    }
+
+    return JSON.stringify(signature);
+  };
+
+  // Helper function to filter odds array to one per hour and remove exact duplicates
+  const filterOddsArray = (oddsArray) => {
+    if (!oddsArray || oddsArray.length <= 2) return oddsArray;
+
+    if (!Array.isArray(oddsArray) || oddsArray.length <= 2) return oddsArray;
+
+    // Sort by timestamp
+    const sorted = [...oddsArray].sort((a, b) => a.t - b.t);
+
+    // First, remove exact duplicates - keep only the most recent entry for each unique odds signature
+    const uniqueOdds = new Map();
+
+    sorted.forEach(entry => {
+      const signature = getOddsSignature(entry);
+      if (!uniqueOdds.has(signature)) {
+        uniqueOdds.set(signature, entry);
+      } else {
+        // Keep the more recent entry (higher timestamp)
+        const existing = uniqueOdds.get(signature);
+        if (entry.t > existing.t) {
+          uniqueOdds.set(signature, entry);
+        }
+      }
+    });
+
+    const deduplicated = Array.from(uniqueOdds.values());
+
+    // If we have 2 or fewer unique entries, return them
+    if (deduplicated.length <= 2) {
+      return deduplicated.sort((a, b) => a.t - b.t);
+    }
+
+    // Always keep first and last from the deduplicated set
+    const first = deduplicated[0];
+    const last = deduplicated[deduplicated.length - 1];
+
+    // Group middle entries by hour and keep one per hour
+    const middleEntries = deduplicated.slice(1, -1);
+    const hourlyMap = new Map();
+
+    middleEntries.forEach(entry => {
+      const hourKey = Math.floor(entry.t / 3600) * 3600; // Round down to nearest hour
+      if (!hourlyMap.has(hourKey)) {
+        hourlyMap.set(hourKey, entry);
+      }
+    });
+
+    // Combine first, hourly entries, and last
+    let filtered = [first, ...Array.from(hourlyMap.values()), last];
+
+    // Sort back by timestamp
+    filtered = filtered.sort((a, b) => a.t - b.t);
+
+    return filtered;
+  };
+
+  const result = filterOddsArray(testOddsX12);
+  console.log('Original entries:', testOddsX12.length);
+  console.log('Filtered entries:', result.length);
+  console.log('Result:', result);
+
+  return result;
+}
+
 // Run directly if this file is executed
 if (process.argv[1].endsWith('cleanup-odds.js')) {
+  // Check if --test flag is provided
+  if (process.argv.includes('--test')) {
+    console.log('Running deduplication test...');
+    testDeduplication();
+    process.exit(0);
+  }
+
   cleanupPastFixturesOdds()
     .then(result => {
       console.log('✅ Cleanup completed successfully:', result);

@@ -42,10 +42,7 @@ interface OddsData {
     fair_odds_x12?: any;
     fair_odds_ah?: any;
     fair_odds_ou?: any;
-    latest_lines?: any;
-    payout_x12?: number;
-    payout_ah?: number[];
-    payout_ou?: number[];
+    lines?: any;
   }>;
 }
 
@@ -581,21 +578,12 @@ export function FixtureOdds({
           } : null
         },
         decimals: bookmaker.decimals,
-        isFairOdds: false,
-        payout: bookmaker.bookie === 'Prediction' ? {
-          x12: null,
-          ah: null,
-          ou: null
-        } : {
-          x12: bookmaker.payout_x12 || null,
-          ah: bookmaker.payout_ah || null,  // An array of payout values per line
-          ou: bookmaker.payout_ou || null   // An array of payout values per line
-        }
+        isFairOdds: false
       };
     }
 
     return acc;
-  }, {} as Record<string, { bookie: string; odds: any; decimals: number; isFairOdds?: boolean; payout?: { x12: number | null; ah: number[] | null; ou: number[] | null } }>);
+  }, {} as Record<string, { bookie: string; odds: any; decimals: number; isFairOdds?: boolean }>);
 
 
   const bookmakers = Object.values(transformedData).sort((a, b) => {

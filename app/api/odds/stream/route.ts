@@ -47,7 +47,7 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
         ffo.fair_odds_x12,
         ffo.fair_odds_ah,
         ffo.fair_odds_ou,
-        jsonb_build_object('ah', ffo.latest_lines->'ah', 'ou', ffo.latest_lines->'ou') as fair_odds_lines,
+        jsonb_build_object('ah', ffo.lines->'ah', 'ou', ffo.lines->'ou') as fair_odds_lines,
         ffo.latest_t as fair_odds_latest_t
       FROM football_fixtures ff
       LEFT JOIN football_odds fo ON ff.id = fo.fixture_id

@@ -22,7 +22,6 @@
 -- - football_leagues (league information and season data)
 -- - football_teams (team information)
 -- - football_odds (bookmaker odds with complete historical snapshots)
--- - football_payouts (calculated bookmaker payout margins)
 -- - football_fair_odds (fair odds without bookmaker margins)
 -- - football_predictions (MLP neural network predictions and manual adjustments)
 -- - football_stats (calculated team statistics: ELO, rolling xG, etc.)
@@ -40,7 +39,6 @@
 --
 -- 2. ODDS AND PREDICTIONS (lines ~149-295)
 --    - football_odds: Historical bookmaker odds data (line ~154)
---    - football_payouts: Calculated bookmaker margins (line ~233)
 --    - football_fair_odds: Odds without bookmaker profit (line ~254)
 --    - football_predictions: MLP predictions and adjustments (line ~277)
 --
@@ -258,26 +256,6 @@ CREATE TRIGGER trg_notify_fixture_update
 AFTER INSERT OR UPDATE ON football_fixtures
 FOR EACH ROW EXECUTE FUNCTION notify_fixture_update();
 
--- Payouts table - stores calculated bookmaker payout margins per fixture/bookie combination
--- Used to analyze bookmaker profit margins and identify arbitrage opportunities
-CREATE TABLE IF NOT EXISTS football_payouts (
-    fixture_id BIGINT,
-    bookie VARCHAR(100),
-    decimals INTEGER,
-
-    -- Individual bookie payouts
-    payout_x12 DECIMAL(5,4),
-    payout_ah JSONB,
-    payout_ou JSONB,
-
-    -- Latest betting lines from bookmaker data
-    latest_lines JSONB,
-
-    updated_at TIMESTAMP DEFAULT NOW(),
-
-    PRIMARY KEY (fixture_id, bookie),
-    FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
-);
 
 -- Fair odds table - stores calculated fair odds (without bookmaker margins) per fixture/bookie combination
 -- Represents theoretical 'true' odds based on removing bookmaker profit from regular odds
@@ -289,7 +267,8 @@ CREATE TABLE IF NOT EXISTS football_fair_odds (
     fair_odds_x12 JSONB,
     fair_odds_ah JSONB,
     fair_odds_ou JSONB,
-    latest_lines JSONB,
+    lines JSONB,
+    latest_t JSONB,
 
     updated_at TIMESTAMP DEFAULT NOW(),
 
@@ -297,7 +276,6 @@ CREATE TABLE IF NOT EXISTS football_fair_odds (
     FOREIGN KEY (fixture_id) REFERENCES football_fixtures(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_football_payouts_payouts ON football_payouts (payout_x12, payout_ah, payout_ou);
 
 -- Predictions table - stores MLP neural network predictions and manual betting adjustments
 -- Contains predicted probabilities for home/away outcomes with optional manual overrides
@@ -409,7 +387,7 @@ CREATE INDEX IF NOT EXISTS idx_football_leagues_seasons_jsonb ON football_league
 -- ============================================
 -- FUNCTIONAL INDEXES FOR JSON PATHS
 -- ============================================
--- These indexes optimize the specific JSON path operations used in payout_view and fair_odds_view
+-- These indexes optimize the specific JSON path operations used in fair_odds_view
 
 -- Index for latest X12 odds array access (odds_x12->-1->'x12')
 -- This optimizes queries that access the latest 3-way odds (home, draw, away)
@@ -484,109 +462,13 @@ CREATE TRIGGER update_football_initial_league_elos_updated_at
 -- CALCULATED ODDS FUNCTIONS
 -- ============================================
 
--- Function to update payouts for a fixture
-CREATE OR REPLACE FUNCTION update_payouts_for_fixture(p_fixture_id BIGINT) RETURNS VOID AS $$
-BEGIN
-
-    -- Insert or update calculated payouts for all bookies for this fixture
-    INSERT INTO football_payouts (
-        fixture_id, bookie, decimals,
-        payout_x12, payout_ah, payout_ou, latest_lines
-    )
-SELECT
-    fo.fixture_id,
-    fo.bookie,
-    fo.decimals,
-                    -- Individual bookie payouts
-    CASE
-        WHEN fo.odds_x12 IS NOT NULL THEN
-        ROUND(
-            (
-                1.0 / (
-                    (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>0)::numeric / POWER(10, fo.decimals), 0)) +
-                    (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>1)::numeric / POWER(10, fo.decimals), 0)) +
-                    (1.0 / NULLIF((fo.odds_x12->-1->'x12'->>2)::numeric / POWER(10, fo.decimals), 0))
-                )
-            )::numeric,
-            4
-        )
-        ELSE NULL
-    END as payout_x12,
-
-    CASE
-        WHEN fo.odds_ah IS NOT NULL THEN
-            (
-        SELECT jsonb_agg(
-            CASE
-                WHEN (ah_h.elem::numeric = 0 OR ah_a.elem::numeric = 0) THEN NULL
-                ELSE ROUND(
-                    (
-                        1.0 / (
-                            (1.0 / (ah_h.elem::numeric / POWER(10, fo.decimals))) +
-                            (1.0 / (ah_a.elem::numeric / POWER(10, fo.decimals)))
-                        )
-                    )::numeric,
-                    4
-                )
-                            END ORDER BY ah_h.idx
-        )
-              FROM jsonb_array_elements_text((fo.odds_ah->-1->>'ah_h')::jsonb) WITH ORDINALITY ah_h(elem, idx)
-              JOIN jsonb_array_elements_text((fo.odds_ah->-1->>'ah_a')::jsonb) WITH ORDINALITY ah_a(elem, idx)
-              ON ah_h.idx = ah_a.idx
-            )
-        ELSE NULL
-    END as payout_ah,
-
-    CASE
-        WHEN fo.odds_ou IS NOT NULL THEN
-            (
-        SELECT jsonb_agg(
-            CASE
-                WHEN (ou_o.elem::numeric = 0 OR ou_u.elem::numeric = 0) THEN NULL
-                ELSE ROUND(
-                    (
-                        1.0 / (
-                            (1.0 / (ou_o.elem::numeric / POWER(10, fo.decimals))) +
-                            (1.0 / (ou_u.elem::numeric / POWER(10, fo.decimals)))
-                        )
-                    )::numeric,
-                    4
-                )
-                            END ORDER BY ou_o.idx
-        )
-              FROM jsonb_array_elements_text((fo.odds_ou->-1->>'ou_o')::jsonb) WITH ORDINALITY ou_o(elem, idx)
-              JOIN jsonb_array_elements_text((fo.odds_ou->-1->>'ou_u')::jsonb) WITH ORDINALITY ou_u(elem, idx)
-              ON ou_o.idx = ou_u.idx
-            )
-        ELSE NULL
-    END as payout_ou,
-
-    -- Latest lines from bookmaker data
-    (fo.lines->-1) as latest_lines
-
-    FROM football_odds fo
-    WHERE fo.fixture_id = p_fixture_id
-      AND fo.bookie NOT IN ('Prediction')
-      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
-    ON CONFLICT (fixture_id, bookie) DO UPDATE SET
-        payout_x12 = EXCLUDED.payout_x12,
-        payout_ah = EXCLUDED.payout_ah,
-        payout_ou = EXCLUDED.payout_ou,
-        latest_lines = EXCLUDED.latest_lines,
-        updated_at = NOW()
-    WHERE football_payouts.payout_x12 IS DISTINCT FROM EXCLUDED.payout_x12
-       OR football_payouts.payout_ah IS DISTINCT FROM EXCLUDED.payout_ah
-       OR football_payouts.payout_ou IS DISTINCT FROM EXCLUDED.payout_ou
-       OR football_payouts.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines;
-END;
-$$ LANGUAGE plpgsql;
 
 -- Function to update fair odds for a fixture (only update when odds are available and valid)
 CREATE OR REPLACE FUNCTION update_fair_odds_for_fixture(p_fixture_id BIGINT) RETURNS VOID AS $$
 BEGIN
     -- Insert or update fair odds only when odds data is available and valid
     -- This preserves existing fair odds when bookmaker odds become empty/unavailable
-    INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, latest_lines)
+    INSERT INTO football_fair_odds (fixture_id, bookie, decimals, fair_odds_x12, fair_odds_ah, fair_odds_ou, lines, latest_t)
     SELECT
         fo.fixture_id,
         fo.bookie,
@@ -837,22 +719,40 @@ BEGIN
         END as fair_odds_ou,
 
         -- Latest lines from bookmaker data
-        (fo.lines->-1) as latest_lines
+        (fo.lines->-1) as lines,
 
-    FROM football_odds fo
-    WHERE fo.fixture_id = p_fixture_id
-      AND fo.bookie != 'Prediction'
-      AND (fo.odds_x12 IS NOT NULL OR fo.odds_ah IS NOT NULL OR fo.odds_ou IS NOT NULL)
+        -- Latest timestamps from the odds data used for fair odds calculation
+        fo.latest_t as latest_t
+
+    FROM (
+        SELECT DISTINCT ON (fixture_id, bookie)
+            fixture_id,
+            bookie,
+            decimals,
+            odds_x12,
+            odds_ah,
+            odds_ou,
+            lines,
+            latest_t,
+            updated_at
+        FROM football_odds
+        WHERE fixture_id = p_fixture_id
+          AND bookie != 'Prediction'
+          AND (odds_x12 IS NOT NULL OR odds_ah IS NOT NULL OR odds_ou IS NOT NULL)
+        ORDER BY fixture_id, bookie, updated_at DESC
+    ) fo
     ON CONFLICT (fixture_id, bookie) DO UPDATE SET
-        fair_odds_x12 = EXCLUDED.fair_odds_x12,
-        fair_odds_ah = EXCLUDED.fair_odds_ah,
-        fair_odds_ou = EXCLUDED.fair_odds_ou,
-        latest_lines = EXCLUDED.latest_lines,
-        updated_at = NOW()
-    WHERE football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12
-       OR football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah
-       OR football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou
-       OR football_fair_odds.latest_lines IS DISTINCT FROM EXCLUDED.latest_lines;
+        fair_odds_x12 = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL THEN EXCLUDED.fair_odds_x12 ELSE football_fair_odds.fair_odds_x12 END,
+        fair_odds_ah = CASE WHEN EXCLUDED.fair_odds_ah IS NOT NULL THEN EXCLUDED.fair_odds_ah ELSE football_fair_odds.fair_odds_ah END,
+        fair_odds_ou = CASE WHEN EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.fair_odds_ou ELSE football_fair_odds.fair_odds_ou END,
+        lines = EXCLUDED.lines,
+        latest_t = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN EXCLUDED.latest_t ELSE football_fair_odds.latest_t END,
+        updated_at = CASE WHEN EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL THEN NOW() ELSE football_fair_odds.updated_at END
+    WHERE (EXCLUDED.fair_odds_x12 IS NOT NULL AND football_fair_odds.fair_odds_x12 IS DISTINCT FROM EXCLUDED.fair_odds_x12)
+       OR (EXCLUDED.fair_odds_ah IS NOT NULL AND football_fair_odds.fair_odds_ah IS DISTINCT FROM EXCLUDED.fair_odds_ah)
+       OR (EXCLUDED.fair_odds_ou IS NOT NULL AND football_fair_odds.fair_odds_ou IS DISTINCT FROM EXCLUDED.fair_odds_ou)
+       OR football_fair_odds.lines IS DISTINCT FROM EXCLUDED.lines
+       OR ((EXCLUDED.fair_odds_x12 IS NOT NULL OR EXCLUDED.fair_odds_ah IS NOT NULL OR EXCLUDED.fair_odds_ou IS NOT NULL) AND football_fair_odds.latest_t IS DISTINCT FROM EXCLUDED.latest_t);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -891,28 +791,3 @@ CREATE TRIGGER update_football_stats_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Trigger to update all calculated odds tables when odds change
-CREATE OR REPLACE FUNCTION update_calculated_odds_data() RETURNS TRIGGER AS $$
-DECLARE
-    fixture_id BIGINT;
-BEGIN
-    -- Handle INSERT/UPDATE vs DELETE operations
-    fixture_id := COALESCE(NEW.fixture_id, OLD.fixture_id);
-
-    -- Update all calculated tables for this fixture
-    PERFORM update_payouts_for_fixture(fixture_id);
-    PERFORM update_fair_odds_for_fixture(fixture_id);
-
-    -- Return appropriate value for AFTER trigger
-    IF TG_OP = 'DELETE' THEN
-        RETURN OLD;
-    ELSE
-        RETURN NEW;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trg_update_calculated_odds ON football_odds;
-CREATE TRIGGER trg_update_calculated_odds
-    AFTER INSERT OR UPDATE OR DELETE ON football_odds
-    FOR EACH ROW EXECUTE FUNCTION update_calculated_odds_data();
