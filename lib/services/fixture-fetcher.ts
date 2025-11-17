@@ -3,6 +3,14 @@ import { executeQuery, executeTransaction } from '../database/db-utils';
 import { League } from '../../types/database';
 import { CANCELLED, IN_PAST } from '../constants';
 
+/**
+ * Helper for consistent logging with timestamp and service prefix
+ */
+function log(message: string): void {
+  const now = new Date();
+  const time = now.toTimeString().slice(0, 8); // HH:MM:SS format
+  console.log(`${time} FixtureFetcher: ${message}`);
+}
 
 interface SeasonData {
   start: string;
@@ -144,12 +152,12 @@ export class FixtureFetcher {
         });
       } else {
         // Fall back to current seasons
-        console.log('No selected seasons provided, using current seasons');
+        log('No selected seasons provided, using current seasons');
         leaguesToProcess = await this.getCurrentLeaguesAndSeasons();
       }
 
       if (leaguesToProcess.length === 0) {
-        console.log('No leagues to process');
+        log('No leagues to process');
         return {
           success: false,
           message: 'No leagues selected or no current seasons found'
@@ -174,7 +182,7 @@ export class FixtureFetcher {
           const apiFixtureIds = apiFixtures.map(f => f.fixture.id);
           const deletedCount = await this.removeOrphanedFixtures(leagueInfo.id, leagueInfo.season, apiFixtureIds);
           if (deletedCount > 0) {
-            console.log(`Removed ${deletedCount} orphaned fixtures for league ${leagueInfo.id}, season ${leagueInfo.season}`);
+            log(`Removed ${deletedCount} orphaned fixtures for league ${leagueInfo.id}, season ${leagueInfo.season}`);
           }
 
           totalUpdated += result.updatedCount;
@@ -290,7 +298,7 @@ export class FixtureFetcher {
       return teamCountryMap;
     }
 
-    console.log(`Fetching ${missingTeamIds.length} missing teams from API...`);
+    log(`Fetching ${missingTeamIds.length} missing teams from API...`);
 
     // Fetch missing teams from API-Football Teams endpoint
     const apiTeams = await this.fetchTeamsFromAPI(missingTeamIds);
@@ -367,7 +375,7 @@ export class FixtureFetcher {
     });
 
     await executeTransaction(queries);
-    console.log(`Added/updated ${apiTeams.length} teams in database`);
+    log(`Added/updated ${apiTeams.length} teams in database`);
   }
 
   private async fetchFixturesFromAPI(leagueId?: number, season?: number): Promise<ApiFootballFixture[]> {
@@ -428,7 +436,7 @@ export class FixtureFetcher {
           'DELETE FROM football_fixtures WHERE id = ANY($1)',
           [cancelledIds]
         );
-        console.log(`Deleted ${cancelledFixtures.length} cancelled fixtures from database`);
+        log(`Deleted ${cancelledFixtures.length} cancelled fixtures from database`);
       } catch (error) {
         console.error('Error deleting cancelled fixtures:', error);
       }
@@ -445,9 +453,12 @@ export class FixtureFetcher {
     // Fetch team countries for all teams in these fixtures
     const teamCountryMap = await this.fetchMissingTeamCountries(allTeamIds);
 
-    // Build transaction queries and track status changes
+    // Build transaction queries and track status changes sequentially to avoid connection overload
     const fixtureStatusChanges: boolean[] = [];
-    const queries = await Promise.all(validFixtures.map(async (fixture) => {
+    const queries: any[] = [];
+
+    // Process fixtures sequentially to avoid overwhelming the database
+    for (const fixture of validFixtures) {
       // Get existing fixture to preserve xg_home, xg_away and check for status change to past
       let existingXG = null;
       let existingStatus = null;
@@ -459,7 +470,9 @@ export class FixtureFetcher {
         existingXG = existingResult.rows[0];
         existingStatus = existingResult.rows[0]?.status_short;
       } catch (error) {
-        console.log(`No existing fixture found for ID ${fixture.fixture.id}, will create new`);
+        log(`No existing fixture found for ID ${fixture.fixture.id}, will create new`);
+        existingXG = null;
+        existingStatus = null;
       }
 
       // Check if status changed to "in past"
@@ -562,8 +575,8 @@ export class FixtureFetcher {
         existingXG?.xg_away || null
       ];
 
-      return { query, params };
-    }));
+      queries.push({ query, params });
+    }
 
     // Execute all queries in a transaction and track status changes
     const results = await executeTransaction(queries);

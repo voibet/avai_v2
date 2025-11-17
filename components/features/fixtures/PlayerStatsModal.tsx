@@ -1,9 +1,9 @@
 'use client'
 
-import { usePlayerStats } from '../../lib/hooks/use-football-data'
-import { LoadingState } from '../ui/LoadingState'
-import { ErrorState } from '../ui/ErrorState'
-import { EmptyState } from '../ui/EmptyState'
+import { usePlayerStats } from '../../../lib/hooks/use-football-data'
+import { LoadingState } from '../../shared/LoadingState'
+import { ErrorState } from '../../shared/ErrorState'
+import { EmptyState } from '../../shared/EmptyState'
 
 interface PlayerStatsModalProps {
   playerId: number | null

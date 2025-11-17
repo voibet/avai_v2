@@ -3,6 +3,15 @@ import { FixtureFetcher } from './fixture-fetcher';
 import { XGFetcher } from './xg-fetcher';
 import { IN_PAST, IN_PLAY, IN_FUTURE } from '../constants';
 
+/**
+ * Helper for consistent logging with timestamp and service prefix
+ */
+function log(message: string): void {
+  const now = new Date();
+  const time = now.toTimeString().slice(0, 8); // HH:MM:SS format
+  console.log(`${time} Chain: ${message}`);
+}
+
 interface ChainOptions {
   type: 'league' | 'all';
   leagueId?: number;
@@ -91,10 +100,10 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
   const marketXGCalculatedFixtureIds = fixturesNeedingMarketXGResult.rows.map((row: any) => row.id);
 
   if (marketXGCalculatedFixtureIds.length > 0) {
-    console.log(`Found ${marketXGCalculatedFixtureIds.length} fixtures needing market XG: ${marketXGCalculatedFixtureIds.join(', ')}`);
+    log(`Found ${marketXGCalculatedFixtureIds.length} fixtures needing market XG: ${marketXGCalculatedFixtureIds.join(', ')}`);
     const { calculateMarketXG } = await import('@/calculators/market-xg.js');
     await calculateMarketXG(marketXGCalculatedFixtureIds);
-    console.log(`Market XG calculation complete`);
+    log(`Market XG calculation complete`);
   }
 
   // Step 3: Fetch xG data for completed matches (skip if requested)
@@ -168,7 +177,7 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
       const futureFixtureIds = futureFixturesResult.rows.map((row: any) => row.id);
 
       if (futureFixtureIds.length > 0) {
-        console.log(`Updating statistics for ${futureFixtureIds.length} future fixtures`);
+        log(`Updating statistics for ${futureFixtureIds.length} future fixtures`);
         
         // Update statistics for affected future fixtures
         await pool.query('SELECT populate_hours_batch($1)', [futureFixtureIds]);

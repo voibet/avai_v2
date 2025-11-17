@@ -8,11 +8,20 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME,
   ssl: process.env.DB_SSL === 'true' ? true : false,
-  // Connection pool settings to handle high-frequency updates
-  max: 20, // Maximum number of clients in the pool
-  min: 2, // Minimum number of clients in the pool
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
+  // Connection pool settings optimized for high-frequency updates
+  max: 50, // Reduced maximum connections to prevent database overload
+  min: 2,   // Minimum connections to keep warm
+  idleTimeoutMillis: 10000, // Close idle clients after 10 seconds
+  connectionTimeoutMillis: 5000, // Increased timeout for connection acquisition
+});
+
+// Log pool events for monitoring
+pool.on('connect', (client) => {
+  console.log(`Database client connected (total: ${pool.totalCount}, idle: ${pool.idleCount}, waiting: ${pool.waitingCount})`);
+});
+
+pool.on('error', (err, client) => {
+  console.error('Unexpected error on idle client', err);
 });
 
 export default pool;

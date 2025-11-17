@@ -1,6 +1,7 @@
 import axios from 'axios';
-import { executeQuery } from '../database/db-utils';
-import { findMatchingFixture } from '../utils/fixture-matching';
+import { executeQuery } from '../../database/db-utils';
+import { findMatchingFixture } from '../../utils/fixture-matching';
+import { IN_FUTURE } from '../../constants';
 
 interface PinnacleMarket {
   sport_id: number;
@@ -93,6 +94,15 @@ class PinnacleOddsService {
   private runInterval: NodeJS.Timeout | null = null;
 
   /**
+   * Helper for consistent logging with timestamp and service prefix
+   */
+  private log(message: string): void {
+    const now = new Date();
+    const time = now.toTimeString().slice(0, 8); // HH:MM:SS format
+    console.log(`${time} Pinnacle: ${message}`);
+  }
+
+  /**
    * Loads known pinnacle league IDs from database
    */
   private async loadKnownPinnacleLeagues(): Promise<void> {
@@ -110,7 +120,7 @@ class PinnacleOddsService {
           .filter(id => id !== null)
       );
 
-      console.log(`Loaded ${this.knownPinnacleLeagues.size} known Pinnacle league IDs`);
+      this.log(`Loaded ${this.knownPinnacleLeagues.size} known league IDs`);
     } catch (error) {
       console.error('Error loading known Pinnacle leagues:', error);
       this.knownPinnacleLeagues = new Set();
@@ -147,7 +157,7 @@ class PinnacleOddsService {
 
       return response.data;
     } catch (error) {
-      console.error('Error fetching Pinnacle odds:', error);
+      console.error('Pinnacle API timeout');
       return null;
     }
   }
@@ -174,8 +184,6 @@ class PinnacleOddsService {
       this.knownPinnacleLeagues.has(event.league_id)
     );
 
-    console.log(`Processing ${filteredEvents.length} events (filtered from ${marketData.events.length})`);
-
     let eventsProcessed = 0;
     let fixturesUpdated = 0;
 
@@ -201,7 +209,6 @@ class PinnacleOddsService {
 
     const period = event.periods?.num_0;
     if (!period) {
-      console.log(`No period data for event ${event.event_id}`);
       return { updated: false };
     }
 
@@ -215,7 +222,12 @@ class PinnacleOddsService {
                         cutoffInFuture &&
                         metaOpenFlags;
 
-    // Always check if we already have odds for this Pinnacle event
+    // Only process if market is open
+    if (!isMarketOpen) {
+      return { updated: false };
+    }
+
+    // Check if we already have odds for this Pinnacle event
     const existingOddsQuery = `
       SELECT fixture_id
       FROM football_odds
@@ -224,18 +236,13 @@ class PinnacleOddsService {
     const existingOddsResult = await executeQuery(existingOddsQuery, [event.event_id]);
 
     if (existingOddsResult.rows.length > 0) {
-      // Update existing odds - if market closed, send empty odds
-      const wasUpdated = await this.updateExistingOdds(event.event_id, period, !isMarketOpen);
-      return { updated: wasUpdated };
+      // Update existing odds
+      await this.updateExistingOdds(event.event_id, period);
+      return { updated: true };
     }
 
-    // No existing odds found - only create new if market is open
-    if (!isMarketOpen) {
-      console.log(`Skipping new event ${event.event_id} - market closed`);
-      return { updated: false };
-    }
-
-    console.log(`No existing odds for event ${event.event_id}, searching for fixture match...`);
+    // No existing odds found - create new entry
+    this.log(`No existing odds for event ${event.event_id}, searching for fixture match...`);
 
     // Parse start time
     const startTime = new Date(event.starts);
@@ -249,11 +256,11 @@ class PinnacleOddsService {
     );
 
     if (!fixtureId) {
-      console.log(`No matching fixture found for event ${event.event_id}: ${event.home} vs ${event.away}`);
+      this.log(`No matching fixture found for event ${event.event_id}: ${event.home} vs ${event.away}`);
       return { updated: false };
     }
 
-    console.log(`Found matching fixture ${fixtureId} for event ${event.event_id}`);
+    this.log(`Found matching fixture ${fixtureId} for event ${event.event_id}`);
 
     // Create new odds entry
     await this.createNewOddsEntry(fixtureId, event.event_id, period);
@@ -278,7 +285,7 @@ class PinnacleOddsService {
       const leagueResult = await executeQuery(leagueQuery, [pinnacleLeagueId]);
 
       if (leagueResult.rows.length === 0) {
-        console.log(`No league found for pinnacle_league_id ${pinnacleLeagueId}`);
+        this.log(`No league found for pinnacle_league_id ${pinnacleLeagueId}`);
         return null;
       }
 
@@ -300,7 +307,7 @@ class PinnacleOddsService {
   /**
    * Updates existing odds for a Pinnacle event
    */
-  private async updateExistingOdds(eventId: number, period: PinnaclePeriod, marketClosed: boolean = false): Promise<boolean> {
+  private async updateExistingOdds(eventId: number, period: PinnaclePeriod): Promise<void> {
     const timestamp = Math.floor(Date.now() / 1000);
 
     // Transform Pinnacle odds to our format (decimals = 3, multiply by 1000)
@@ -308,204 +315,163 @@ class PinnacleOddsService {
       return Math.round(odds * 1000);
     };
 
-    // Get existing odds
-    const existingQuery = `
+    // Get current odds data from database
+    const selectQuery = `
       SELECT fixture_id, odds_x12, odds_ah, odds_ou, lines, ids, max_stakes, latest_t
       FROM football_odds
       WHERE bookie_id = $1 AND bookie = 'Pinnacle'
     `;
-    const existingResult = await executeQuery(existingQuery, [eventId]);
+    const selectResult = await executeQuery(selectQuery, [eventId]);
 
-    if (existingResult.rows.length === 0) {
-      console.error(`No existing odds found for event ${eventId}`);
-      return false;
+    if (selectResult.rows.length === 0) {
+      throw new Error(`No existing odds found for event ${eventId}`);
     }
 
-    const existing = existingResult.rows[0];
-    const fixtureId = existing.fixture_id;
+    const row = selectResult.rows[0];
+    const fixtureId = row.fixture_id;
 
-    // Prepare odds data
-    let x12Odds = existing.odds_x12 ? existing.odds_x12 : [];
-    let ahOdds = existing.odds_ah ? existing.odds_ah : [];
-    let ouOdds = existing.odds_ou ? existing.odds_ou : [];
-    let lines = existing.lines ? existing.lines : [];
-    let ids = existing.ids ? existing.ids : [];
-    let maxStakes = existing.max_stakes ? existing.max_stakes : [];
-    const latestT = existing.latest_t ? existing.latest_t : {};
+    // Parse existing data
+    const parseJsonArray = (value: any): any[] => {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    };
 
-    if (marketClosed) {
-      // Market is closed - append empty arrays to mark closure
-      const emptyEntry = { t: timestamp };
-      x12Odds = this.mergeOddsEntry(x12Odds, emptyEntry);
-      ahOdds = this.mergeOddsEntry(ahOdds, emptyEntry);
-      ouOdds = this.mergeOddsEntry(ouOdds, emptyEntry);
-      lines = this.mergeOddsEntry(lines, emptyEntry);
-      ids = this.mergeOddsEntry(ids, emptyEntry);
-      maxStakes = this.mergeOddsEntry(maxStakes, emptyEntry);
+    let x12Odds = parseJsonArray(row.odds_x12);
+    let ahOdds = parseJsonArray(row.odds_ah);
+    let ouOdds = parseJsonArray(row.odds_ou);
+    let lines = parseJsonArray(row.lines);
+    let ids = parseJsonArray(row.ids);
+    let maxStakes = parseJsonArray(row.max_stakes);
+    let latestT = row.latest_t || {};
+
+    // Update X12 odds
+    if (period.money_line) {
+      const newX12Entry = {
+        t: timestamp,
+        x12: [
+          transformOdds(period.money_line.home),
+          transformOdds(period.money_line.draw),
+          transformOdds(period.money_line.away)
+        ]
+      };
+      x12Odds.push(newX12Entry);
       latestT.x12_ts = timestamp;
+    }
+
+    // Collect line data for both AH and OU
+    let combinedLineEntry: any = { t: timestamp };
+    let combinedIdEntry: any = { t: timestamp, line_id: period.line_id, line_ids: {} };
+
+    // Update AH odds
+    if (period.spreads && Object.keys(period.spreads).length > 0) {
+      const spreadKeys = Object.keys(period.spreads).sort((a, b) => parseFloat(a) - parseFloat(b));
+
+      const ahHome: number[] = [];
+      const ahAway: number[] = [];
+      const ahLineValues: number[] = [];
+      const ahAltLineIds: number[] = [];
+
+      spreadKeys.forEach(key => {
+        const spread = period.spreads[key];
+        ahHome.push(transformOdds(spread.home));
+        ahAway.push(transformOdds(spread.away));
+        ahLineValues.push(spread.hdp);
+        ahAltLineIds.push(spread.alt_line_id || 0);
+      });
+
+      const newAhEntry = {
+        t: timestamp,
+        ah_h: ahHome,
+        ah_a: ahAway
+      };
+
+      ahOdds.push(newAhEntry);
+      combinedLineEntry.ah = ahLineValues;
+      combinedIdEntry.line_ids.ah = ahAltLineIds;
       latestT.ah_ts = timestamp;
+    }
+
+    // Update OU odds
+    if (period.totals && Object.keys(period.totals).length > 0) {
+      const totalKeys = Object.keys(period.totals).sort((a, b) => parseFloat(a) - parseFloat(b));
+
+      const ouOver: number[] = [];
+      const ouUnder: number[] = [];
+      const ouLineValues: number[] = [];
+      const ouAltLineIds: number[] = [];
+
+      totalKeys.forEach(key => {
+        const total = period.totals[key];
+        ouOver.push(transformOdds(total.over));
+        ouUnder.push(transformOdds(total.under));
+        ouLineValues.push(total.points);
+        ouAltLineIds.push(total.alt_line_id || 0);
+      });
+
+      const newOuEntry = {
+        t: timestamp,
+        ou_o: ouOver,
+        ou_u: ouUnder
+      };
+
+      ouOdds.push(newOuEntry);
+      combinedLineEntry.ou = ouLineValues;
+      combinedIdEntry.line_ids.ou = ouAltLineIds;
       latestT.ou_ts = timestamp;
+    }
+
+    // Add combined line entry if we have any lines
+    if (combinedLineEntry.ah || combinedLineEntry.ou) {
+      lines.push(combinedLineEntry);
       latestT.lines_ts = timestamp;
+    }
+
+    // Add combined ID entry if we have any IDs
+    if (Object.keys(combinedIdEntry.line_ids).length > 0) {
+      ids.push(combinedIdEntry);
       latestT.ids_ts = timestamp;
-      latestT.stakes_ts = timestamp;
+    }
 
-      // For market closure, always update the database
-      const { query: updateQuery, params } = this.buildUpdateQuery(existing, {
-        odds_x12: x12Odds,
-        odds_ah: ahOdds,
-        odds_ou: ouOdds,
-        lines,
-        ids,
-        max_stakes: maxStakes,
-        latest_t: latestT
-      }, fixtureId);
-
-      if (updateQuery) {
-        await executeQuery(updateQuery, params);
-        console.log(`Market closed for event ${eventId} - updated closure status`);
-        return true;
-      }
-      return false;
-    } else {
-      // Market is open, update with new odds
-
-      // Update X12 odds
-      if (period.money_line) {
-        const newX12Entry = {
-          t: timestamp,
-          x12: [
-            transformOdds(period.money_line.home),
-            transformOdds(period.money_line.draw),
-            transformOdds(period.money_line.away)
-          ]
-        };
-        x12Odds = this.mergeOddsEntry(x12Odds, newX12Entry);
-      }
-
-      // Collect line data for both AH and OU
-      let combinedLineEntry: any = { t: timestamp };
-      let combinedIdEntry: any = { t: timestamp, line_id: period.line_id, line_ids: {} };
-
-      // Update AH odds
-      if (period.spreads && Object.keys(period.spreads).length > 0) {
-        const spreadKeys = Object.keys(period.spreads).sort((a, b) => parseFloat(a) - parseFloat(b));
-
-        const ahHome: number[] = [];
-        const ahAway: number[] = [];
-        const ahLineValues: number[] = [];
-        const ahAltLineIds: number[] = [];
-
-        spreadKeys.forEach(key => {
-          const spread = period.spreads[key];
-          ahHome.push(transformOdds(spread.home));
-          ahAway.push(transformOdds(spread.away));
-          ahLineValues.push(spread.hdp);
-          ahAltLineIds.push(spread.alt_line_id || 0);
-        });
-
-        const newAhEntry = {
-          t: timestamp,
-          ah_h: ahHome,
-          ah_a: ahAway
-        };
-
-        ahOdds = this.mergeOddsEntry(ahOdds, newAhEntry);
-        combinedLineEntry.ah = ahLineValues;
-        combinedIdEntry.line_ids.ah = ahAltLineIds;
-      }
-
-      // Update OU odds
-      if (period.totals && Object.keys(period.totals).length > 0) {
-        const totalKeys = Object.keys(period.totals).sort((a, b) => parseFloat(a) - parseFloat(b));
-
-        const ouOver: number[] = [];
-        const ouUnder: number[] = [];
-        const ouLineValues: number[] = [];
-        const ouAltLineIds: number[] = [];
-
-        totalKeys.forEach(key => {
-          const total = period.totals[key];
-          ouOver.push(transformOdds(total.over));
-          ouUnder.push(transformOdds(total.under));
-          ouLineValues.push(total.points);
-          ouAltLineIds.push(total.alt_line_id || 0);
-        });
-
-        const newOuEntry = {
-          t: timestamp,
-          ou_o: ouOver,
-          ou_u: ouUnder
-        };
-
-        ouOdds = this.mergeOddsEntry(ouOdds, newOuEntry);
-        combinedLineEntry.ou = ouLineValues;
-        combinedIdEntry.line_ids.ou = ouAltLineIds;
-      }
-
-      // Add combined line entry if we have any lines
-      if (combinedLineEntry.ah || combinedLineEntry.ou) {
-        lines = this.mergeOddsEntry(lines, combinedLineEntry);
-      }
-
-      // Add combined ID entry if we have any IDs
-      if (Object.keys(combinedIdEntry.line_ids).length > 0) {
-        ids = this.mergeOddsEntry(ids, combinedIdEntry);
-      }
-
-      // Update max stakes
+    // Update max stakes
+    if (period.meta) {
       const newMaxStakeEntry = {
         t: timestamp,
-        max_stake_x12: period.meta?.max_money_line ? [period.meta.max_money_line] : [],
-        max_stake_ah: period.meta?.max_spread ? { h: [period.meta.max_spread], a: [period.meta.max_spread] } : {},
-        max_stake_ou: period.meta?.max_total ? { o: [period.meta.max_total], u: [period.meta.max_total] } : {}
+        max_stake_x12: period.meta.max_money_line ? [period.meta.max_money_line] : [],
+        max_stake_ah: period.meta.max_spread ? { h: [period.meta.max_spread], a: [period.meta.max_spread] } : {},
+        max_stake_ou: period.meta.max_total ? { o: [period.meta.max_total], u: [period.meta.max_total] } : {}
       };
-      maxStakes = this.mergeOddsEntry(maxStakes, newMaxStakeEntry);
-
-      // Update timestamps
-      if (period.money_line) latestT.x12_ts = timestamp;
-      if (period.spreads) latestT.ah_ts = timestamp;
-      if (period.totals) latestT.ou_ts = timestamp;
-      latestT.lines_ts = timestamp;
-      latestT.ids_ts = timestamp;
+      maxStakes.push(newMaxStakeEntry);
       latestT.stakes_ts = timestamp;
     }
 
-    // Check if anything actually changed
-    const hasChanges = this.hasOddsChanged(existing, {
-      odds_x12: x12Odds,
-      odds_ah: ahOdds,
-      odds_ou: ouOdds,
-      lines,
-      ids,
-      max_stakes: maxStakes,
-      latest_t: latestT,
-      bookie_id: eventId.toString()
-    });
+    // Update the database
+    const updateQuery = `
+      UPDATE football_odds
+      SET odds_x12 = $1, odds_ah = $2, odds_ou = $3, lines = $4, ids = $5, max_stakes = $6, latest_t = $7, updated_at = now()
+      WHERE bookie_id = $8 AND bookie = 'Pinnacle'
+    `;
 
-    if (!hasChanges) {
-      // No changes, skip update silently
-      return false;
-    }
+    await executeQuery(updateQuery, [
+      x12Odds.length > 0 ? JSON.stringify(x12Odds) : null,
+      ahOdds.length > 0 ? JSON.stringify(ahOdds) : null,
+      ouOdds.length > 0 ? JSON.stringify(ouOdds) : null,
+      lines.length > 0 ? JSON.stringify(lines) : null,
+      ids.length > 0 ? JSON.stringify(ids) : null,
+      maxStakes.length > 0 ? JSON.stringify(maxStakes) : null,
+      JSON.stringify(latestT),
+      eventId
+    ]);
 
-    // Build dynamic UPDATE query for only changed fields
-    const { query: updateQuery, params } = this.buildUpdateQuery(existing, {
-      odds_x12: x12Odds,
-      odds_ah: ahOdds,
-      odds_ou: ouOdds,
-      lines,
-      ids,
-      max_stakes: maxStakes,
-      latest_t: latestT
-    }, fixtureId);
-
-    if (updateQuery) {
-      await executeQuery(updateQuery, params);
-      console.log(`Updated changed fields for event ${eventId}`);
-      return true;
-    }
-
-    return false;
-
+    this.log(`Updated event ${eventId}`);
   }
 
   /**
@@ -649,24 +615,9 @@ class PinnacleOddsService {
       JSON.stringify(latestT)
     ]);
 
-    console.log(`Created new odds entry for fixture ${fixtureId}, event ${eventId}`);
+    this.log(`Created new odds entry for fixture ${fixtureId}, event ${eventId}`);
   }
 
-  /**
-   * Merges new odds entry with existing array, replacing same timestamp
-   */
-  private mergeOddsEntry(existing: any[], newEntry: any): any[] {
-    const merged = [...existing];
-    const existingIndex = merged.findIndex(entry => entry.t === newEntry.t);
-
-    if (existingIndex >= 0) {
-      merged[existingIndex] = newEntry;
-    } else {
-      merged.push(newEntry);
-    }
-
-    return merged;
-  }
 
   /**
    * Main method to fetch and process odds
@@ -678,7 +629,7 @@ class PinnacleOddsService {
 
     const marketData = await this.fetchOdds();
     if (!marketData) {
-      console.log('No market data received');
+      this.log('No market data received');
       return { eventsProcessed: 0, fixturesUpdated: 0 };
     }
 
@@ -727,7 +678,7 @@ class PinnacleOddsService {
    */
   stopContinuousFetching(): void {
     if (!this.isRunning) {
-      console.log('Pinnacle odds fetching is not running');
+      this.log('Service is not running');
       return;
     }
 
@@ -737,91 +688,9 @@ class PinnacleOddsService {
       this.runInterval = null;
     }
 
-    console.log('Stopped continuous Pinnacle odds fetching');
+    this.log('Service stopped');
   }
 
-  /**
-   * Checks if odds data has actually changed
-   */
-  private hasOddsChanged(existing: any, newData: any): boolean {
-    // Compare arrays as JSON strings for deep equality
-    const fields = ['odds_x12', 'odds_ah', 'odds_ou', 'lines', 'ids', 'max_stakes', 'latest_t'];
-
-    for (const field of fields) {
-      const existingValue = existing[field];
-      const newValue = newData[field];
-
-      // Handle null/undefined cases
-      if (!existingValue && !newValue) continue;
-      if (!existingValue || !newValue) return true;
-
-      // Compare as JSON strings for arrays/objects
-      if (JSON.stringify(existingValue) !== JSON.stringify(newValue)) {
-        return true;
-      }
-    }
-
-    // Check bookie_id change (shouldn't happen but just in case)
-    if (existing.bookie_id !== newData.bookie_id) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Builds dynamic UPDATE query for only changed fields
-   */
-  private buildUpdateQuery(existing: any, newData: any, fixtureId: number): { query: string | null, params: any[] } {
-    const setParts: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
-
-    // Always update updated_at
-    setParts.push('updated_at = now()');
-
-    // Check each field for changes
-    const fields = [
-      { key: 'odds_x12', json: true },
-      { key: 'odds_ah', json: true },
-      { key: 'odds_ou', json: true },
-      { key: 'lines', json: true },
-      { key: 'ids', json: true },
-      { key: 'max_stakes', json: true },
-      { key: 'latest_t', json: true }
-    ];
-
-    for (const field of fields) {
-      const existingValue = existing[field.key];
-      const newValue = newData[field.key];
-
-      // Skip if no change
-      if (JSON.stringify(existingValue) === JSON.stringify(newValue)) {
-        continue;
-      }
-
-      // Add to SET clause
-      const value = field.json && newValue && newValue.length > 0 ? JSON.stringify(newValue) : null;
-      setParts.push(`${field.key} = $${paramIndex}`);
-      params.push(value);
-      paramIndex++;
-    }
-
-    // If nothing changed besides updated_at, return null
-    if (setParts.length === 1) {
-      return { query: null, params: [] };
-    }
-
-    // Build the query
-    const query = `
-      UPDATE football_odds
-      SET ${setParts.join(', ')}
-      WHERE fixture_id = $${paramIndex} AND bookie = 'Pinnacle'
-    `;
-    params.push(fixtureId);
-
-    return { query, params };
-  }
 
   /**
    * Gets the current running status

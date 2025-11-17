@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
-import { LoadingState } from './ui/LoadingState';
-import { ErrorState } from './ui/ErrorState';
+import { LoadingState } from '../../shared/LoadingState';
+import { ErrorState } from '../../shared/ErrorState';
 import { calculateWeightedAverageFairOdds, getOddsDivisor, getFairOddsValueForOutcome } from '@/lib/utils/value-calculations';
 import type { BookieOdds } from '@/lib/utils/value-analysis';
 
@@ -21,7 +21,7 @@ interface FixtureOddsProps {
   ratios?: any[]; // For value opportunities that have ratios data
   minRatio?: number;
   fairOddsBookies?: Array<{bookie: string, required: boolean, multiplier: number}>;
-  filterMethod?: 'individual' | 'above_all' | 'average';
+  filterMethod?: 'above_all' | 'average';
 }
 
 interface OddsData {
@@ -70,7 +70,7 @@ export function FixtureOdds({
   ratios: propRatios,
   minRatio = 1.0,
   fairOddsBookies = [{bookie: 'Pinnacle', required: false, multiplier: 1}],
-  filterMethod = 'individual'
+  filterMethod = 'above_all'
 }: FixtureOddsProps) {
   const [oddsData, setOddsData] = useState<OddsData | null>(propOddsData || null);
   const [oddsLoading, setOddsLoading] = useState(!propOddsData);

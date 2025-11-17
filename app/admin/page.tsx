@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import DataTable, { Column } from '../../components/ui/data-table';
+import DataTable, { Column } from '../../components/shared/data-table';
 import {
   TabNavigation,
   SearchBar,
@@ -9,7 +9,7 @@ import {
   DeleteConfirmationModal,
   ProgressPanel,
   ResultsPanel
-} from '../../components/admin';
+} from '../../components/features/admin';
 import { League } from '../../types/database';
 import { AdminTab } from '../../types/admin';
 
@@ -479,82 +479,6 @@ export default function AdminPage() {
     }
   };
 
-  const handleVacuumAnalyze = async () => {
-    // Ask user which tables to maintain
-    const maintenanceOptions = [
-      'football_odds (recommended - fixes current lock issues)',
-      'All frequently updated tables (football_odds, football_fixtures, football_stats, football_predictions)',
-      'All football_ tables'
-    ];
-
-    const choice = prompt(
-      'Choose maintenance scope:\n\n1. football_odds (recommended - fixes current lock issues)\n2. All frequently updated tables (football_odds, football_fixtures, football_stats, football_predictions)\n3. All football_ tables\n\nEnter 1, 2, or 3:',
-      '1'
-    );
-
-    if (!choice || !['1', '2', '3'].includes(choice)) {
-      return;
-    }
-
-    let tablesToProcess: string[] = [];
-    switch (choice) {
-      case '1':
-        tablesToProcess = ['football_odds'];
-        break;
-      case '2':
-        tablesToProcess = ['football_odds', 'football_fixtures', 'football_stats', 'football_predictions'];
-        break;
-      case '3':
-        tablesToProcess = [
-          'football_leagues', 'football_teams', 'football_fixtures', 'football_odds',
-          'football_fair_odds', 'football_predictions', 'football_stats'
-        ];
-        break;
-    }
-
-    if (!confirm(`This will run VACUUM ANALYZE on: ${tablesToProcess.join(', ')}\n\nContinue?`)) {
-      return;
-    }
-
-    setIsLoading(true);
-    setResult(null);
-
-    try {
-      const response = await fetch('/api/admin/vacuum', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'vacuum_analyze',
-          tables: tablesToProcess
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        const details = data.details ? '\n' + data.details.join('\n') : '';
-        setResult({
-          success: true,
-          message: `${data.message}${details}`
-        });
-        // Refresh monitor data to see updated stats
-        loadMonitorData();
-      } else {
-        setResult({
-          success: false,
-          message: data.error || 'VACUUM ANALYZE failed'
-        });
-      }
-    } catch (error: any) {
-      console.error('VACUUM error:', error);
-      setResult({
-        success: false,
-        message: `Network error: ${error.message}`
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
 
   // Auto-start monitoring when monitor tab is activated
@@ -1147,13 +1071,6 @@ export default function AdminPage() {
             <div className="flex justify-between items-center">
               <h2 className="text-lg font-semibold text-red-400 font-mono">DATABASE MONITOR</h2>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handleVacuumAnalyze}
-                  disabled={isLoading}
-                  className="px-3 py-1 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 text-white text-xs font-mono rounded transition-colors"
-                >
-                  {isLoading ? 'VACUUMING...' : 'VACUUM ANALYZE'}
-                </button>
                 {monitorData && (
                   <span className="text-xs text-gray-500 font-mono">
                     {new Date(monitorData.timestamp).toLocaleTimeString()}
@@ -1171,16 +1088,16 @@ export default function AdminPage() {
                     <div className="flex justify-between">
                       <span className="text-gray-400">Cache Hit Ratio:</span>
                       <span className={`font-mono ${
-                        monitorData.performance.cache_hit_ratio > 90 ? 'text-green-400' :
-                        monitorData.performance.cache_hit_ratio > 70 ? 'text-yellow-400' :
+                        monitorData.performance?.cache_hit_ratio > 90 ? 'text-green-400' :
+                        monitorData.performance?.cache_hit_ratio > 70 ? 'text-yellow-400' :
                         'text-red-400'
                       }`}>
-                        {monitorData.performance.cache_hit_ratio.toFixed(1)}%
+                        {monitorData.performance?.cache_hit_ratio?.toFixed(1) || '0.0'}%
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-400">Active Queries:</span>
-                      <span className="text-white font-mono">{monitorData.performance.active_queries}</span>
+                      <span className="text-white font-mono">{monitorData.performance?.active_queries || 0}</span>
                     </div>
                   </div>
                 </div>
@@ -1224,7 +1141,7 @@ export default function AdminPage() {
                 <div className="bg-gray-800 p-4 border border-gray-700">
                   <h3 className="text-sm font-semibold text-white mb-3">Recent Queries</h3>
                   <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {monitorData.performance.recent_queries.length > 0 ? (
+                    {(monitorData.performance?.recent_queries?.length || 0) > 0 ? (
                       monitorData.performance.recent_queries.map((query, index) => (
                         <div key={index} className="text-xs bg-gray-900 p-2 border border-gray-600">
                           <div className="flex justify-between mb-1">
@@ -1255,7 +1172,7 @@ export default function AdminPage() {
                   {/* Database Stats */}
                   <div className="bg-gray-800 p-4 border border-gray-700">
                     <h3 className="text-sm font-semibold text-white mb-3">Database Stats</h3>
-                    {monitorData.performance.database_stats.map((stat, index) => (
+                    {monitorData.performance?.database_stats?.map((stat, index) => (
                       <div key={index} className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-gray-400">Database:</span>
@@ -1271,9 +1188,9 @@ export default function AdminPage() {
 
                   {/* Active Locks */}
                   <div className="bg-gray-800 p-4 border border-gray-700">
-                    <h3 className="text-sm font-semibold text-white mb-3">Active Locks ({monitorData.locks.length})</h3>
+                    <h3 className="text-sm font-semibold text-white mb-3">Active Locks ({monitorData.locks?.length || 0})</h3>
                     <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {monitorData.locks.length > 0 ? (
+                      {(monitorData.locks?.length || 0) > 0 ? (
                         monitorData.locks.map((lock, index) => (
                           <div key={index} className="text-xs bg-gray-900 p-2 border border-gray-600">
                             <div className="flex justify-between">

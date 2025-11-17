@@ -8,21 +8,76 @@ export interface QueryResult<T = any> {
 }
 
 /**
- * Execute a database query with automatic connection handling
+ * Execute a database query with automatic connection handling and retry logic
  */
 export async function executeQuery<T = any>(
   query: string,
-  params: any[] = []
+  params: any[] = [],
+  retries: number = 2
 ): Promise<QueryResult<T>> {
-  const client = await pool.connect();
+  let lastError: any;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const client = await pool.connect();
+    try {
+      const result = await client.query(query, params);
+      return {
+        rows: result.rows,
+        rowCount: result.rowCount || 0
+      };
+    } catch (error: any) {
+      lastError = error;
+      console.error(`Database query error (attempt ${attempt + 1}/${retries + 1}):`, error.message);
+
+      // If it's a "too many clients" error, wait before retrying
+      if (error.code === '53300' && attempt < retries) {
+        console.log(`Retrying in ${Math.pow(2, attempt) * 1000}ms due to connection limit...`);
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        continue;
+      }
+
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Get current pool statistics for monitoring
+ */
+export function getPoolStats() {
+  return {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount
+  };
+}
+
+/**
+ * Health check for database connectivity
+ */
+export async function checkDatabaseHealth(): Promise<{
+  healthy: boolean;
+  poolStats: any;
+  message: string;
+}> {
   try {
-    const result = await client.query(query, params);
+    // Simple query to test connectivity
+    await executeQuery('SELECT 1 as health_check', [], 0);
     return {
-      rows: result.rows,
-      rowCount: result.rowCount || 0
+      healthy: true,
+      poolStats: getPoolStats(),
+      message: 'Database connection is healthy'
     };
-  } finally {
-    client.release();
+  } catch (error: any) {
+    return {
+      healthy: false,
+      poolStats: getPoolStats(),
+      message: `Database health check failed: ${error.message}`
+    };
   }
 }
 

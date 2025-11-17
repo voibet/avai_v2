@@ -1,6 +1,6 @@
 import axios from 'axios';
-import { executeQuery } from '../database/db-utils';
-import { findMatchingFixture, FixtureMatchCriteria } from '../utils/fixture-matching';
+import { executeQuery } from '../../database/db-utils';
+import { findMatchingFixture, FixtureMatchCriteria } from '../../utils/fixture-matching';
 
 interface MonacoMarket {
   id: string;
@@ -40,7 +40,17 @@ export class MonacoOddsService {
   private websocket: any = null;
   private isRunning: boolean = false;
   private marketRefetchInterval: NodeJS.Timeout | null = null;
+  private marketResubscribeInterval: NodeJS.Timeout | null = null;
   private tokenRefreshTimeout: NodeJS.Timeout | null = null;
+
+  /**
+   * Helper for consistent logging with timestamp and service prefix
+   */
+  private log(message: string): void {
+    const now = new Date();
+    const time = now.toTimeString().slice(0, 8); // HH:MM:SS format
+    console.log(`${time} Monaco: ${message}`);
+  }
   private knownMonacoEventGroups: Set<string> = new Set();
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
@@ -85,7 +95,7 @@ export class MonacoOddsService {
       const waitTime = 1000 - (now - oldestTimestamp);
 
       if (waitTime > 0) {
-        console.log(`Rate limit: Waiting ${waitTime}ms before next API request`);
+        this.log(`Rate limit: Waiting ${waitTime}ms before next API request`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }
@@ -108,7 +118,7 @@ export class MonacoOddsService {
       const waitTime = (60 * 1000) - (now - oldestTimestamp);
 
       if (waitTime > 0) {
-        console.log(`Rate limit: Waiting ${waitTime}ms before next subscription`);
+        this.log(`Rate limit: Waiting ${waitTime}ms before next subscription`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     }
@@ -121,7 +131,7 @@ export class MonacoOddsService {
     if (this.isRunning) return;
 
     this.isRunning = true;
-    console.log('Starting Monaco odds service');
+    this.log('Service starting');
 
     // Clear any existing market mappings and order books
     this.marketMapping.clear();
@@ -133,7 +143,7 @@ export class MonacoOddsService {
 
     await this.loadKnownMonacoEventGroups();
     await this.fetchAndProcessMarkets();
-    console.log(`Loaded ${this.marketMapping.size} market mappings`);
+    this.log(`Loaded ${this.marketMapping.size} market mappings`);
     await this.connectWebSocket();
 
     this.marketRefetchInterval = setInterval(async () => {
@@ -150,13 +160,13 @@ export class MonacoOddsService {
         this.orderBooks.clear();
 
         await this.fetchAndProcessMarkets(false); // Don't update database during refetch, only rebuild mappings
-        console.log(`Refetched ${this.marketMapping.size} market mappings`);
+        this.log(`Refetched ${this.marketMapping.size} market mappings`);
 
         // Check if lines or IDs changed by comparing market mappings
         const fixturesWithChanges = this.getFixturesWithMarketChanges(oldMarketMapping, oldEventIdToMappings);
 
         if (fixturesWithChanges.size > 0) {
-          console.log(`Market changes detected for ${fixturesWithChanges.size} fixtures, updating database...`);
+          this.log(`Market changes detected for ${fixturesWithChanges.size} fixtures, updating database...`);
 
           // Only update database for fixtures that had changes
           for (const fixtureId of Array.from(fixturesWithChanges)) {
@@ -183,14 +193,38 @@ export class MonacoOddsService {
             }
           }
         } else {
-          console.log('No market changes detected, skipping database updates');
+          this.log('No market changes detected, skipping database updates');
         }
       } catch (error) {
         console.error('Error refetching Monaco markets:', error);
       }
     }, 60 * 60 * 1000);
 
-    console.log('Monaco odds service started');
+    // Resubscribe to market updates every 15 minutes to keep WebSocket connection alive
+    this.marketResubscribeInterval = setInterval(async () => {
+      try {
+        if (this.websocket && this.websocket.readyState === 1) { // WebSocket.OPEN
+          await this.checkSubscriptionRateLimit();
+          this.websocket.send(JSON.stringify({
+            action: 'subscribe',
+            subscriptionType: 'MarketPriceUpdate',
+            subscriptionIds: ['*']
+          }));
+          this.log('WebSocket RESUBSCRIBE - MarketPriceUpdate (*)');
+
+          this.websocket.send(JSON.stringify({
+            action: 'subscribe',
+            subscriptionType: 'MarketStatusUpdateMessage',
+            subscriptionIds: ['*']
+          }));
+          this.log('WebSocket RESUBSCRIBE - MarketStatusUpdateMessage (*)');
+        }
+      } catch (error) {
+        console.error('Error resubscribing to Monaco market updates:', error);
+      }
+    }, 15 * 60 * 1000);
+
+    this.log('Service started');
   }
 
   async stopContinuousFetching(): Promise<void> {
@@ -204,6 +238,11 @@ export class MonacoOddsService {
     if (this.marketRefetchInterval) {
       clearInterval(this.marketRefetchInterval);
       this.marketRefetchInterval = null;
+    }
+
+    if (this.marketResubscribeInterval) {
+      clearInterval(this.marketResubscribeInterval);
+      this.marketResubscribeInterval = null;
     }
 
     if (this.tokenRefreshTimeout) {
@@ -223,7 +262,7 @@ export class MonacoOddsService {
     // Wait for any pending updates to complete
     const pendingUpdates = Array.from(this.fixtureUpdateQueues.values());
     if (pendingUpdates.length > 0) {
-      console.log(`Waiting for ${pendingUpdates.length} pending updates to complete...`);
+      this.log(`Waiting for ${pendingUpdates.length} pending updates to complete...`);
       await Promise.all(pendingUpdates);
     }
 
@@ -232,7 +271,7 @@ export class MonacoOddsService {
     this.accessExpiresAt = null;
     this.refreshExpiresAt = null;
 
-    console.log('Monaco odds service stopped');
+    this.log('Service stopped');
   }
 
   private async loadKnownMonacoEventGroups(): Promise<void> {
@@ -244,18 +283,18 @@ export class MonacoOddsService {
         });
       }
     });
-    console.log(`Loaded ${this.knownMonacoEventGroups.size} Monaco event groups`);
+    this.log(`Loaded ${this.knownMonacoEventGroups.size} event groups`);
   }
 
   private async authenticate(): Promise<void> {
     try {
       await this.checkApiRateLimit();
-      console.log('Authenticating with Monaco...');
+      this.log('Authenticating...');
       const response = await axios.post(`${this.baseUrl}/sessions`, {
         appId: this.appId,
         apiKey: this.apiKey
       });
-      console.log('POST /sessions - Authentication successful');
+      this.log('POST /sessions - Authentication successful');
 
       // API returns sessions array, get first session
       const session = response.data.sessions?.[0];
@@ -268,7 +307,7 @@ export class MonacoOddsService {
       // Schedule token refresh 2 minutes before expiry
       this.scheduleTokenRefresh();
 
-      console.log('Monaco authentication successful');
+      this.log('Authentication successful');
     } catch (error: any) {
       console.error('Monaco: Authentication error:', error.response?.data || error.message);
       throw error;
@@ -304,7 +343,7 @@ export class MonacoOddsService {
   private async refreshAccessToken(): Promise<void> {
     try {
       await this.checkApiRateLimit();
-      console.log('Refreshing Monaco access token...');
+      this.log('Refreshing access token...');
       const response = await axios.post(`${this.baseUrl}/sessions/refresh`, {
         refreshToken: this.refreshToken
       });
@@ -322,7 +361,7 @@ export class MonacoOddsService {
       // Reschedule the next refresh
       this.scheduleTokenRefresh();
 
-      console.log('Monaco access token refreshed successfully');
+      this.log('Access token refreshed successfully');
     } catch (error: any) {
       console.error('Monaco token refresh failed:', error.response?.data || error.message);
       // Fall back to full authentication
@@ -344,7 +383,7 @@ export class MonacoOddsService {
     const delay = Math.max(0, refreshTime.getTime() - now.getTime());
 
     if (delay > 0) {
-      console.log(`Scheduling token refresh in ${Math.round(delay / 1000 / 60)} minutes`);
+      this.log(`Scheduling token refresh in ${Math.round(delay / 1000 / 60)} minutes`);
       this.tokenRefreshTimeout = setTimeout(async () => {
         try {
           await this.refreshAccessToken();
@@ -354,7 +393,7 @@ export class MonacoOddsService {
       }, delay);
     } else {
       // Already expired, refresh immediately
-      console.log('Access token already expired, refreshing now...');
+      this.log('Access token already expired, refreshing now...');
       setImmediate(() => this.refreshAccessToken());
     }
   }
@@ -373,7 +412,7 @@ export class MonacoOddsService {
         page
       }
     });
-    console.log(`GET /markets - Fetched page ${page}`);
+    this.log(`GET /markets - Fetched page ${page}`);
 
     return response.data;
   }
@@ -417,7 +456,7 @@ export class MonacoOddsService {
       `, [eventGroupId, `${eventGroupId},%`, `%,${eventGroupId}`, `%,${eventGroupId},%`]);
 
       if (leagueResult.rows.length === 0) {
-        console.error(`No league found for Monaco eventGroup: ${eventGroupId}`);
+        this.log(`No league found for Monaco eventGroup: ${eventGroupId}`);
         return null;
       }
 
@@ -476,7 +515,7 @@ export class MonacoOddsService {
     for (const market of markets) {
       const event = eventMap.get(market.eventId);
       if (!event) {
-        console.log(`No event found for market ${market.id}, eventId: ${market.eventId}`);
+        this.log(`No event found for market ${market.id}, eventId: ${market.eventId}`);
         continue;
       }
 
@@ -536,7 +575,7 @@ export class MonacoOddsService {
       fixturePromises.push(
         this.findMatchingFixtureByEvent(event, eventId).then(async (fixtureId) => {
           if (!fixtureId) {
-            console.log(`No fixture found for event ${event.name} (ID: ${eventId})`);
+            this.log(`No fixture found for event ${event.name} (ID: ${eventId})`);
             return;
           }
           fixturesFound++;
@@ -813,7 +852,7 @@ export class MonacoOddsService {
     );
 
     if (existing.rows.length === 0) {
-      console.log(`💾 Creating odds record for ${fixtureInfo}`);
+      this.log(`Creating odds record for ${fixtureInfo}`);
       await executeQuery(`
         INSERT INTO football_odds (
           fixture_id, bookie_id, bookie, decimals,
@@ -832,7 +871,7 @@ export class MonacoOddsService {
         maxStakesJson,
         latestT
       ]);
-      console.log(`INSERT football_odds - ${fixtureInfo}`);
+      this.log(`INSERT football_odds - ${fixtureInfo}`);
     } else {
       // For existing records, only update lines and ids, not max_stakes (that's updated during real-time)
       await executeQuery(`
@@ -848,7 +887,7 @@ export class MonacoOddsService {
         latestT,
         fixtureId
       ]);
-      console.log(`UPDATE football_odds - ${fixtureInfo} (lines, ids)`);
+      this.log(`Updated ${fixtureInfo} (lines, ids)`);
     }
 
     // Update mapping indexes (in case there were new lines)
@@ -874,7 +913,7 @@ export class MonacoOddsService {
   private async fetchAndProcessMarkets(updateDatabase: boolean = true): Promise<void> {
     try {
       const { markets, events, eventGroups } = await this.fetchAllMarkets();
-      console.log(`Fetched ${markets.length} markets, ${events.length} events, ${eventGroups.length} event groups`);
+      this.log(`Fetched ${markets.length} markets, ${events.length} events, ${eventGroups.length} event groups`);
 
 
       const processedMarkets: MonacoMarket[] = markets.map(market => ({
@@ -905,28 +944,28 @@ export class MonacoOddsService {
           action: 'authenticate',
           accessToken: this.accessToken
         }));
-        console.log('WebSocket AUTHENTICATE - Sent access token');
+        this.log('WebSocket AUTHENTICATE - Sent access token');
       });
 
       this.websocket.on('message', async (data: Buffer) => {
         try {
           const message = JSON.parse(data.toString());
           if (message.type === 'AuthenticationUpdate') {
-            console.log('WebSocket AUTHENTICATION - Confirmed');
+            this.log('WebSocket AUTHENTICATION - Confirmed');
             await this.checkSubscriptionRateLimit();
             this.websocket!.send(JSON.stringify({
               action: 'subscribe',
               subscriptionType: 'MarketPriceUpdate',
               subscriptionIds: ['*']
             }));
-            console.log('WebSocket SUBSCRIBE - All market IDs (*)');
+            this.log('WebSocket SUBSCRIBE - All market IDs (*)');
 
             this.websocket!.send(JSON.stringify({
               action: 'subscribe',
               subscriptionType: 'MarketStatusUpdateMessage',
               subscriptionIds: ['*']
             }));
-            console.log('WebSocket SUBSCRIBE - Market status updates (*)');
+            this.log('WebSocket SUBSCRIBE - Market status updates (*)');
             resolve();
           } else if (message.type === 'MarketPriceUpdate') {
             this.queueMessage({ type: 'price', data: message });
@@ -1018,7 +1057,7 @@ export class MonacoOddsService {
 
       const fixtureId = marketMapping.fixtureId;
 
-      console.log(`Market ${message.marketId} status changed to ${message.status}/${message.inPlayStatus}, zeroing odds for fixture ${fixtureId}`);
+      this.log(`Market ${message.marketId} status changed to ${message.status}/${message.inPlayStatus}, zeroing odds for fixture ${fixtureId}`);
 
       // Queue this update to be processed sequentially for this fixture
       const previousUpdate = this.fixtureUpdateQueues.get(fixtureId) || Promise.resolve();
@@ -1215,7 +1254,7 @@ export class MonacoOddsService {
       [jsonData, maxStakesJson, latestTJson, fixtureId, 'Monaco']
     );
 
-    console.log(`ZEROED odds - ${fixtureInfo} (${marketType}) - market ${message.marketId} status: ${message.status}/${message.inPlayStatus}`);
+    this.log(`ZEROED odds - ${fixtureInfo} (${marketType}) - market ${message.marketId} status: ${message.status}/${message.inPlayStatus}`);
   }
 
   private async updateFixtureOddsRealtime(fixtureId: number, message: any, marketType: string): Promise<void> {
@@ -1529,7 +1568,7 @@ export class MonacoOddsService {
     );
 
     // Log the update with fixture name and market type
-    console.log(`UPDATE football_odds - ${fixtureInfo} (${marketType})`);
+    this.log(`Updated ${fixtureInfo} (${marketType})`);
   }
 
   /**

@@ -1,8 +1,3 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    instrumentationHook: true,
-  },
-}
+// Re-export Next.js config from config directory
+export { default } from './config/next.config.js';
 
-export default nextConfig

@@ -6,11 +6,11 @@ import { analyzeValueOpportunities, type Fixture, type ValueOpportunity, type Va
 import { calculateWeightedAverageFairOdds, meetsRequiredBookiesCriterionWithRatios, meetsRequiredBookiesCriterionWithFairOdds, formatOdds, getRatiosForOutcome, getFairOddsForOutcome, getTypeLabel } from '@/lib/utils/value-calculations'
 import { formatDateTimeFull } from '@/lib/utils/date-utils'
 import { IN_FUTURE } from '@/lib/constants'
-import DataTable, { Column } from '../../components/ui/data-table'
-import { FixtureExtension } from '../../components/FixtureExtension'
-import { LoadingState } from '../../components/ui/LoadingState'
-import { ErrorState } from '../../components/ui/ErrorState'
-import { EmptyState } from '../../components/ui/EmptyState'
+import DataTable, { Column } from '../../components/shared/data-table'
+import { FixtureExtension } from '../../components/features/fixtures/FixtureExtension'
+import { LoadingState } from '../../components/shared/LoadingState'
+import { ErrorState } from '../../components/shared/ErrorState'
+import { EmptyState } from '../../components/shared/EmptyState'
 import { useFixtureLineups, useTeamInjuries, useFixtureStats, useLeagueStandings, useFixtureCoaches, useLeagueTeamsElo } from '../../lib/hooks/use-football-data'
 
 // Bookie filter renderer component - defined outside to avoid hooks issues
@@ -62,10 +62,10 @@ const BookieFilterRenderer = ({ onFilterChange, availableBookies, localSelectedB
   )
 }
 import { useFootballSearchData } from '../../lib/hooks/use-football-search-data'
-import FixtureEditModal from '../../components/admin/FixtureEditModal'
-import PlayerStatsModal from '../../components/fixtures/PlayerStatsModal'
-import TeamStandingsModal from '../../components/fixtures/TeamStandingsModal'
-import { FixtureOdds } from '../../components/FixtureOdds'
+import FixtureEditModal from '../../components/features/admin/FixtureEditModal'
+import PlayerStatsModal from '../../components/features/fixtures/PlayerStatsModal'
+import TeamStandingsModal from '../../components/features/fixtures/TeamStandingsModal'
+import { FixtureOdds } from '../../components/features/fixtures/FixtureOdds'
 
 // Custom filter component for ODDS - defined outside component (NO HOOKS!)
 const OddsFilterRenderer = ({ column, currentFilters, onFilterChange, onClose }: any) => {
@@ -219,7 +219,7 @@ function ValuesPageContent() {
   const [fairOddsBookies, setFairOddsBookies] = useState<Array<{bookie: string, required: boolean, multiplier: number}>>([])
   const [oddsRatioBookies, setOddsRatioBookies] = useState<string[]>([])
   const [minRatio] = useState(0.9)
-  const [filterMethod, setFilterMethod] = useState<'individual' | 'above_all' | 'average'>('individual')
+  const [filterMethod, setFilterMethod] = useState<'above_all' | 'average'>('above_all')
   const [showHighestRatioPerFixture, setShowHighestRatioPerFixture] = useState(false)
   const [filtersExpanded, setFiltersExpanded] = useState(true)
 
@@ -307,7 +307,7 @@ function ValuesPageContent() {
     }
 
     const filterMethodValue = searchParams.get('filter_method')
-    if (filterMethodValue && (filterMethodValue === 'individual' || filterMethodValue === 'above_all' || filterMethodValue === 'average')) {
+    if (filterMethodValue && (filterMethodValue === 'above_all' || filterMethodValue === 'average')) {
       setFilterMethod(filterMethodValue)
     }
 
@@ -336,10 +336,10 @@ function ValuesPageContent() {
   // Update URL when filterMethod changes
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
-    if (filterMethod === 'above_all' || filterMethod === 'average') {
+    if (filterMethod === 'average') {
       params.set('filter_method', filterMethod)
     } else {
-      // Default is 'individual', so we can remove the param
+      // Default is 'above_all', so we can remove the param
       params.delete('filter_method')
     }
     router.replace(`/values?${params.toString()}`)
@@ -1985,20 +1985,7 @@ function ValuesPageContent() {
 
             if (oddsBookieX12?.[index] && fairBookieX12?.[index]) {
               // Create opportunity based on filter method
-              if (filterMethod === 'individual') {
-                // Create one opportunity per fair bookie
-                availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
-                  flattenedOpportunities.push({
-                    fixture: fixture,
-                    bookie: bookieRatio.odds_bookie,
-                    type: 'x12',
-                    oddsIndex: index,
-                    oddsBookieOdds: oddsBookieX12[index],
-                    fairOddsBookieOdds: fairBookieX12[index],
-                    ratio: ratio
-                  })
-                })
-              } else if (filterMethod === 'average') {
+              if (filterMethod === 'average') {
                 // For average method, check that odds are better than at least one required bookie's fair odds
                 const availableFairOdds = getFairOddsForOutcome(fixture, bookieRatio.odds_bookie, 'x12', index, 0, fairOddsBookies)
                 const hasBetterThanRequired = requiredFairBookies.length === 0 ||
@@ -2064,22 +2051,7 @@ function ValuesPageContent() {
                 
                 if (oddsBookieAH.ah_a?.[lineIndex] && fairBookieAH.fair_ah_a?.[lineIndex]) {
                   // Create opportunity based on filter method
-                  if (filterMethod === 'individual') {
-                    // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
-                      flattenedOpportunities.push({
-                        fixture: fixture,
-                        bookie: bookieRatio.odds_bookie,
-                        type: 'ah',
-                        lineIndex: lineIndex,
-                        oddsIndex: 0, // away
-                        oddsBookieOdds: oddsBookieAH.ah_a[lineIndex],
-                        fairOddsBookieOdds: fairBookieAH.fair_ah_a![lineIndex],
-                        ratio: ratio,
-                        line: bookieRatio.ratios_lines?.ah?.[lineIndex] === 0 ? 0 : -(bookieRatio.ratios_lines?.ah?.[lineIndex] || 0)
-                      })
-                    })
-                  } else if (filterMethod === 'average') {
+                  if (filterMethod === 'average') {
                     // For average method, check that odds are better than at least one required bookie's fair odds
                     const availableFairOdds = getFairOddsForOutcome(fixture, bookieRatio.odds_bookie, 'ah', 0, lineIndex, fairOddsBookies)
                     const hasBetterThanRequired = requiredFairBookies.length === 0 ||
@@ -2143,22 +2115,7 @@ function ValuesPageContent() {
                 
                 if (oddsBookieAH.ah_h?.[lineIndex] && fairBookieAH.fair_ah_h?.[lineIndex]) {
                   // Create opportunity based on filter method
-                  if (filterMethod === 'individual') {
-                    // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
-                      flattenedOpportunities.push({
-                        fixture: fixture,
-                        bookie: bookieRatio.odds_bookie,
-                        type: 'ah',
-                        lineIndex: lineIndex,
-                        oddsIndex: 1, // home
-                        oddsBookieOdds: oddsBookieAH.ah_h[lineIndex],
-                        fairOddsBookieOdds: fairBookieAH.fair_ah_h![lineIndex],
-                        ratio: ratio,
-                        line: bookieRatio.ratios_lines?.ah?.[lineIndex]
-                      })
-                    })
-                    } else if (filterMethod === 'average') {
+                  if (filterMethod === 'average') {
                       // For average method, check that odds are better than at least one required bookie's fair odds
                       const availableFairOdds = getFairOddsForOutcome(fixture, bookieRatio.odds_bookie, 'ah', 1, lineIndex, fairOddsBookies)
                       const hasBetterThanRequired = requiredFairBookies.length === 0 ||
@@ -2230,22 +2187,7 @@ function ValuesPageContent() {
                 
                 if (oddsBookieOU.ou_o?.[lineIndex] && fairBookieOU.fair_ou_o?.[lineIndex]) {
                   // Create opportunity based on filter method
-                  if (filterMethod === 'individual') {
-                    // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
-                      flattenedOpportunities.push({
-                        fixture: fixture,
-                        bookie: bookieRatio.odds_bookie,
-                        type: 'ou',
-                        lineIndex: lineIndex,
-                        oddsIndex: 0, // over
-                        oddsBookieOdds: oddsBookieOU.ou_o[lineIndex],
-                        fairOddsBookieOdds: fairBookieOU.fair_ou_o![lineIndex],
-                        ratio: ratio,
-                        line: bookieRatio.ratios_lines?.ou?.[lineIndex]
-                      })
-                    })
-                    } else if (filterMethod === 'average') {
+                  if (filterMethod === 'average') {
                       // For average method, check that odds are better than at least one required bookie's fair odds
                       const availableFairOdds = getFairOddsForOutcome(fixture, bookieRatio.odds_bookie, 'ou', 0, lineIndex, fairOddsBookies)
                       const hasBetterThanRequired = requiredFairBookies.length === 0 ||
@@ -2309,22 +2251,7 @@ function ValuesPageContent() {
                 
                 if (oddsBookieOU.ou_u?.[lineIndex] && fairBookieOU.fair_ou_u?.[lineIndex]) {
                   // Create opportunity based on filter method
-                  if (filterMethod === 'individual') {
-                    // Create one opportunity per fair bookie
-                    availableRatios.forEach(({fairBookie: _fairBookie, ratio}) => {
-                      flattenedOpportunities.push({
-                        fixture: fixture,
-                        bookie: bookieRatio.odds_bookie,
-                        type: 'ou',
-                        lineIndex: lineIndex,
-                        oddsIndex: 1, // under
-                        oddsBookieOdds: oddsBookieOU.ou_u[lineIndex],
-                        fairOddsBookieOdds: fairBookieOU.fair_ou_u![lineIndex],
-                        ratio: ratio,
-                        line: bookieRatio.ratios_lines?.ou?.[lineIndex]
-                      })
-                    })
-                    } else if (filterMethod === 'average') {
+                  if (filterMethod === 'average') {
                       // For average method, check that odds are better than at least one required bookie's fair odds
                       const availableFairOdds = getFairOddsForOutcome(fixture, bookieRatio.odds_bookie, 'ou', 1, lineIndex, fairOddsBookies)
                       const hasBetterThanRequired = requiredFairBookies.length === 0 ||
@@ -2822,20 +2749,9 @@ function ValuesPageContent() {
                       <input
                         type="radio"
                         name="filterMethod"
-                        value="individual"
-                        checked={filterMethod === 'individual'}
-                        onChange={(e) => setFilterMethod(e.target.value as 'individual' | 'above_all' | 'average')}
-                        className="border-gray-500 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-gray-300 font-mono">Individual</span>
-                    </label>
-                    <label className="flex items-center space-x-2 text-xs cursor-pointer">
-                      <input
-                        type="radio"
-                        name="filterMethod"
                         value="above_all"
                         checked={filterMethod === 'above_all'}
-                        onChange={(e) => setFilterMethod(e.target.value as 'individual' | 'above_all' | 'average')}
+                        onChange={(e) => setFilterMethod(e.target.value as 'above_all' | 'average')}
                         className="border-gray-500 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="text-gray-300 font-mono">Above All</span>
@@ -2846,7 +2762,7 @@ function ValuesPageContent() {
                         name="filterMethod"
                         value="average"
                         checked={filterMethod === 'average'}
-                        onChange={(e) => setFilterMethod(e.target.value as 'individual' | 'above_all' | 'average')}
+                        onChange={(e) => setFilterMethod(e.target.value as 'above_all' | 'average')}
                         className="border-gray-500 text-blue-600 focus:ring-blue-500"
                       />
                       <span className="text-gray-300 font-mono">Average</span>

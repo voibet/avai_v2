@@ -1,10 +1,18 @@
 import pool from '@/lib/database/db';
 import { executeChain } from '@/lib/services/chain-processor';
-import { pinnacleOddsService } from '@/lib/services/pinnacle-odds-service';
 import { IN_PAST, IN_PLAY } from '@/lib/constants';
 import { initializeSchedulers } from '@/lib/scheduler/init-scheduler';
 
 let isExecuting = false;
+
+/**
+ * Helper for consistent logging with timestamp and service prefix
+ */
+function log(message: string): void {
+  const now = new Date();
+  const time = now.toTimeString().slice(0, 8); // HH:MM:SS format
+  console.log(`${time} AutoRefresh: ${message}`);
+}
 
 export function isAutoRefreshRunning() {
   return isExecuting;
@@ -16,7 +24,7 @@ export async function executeAutoRefresh() {
 
   // Prevent concurrent execution
   if (isExecuting) {
-    console.log('Auto-refresh already running, skipping...');
+    log('Service already running, skipping...');
     return {
       success: false,
       message: 'Auto-refresh already in progress',
@@ -68,12 +76,12 @@ async function runAutoRefreshInternal() {
     const result = await client.query(query);
     const leaguesToProcess = result.rows;
 
-    console.log(`Found ${leaguesToProcess.length} leagues needing refresh`);
+    log(`Found ${leaguesToProcess.length} leagues needing refresh`);
     let leaguesProcessed = 0;
 
     for (const league of leaguesToProcess) {
       try {
-        console.log(`Processing league: ${league.league_name} (ID: ${league.league_id})`);
+        log(`Processing league: ${league.league_name} (ID: ${league.league_id})`);
 
         await executeChain({
           type: 'league',
@@ -81,14 +89,14 @@ async function runAutoRefreshInternal() {
         });
 
         leaguesProcessed++;
-        console.log(`✓ Successfully processed league: ${league.league_name}`);
-        console.log('');
+        log(`✓ Successfully processed league: ${league.league_name}`);
+        log('');
 
         // Add a small delay between leagues to avoid overwhelming the system
         await new Promise(resolve => setTimeout(resolve, 1000));
 
       } catch (error) {
-        console.error(`Failed to process league ${league.league_name}:`, error);
+        log(`✗ Failed to process league ${league.league_name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         // Continue with other leagues even if one fails
       }
     }

@@ -1,4 +1,4 @@
-import { AdminTab } from '../../types/admin';
+import { AdminTab } from '../../../types/admin';
 
 interface Tab {
   id: AdminTab;
