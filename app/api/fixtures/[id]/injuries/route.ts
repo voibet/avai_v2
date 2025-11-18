@@ -170,7 +170,7 @@ async function getFixtureInjuries(request: Request, { params }: { params: { id: 
 
     return NextResponse.json(injuries);
   } catch (error: any) {
-    console.error('Error fetching injuries:', error);
+    console.error('Error fetching injuries');
 
     if (error.response?.status === 404) {
       // No injuries for this fixture

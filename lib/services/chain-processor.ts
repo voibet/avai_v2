@@ -32,177 +32,102 @@ interface ChainResult {
 export async function executeChain(options: ChainOptions): Promise<ChainResult> {
   const { type, leagueId, fixtureId, onProgress, skipFixtureFetch = false, skipXG = false, forceStatsUpdate = false } = options;
 
+  let result: ChainResult;
+
+  if (type === 'league') {
+    result = await executeLeagueChain(leagueId!, { onProgress, skipFixtureFetch, skipXG, forceStatsUpdate, fixtureId });
+  } else {
+    result = await executeAllLeaguesChain({ onProgress, skipFixtureFetch, skipXG, forceStatsUpdate, fixtureId });
+  }
+
+  return result;
+}
+
+async function executeLeagueChain(
+  leagueId: number,
+  options: { onProgress?: ChainOptions['onProgress'], skipFixtureFetch?: boolean, skipXG?: boolean, forceStatsUpdate?: boolean, fixtureId?: number }
+): Promise<ChainResult> {
+  const { onProgress, skipFixtureFetch = false, skipXG = false, forceStatsUpdate = false, fixtureId } = options;
+
   let fixturesUpdated = 0;
-  let statusChangedToPastCount = 0;
   let fixturesUpdatedIds: number[] = [];
 
-  // Calculate total steps based on what we're actually doing
-  const totalSteps = 5 - (skipFixtureFetch ? 1 : 0) - (skipXG ? 1 : 0);
-  let currentStep = 0;
-
-  // Step 1: Fetch fixtures (skip if requested)
+  // Step 1/5: Fetch fixtures for specific league
   if (!skipFixtureFetch) {
-    currentStep++;
-    onProgress?.(`Step ${currentStep}/${totalSteps}: Fetching fixtures...`, currentStep, totalSteps);
-    const fixtureFetcher = new FixtureFetcher();
+    onProgress?.('1/5: Fetching fixtures', 1, 5);
 
-    let fixtureResult;
-    if (type === 'league') {
-      const currentSeason = await fixtureFetcher.getCurrentSeasonForLeague(leagueId!);
-      if (!currentSeason) {
-        throw new Error(`No current season found for league ${leagueId}`);
-      }
-      const selectedSeasons: Record<string, string[]> = {
-        [leagueId!.toString()]: [currentSeason.toString()]
-      };
-      fixtureResult = await fixtureFetcher.fetchAndUpdateFixtures(
-        (info: string) => onProgress?.(`Fetched ${info}`, currentStep, totalSteps),
-        selectedSeasons
-      );
-    } else {
-      fixtureResult = await fixtureFetcher.fetchAndUpdateFixtures(
-        (info: string) => onProgress?.(`Fetched ${info}`, currentStep, totalSteps)
-      );
+    const fixtureFetcher = new FixtureFetcher();
+    const currentSeason = await fixtureFetcher.getCurrentSeasonForLeague(leagueId);
+    if (!currentSeason) {
+      throw new Error(`No current season found for league ${leagueId}`);
     }
+
+    const leagueSeasons = [{ id: leagueId, name: '', season: currentSeason }];
+    const fixtureResult = await fixtureFetcher.fetchAndUpdateFixtures(
+      leagueSeasons,
+      (info: string) => onProgress?.(`1/5: Fetching fixtures - ${info}`, 1, 5)
+    );
+
     fixturesUpdated = fixtureResult.updatedCount || 0;
-    statusChangedToPastCount = fixtureResult.statusChangedToPastCount || 0;
     fixturesUpdatedIds = fixtureResult.updatedFixtureIds || [];
   }
 
-  // Step 2: Calculate market XG for any fixtures that need it (IN_PAST or IN_PLAY with NULL market XG)
-  currentStep++;
-  onProgress?.(`Step ${currentStep}/${totalSteps}: Checking for market XG calculations...`, currentStep, totalSteps);
-
-  let fixturesNeedingMarketXGQuery: string;
-  let fixturesNeedingMarketXGResult: any;
-
-  if (type === 'league') {
-    fixturesNeedingMarketXGQuery = `
-      SELECT f.id
-      FROM football_fixtures f
-      WHERE f.league_id = $1
-        AND f.date > NOW() - INTERVAL '5 days'
-        AND (LOWER(f.status_short) = ANY($2) OR LOWER(f.status_short) = ANY($3))
-        AND (f.market_xg_home IS NULL OR f.market_xg_away IS NULL)
-    `;
-    fixturesNeedingMarketXGResult = await pool.query(fixturesNeedingMarketXGQuery, [leagueId, IN_PAST, IN_PLAY]);
-  } else {
-    fixturesNeedingMarketXGQuery = `
-      SELECT f.id
-      FROM football_fixtures f
-      WHERE f.date > NOW() - INTERVAL '5 days'
-        AND (LOWER(f.status_short) = ANY($1) OR LOWER(f.status_short) = ANY($2))
-        AND (f.market_xg_home IS NULL OR f.market_xg_away IS NULL)
-    `;
-    fixturesNeedingMarketXGResult = await pool.query(fixturesNeedingMarketXGQuery, [IN_PAST, IN_PLAY]);
-  }
-
-  const marketXGCalculatedFixtureIds = fixturesNeedingMarketXGResult.rows.map((row: any) => row.id);
+  // Step 2/5: Calculate market XG
+  onProgress?.('2/5: Calculating market XG', 2, 5);
+  const marketXGCalculatedFixtureIds = await getFixturesNeedingMarketXG(leagueId);
 
   if (marketXGCalculatedFixtureIds.length > 0) {
-    log(`Found ${marketXGCalculatedFixtureIds.length} fixtures needing market XG: ${marketXGCalculatedFixtureIds.join(', ')}`);
-    const { calculateMarketXG } = await import('@/calculators/market-xg.js');
+    log(`Found ${marketXGCalculatedFixtureIds.length} fixtures needing market XG`);
+    const { calculateMarketXG } = await import('@/lib/calculations/market-xg');
     await calculateMarketXG(marketXGCalculatedFixtureIds);
-    log(`Market XG calculation complete`);
+    log('Market XG calculation complete');
   }
 
-  // Step 3: Fetch xG data for completed matches (skip if requested)
+  // Step 3/5: Fetch xG data
   let xgUpdated = 0;
   let xgUpdatedFixtureIds: number[] = [];
 
   if (!skipXG) {
-    currentStep++;
-    onProgress?.(`Step ${currentStep}/${totalSteps}: Fetching xG data...`, currentStep, totalSteps);
+    onProgress?.('3/5: Fetching xG data', 3, 5);
 
     const xgFetcher = new XGFetcher();
-    let xgResult;
-
-    if (type === 'league') {
-      xgResult = await xgFetcher.fetchXGDataForLeague(
-        leagueId!,
-        (msg: string) => onProgress?.(`xG: ${msg}`, 2, 4)
-      );
-    } else {
-      xgResult = await xgFetcher.fetchXGDataForAllLeagues(
-        (msg: string) => onProgress?.(`xG: ${msg}`, 2, 4)
-      );
-    }
+    const xgResult = await xgFetcher.fetchXGDataForLeague(
+      leagueId,
+      (msg: string) => onProgress?.(`3/5: Fetching xG data - ${msg}`, 3, 5)
+    );
 
     xgUpdated = xgResult.updatedCount || 0;
     xgUpdatedFixtureIds = xgResult.updatedFixtureIds || [];
   }
 
-  // Step 4: Update statistics and predictions if we have meaningful changes or forced update
-  // Trigger calculations if: market XG was calculated OR basic XG was updated OR fixtures were added OR forced update
+  // Step 4/5: Update statistics if needed
   const hasMeaningfulChanges = marketXGCalculatedFixtureIds.length > 0 || xgUpdatedFixtureIds.length > 0 || fixturesUpdated > 0 || forceStatsUpdate;
 
   if (hasMeaningfulChanges) {
-    currentStep++;
-    onProgress?.(`Step ${currentStep}/${totalSteps}: Updating statistics...`, currentStep, totalSteps);
+    onProgress?.('4/5: Updating statistics', 4, 5);
 
     // Collect all fixture IDs that need statistics updates
     const allAffectedFixtureIds = [...marketXGCalculatedFixtureIds, ...xgUpdatedFixtureIds, ...fixturesUpdatedIds];
 
-    // If doing forced update for a specific fixture, include that fixture's teams
     if (forceStatsUpdate && fixtureId) {
       allAffectedFixtureIds.push(fixtureId);
     }
 
-    // Get teams from the affected fixtures
-    let affectedTeams: number[] = [];
-    if (allAffectedFixtureIds.length > 0) {
-      const teamsFromAffectedQuery = `
-        SELECT DISTINCT team_id
-        FROM (
-          SELECT home_team_id as team_id FROM football_fixtures WHERE id = ANY($1)
-          UNION
-          SELECT away_team_id as team_id FROM football_fixtures WHERE id = ANY($1)
-        ) teams
-      `;
-      const teamsFromAffectedResult = await pool.query(teamsFromAffectedQuery, [allAffectedFixtureIds]);
-      affectedTeams = teamsFromAffectedResult.rows.map((row: any) => row.team_id);
-    }
+    const affectedTeams = await getAffectedTeams(allAffectedFixtureIds);
+    const futureFixtureIds = await getFutureFixturesForTeams(affectedTeams);
 
-    // Get future fixtures for affected teams (across all leagues)
-    if (affectedTeams.length > 0) {
-      const futureFixturesQuery = `
-        SELECT f.id
-        FROM football_fixtures f
-        WHERE LOWER(f.status_short) IN ('${IN_FUTURE.join("', '")}')
-          AND (f.home_team_id = ANY($1::bigint[]) OR f.away_team_id = ANY($1::bigint[]))
-        ORDER BY f.date ASC
-      `;
-      const futureFixturesResult = await pool.query(futureFixturesQuery, [affectedTeams]);
+    if (futureFixtureIds.length > 0) {
+      log(`Updating statistics for ${futureFixtureIds.length} future fixtures`);
+      await updateStatisticsForFixtures(futureFixtureIds);
 
-      const futureFixtureIds = futureFixturesResult.rows.map((row: any) => row.id);
-
-      if (futureFixtureIds.length > 0) {
-        log(`Updating statistics for ${futureFixtureIds.length} future fixtures`);
-        
-        // Update statistics for affected future fixtures
-        await pool.query('SELECT populate_hours_batch($1)', [futureFixtureIds]);
-        await pool.query('SELECT populate_league_goals_batch($1)', [futureFixtureIds]);
-        await pool.query('SELECT populate_home_advantage_batch($1)', [futureFixtureIds]);
-        await pool.query('SELECT calculate_elos_incremental($1)', [futureFixtureIds]);
-        await pool.query('SELECT populate_adjusted_rolling_xg_batch($1)', [futureFixtureIds]);
-        await pool.query('SELECT populate_adjusted_rolling_market_xg_batch($1)', [futureFixtureIds]);
-
-        // Step 5: Generate predictions and odds
-        currentStep++;
-        onProgress?.(`Step ${currentStep}/${totalSteps}: Generating predictions...`, currentStep, totalSteps);
-        const { predictFixtures } = await import('@/lib/ml/ml-predict');
-        await predictFixtures({ fixtureIds: futureFixtureIds });
-
-        const { calculateOddsFromPredictions } = await import('@/calculators/prediction-odds.js');
-        await calculateOddsFromPredictions(futureFixtureIds);
-      } else {
-        onProgress?.(`No future fixtures to update`, currentStep, totalSteps);
-      }
+      // Step 5/5: Generate predictions and odds
+      onProgress?.('5/5: Running MLP predictions', 5, 5);
+      await generatePredictionsAndOdds(futureFixtureIds, onProgress);
     } else {
-      onProgress?.(`No teams affected, skipping statistics update`, currentStep, totalSteps);
+      onProgress?.('4/5: No future fixtures to update', 4, 5);
     }
   } else {
-    onProgress?.(`Step ${currentStep}/${totalSteps}: No meaningful changes, skipping updates...`, currentStep, totalSteps);
+    onProgress?.('4/5: No meaningful changes, skipping updates', 4, 5);
   }
 
   return {
@@ -211,4 +136,145 @@ export async function executeChain(options: ChainOptions): Promise<ChainResult> 
     fixturesUpdated,
     xgUpdated
   };
+}
+
+async function executeAllLeaguesChain(
+  options: { onProgress?: ChainOptions['onProgress'], skipFixtureFetch?: boolean, skipXG?: boolean, forceStatsUpdate?: boolean, fixtureId?: number }
+): Promise<ChainResult> {
+  const { onProgress, skipFixtureFetch = false, skipXG = false, forceStatsUpdate = false, fixtureId } = options;
+
+  let fixturesUpdated = 0;
+  let fixturesUpdatedIds: number[] = [];
+
+  // Step 1/5: Fetch fixtures for all leagues
+  if (!skipFixtureFetch) {
+    onProgress?.('1/5: Fetching fixtures', 1, 5);
+
+    const fixtureFetcher = new FixtureFetcher();
+    const fixtureResult = await fixtureFetcher.fetchAndUpdateFixturesForCurrentSeasons(
+      (info: string) => onProgress?.(`1/5: Fetching fixtures - ${info}`, 1, 5)
+    );
+
+    fixturesUpdated = fixtureResult.updatedCount || 0;
+    fixturesUpdatedIds = fixtureResult.updatedFixtureIds || [];
+  }
+
+  // Step 2/5: Calculate market XG
+  onProgress?.('2/5: Calculating market XG', 2, 5);
+  const marketXGCalculatedFixtureIds = await getFixturesNeedingMarketXG();
+
+  if (marketXGCalculatedFixtureIds.length > 0) {
+    log(`Found ${marketXGCalculatedFixtureIds.length} fixtures needing market XG`);
+    const { calculateMarketXG } = await import('@/lib/calculations/market-xg');
+    await calculateMarketXG(marketXGCalculatedFixtureIds);
+    log('Market XG calculation complete');
+  }
+
+  // Step 3/5: Fetch xG data
+  let xgUpdated = 0;
+  let xgUpdatedFixtureIds: number[] = [];
+
+  if (!skipXG) {
+    onProgress?.('3/5: Fetching xG data', 3, 5);
+
+    const xgFetcher = new XGFetcher();
+    const xgResult = await xgFetcher.fetchXGDataForAllLeagues(
+      (msg: string) => onProgress?.(`3/5: Fetching xG data - ${msg}`, 3, 5)
+    );
+
+    xgUpdated = xgResult.updatedCount || 0;
+    xgUpdatedFixtureIds = xgResult.updatedFixtureIds || [];
+  }
+
+  // Step 4/5: Update statistics if needed
+  const hasMeaningfulChanges = marketXGCalculatedFixtureIds.length > 0 || xgUpdatedFixtureIds.length > 0 || fixturesUpdated > 0 || forceStatsUpdate;
+
+  if (hasMeaningfulChanges) {
+    onProgress?.('4/5: Updating statistics', 4, 5);
+
+    const allAffectedFixtureIds = [...marketXGCalculatedFixtureIds, ...xgUpdatedFixtureIds, ...fixturesUpdatedIds];
+
+    if (forceStatsUpdate && fixtureId) {
+      allAffectedFixtureIds.push(fixtureId);
+    }
+
+    const affectedTeams = await getAffectedTeams(allAffectedFixtureIds);
+    const futureFixtureIds = await getFutureFixturesForTeams(affectedTeams);
+
+    if (futureFixtureIds.length > 0) {
+      log(`Updating statistics for ${futureFixtureIds.length} future fixtures`);
+      await updateStatisticsForFixtures(futureFixtureIds);
+
+      // Step 5/5: Generate predictions and odds
+      onProgress?.('5/5: Running MLP predictions', 5, 5);
+      await generatePredictionsAndOdds(futureFixtureIds, onProgress);
+    } else {
+      onProgress?.('4/5: No future fixtures to update', 4, 5);
+    }
+  } else {
+    onProgress?.('4/5: No meaningful changes, skipping updates', 4, 5);
+  }
+
+  return {
+    success: true,
+    message: `Chain completed: ${fixturesUpdated} fixtures fetched, ${xgUpdated} xG values updated`,
+    fixturesUpdated,
+    xgUpdated
+  };
+}
+
+async function getFixturesNeedingMarketXG(leagueId?: number): Promise<number[]> {
+  const query = leagueId
+    ? `SELECT f.id FROM football_fixtures f WHERE f.league_id = $1 AND f.date > NOW() - INTERVAL '5 days' AND (LOWER(f.status_short) = ANY($2) OR LOWER(f.status_short) = ANY($3)) AND (f.market_xg_home IS NULL OR f.market_xg_away IS NULL)`
+    : `SELECT f.id FROM football_fixtures f WHERE f.date > NOW() - INTERVAL '5 days' AND (LOWER(f.status_short) = ANY($1) OR LOWER(f.status_short) = ANY($2)) AND (f.market_xg_home IS NULL OR f.market_xg_away IS NULL)`;
+
+  const params = leagueId ? [leagueId, IN_PAST, IN_PLAY] : [IN_PAST, IN_PLAY];
+  const result = await pool.query(query, params);
+  return result.rows.map((row: any) => row.id);
+}
+
+async function getAffectedTeams(fixtureIds: number[]): Promise<number[]> {
+  if (fixtureIds.length === 0) return [];
+
+  const query = `
+    SELECT DISTINCT team_id
+    FROM (
+      SELECT home_team_id as team_id FROM football_fixtures WHERE id = ANY($1)
+      UNION
+      SELECT away_team_id as team_id FROM football_fixtures WHERE id = ANY($1)
+    ) teams
+  `;
+  const result = await pool.query(query, [fixtureIds]);
+  return result.rows.map((row: any) => row.team_id);
+}
+
+async function getFutureFixturesForTeams(teamIds: number[]): Promise<number[]> {
+  if (teamIds.length === 0) return [];
+
+  const query = `
+    SELECT f.id
+    FROM football_fixtures f
+    WHERE LOWER(f.status_short) IN ('${IN_FUTURE.join("', '")}')
+      AND (f.home_team_id = ANY($1::bigint[]) OR f.away_team_id = ANY($1::bigint[]))
+    ORDER BY f.date ASC
+  `;
+  const result = await pool.query(query, [teamIds]);
+  return result.rows.map((row: any) => row.id);
+}
+
+async function updateStatisticsForFixtures(fixtureIds: number[]): Promise<void> {
+  await pool.query('SELECT populate_hours_batch($1)', [fixtureIds]);
+  await pool.query('SELECT populate_league_goals_batch($1)', [fixtureIds]);
+  await pool.query('SELECT populate_home_advantage_batch($1)', [fixtureIds]);
+  await pool.query('SELECT calculate_elos_incremental($1)', [fixtureIds]);
+  await pool.query('SELECT populate_adjusted_rolling_xg_batch($1)', [fixtureIds]);
+  await pool.query('SELECT populate_adjusted_rolling_market_xg_batch($1)', [fixtureIds]);
+}
+
+async function generatePredictionsAndOdds(fixtureIds: number[], onProgress?: ChainOptions['onProgress']): Promise<void> {
+  const { predictFixtures } = await import('@/lib/ml/ml-predict');
+  await predictFixtures({ fixtureIds });
+
+  const { calculateOddsFromPredictions } = await import('@/lib/calculations/prediction-odds');
+  await calculateOddsFromPredictions(fixtureIds);
 }

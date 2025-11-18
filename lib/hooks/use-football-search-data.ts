@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useApi } from './use-api';
-import { Team, League } from '../../types/database';
+import { Team, League } from '@/types';
 
 export interface SearchData {
   teams: Team[];

@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { OddsChart } from './OddsChart';
 import { LoadingState } from '../../shared/LoadingState';
 import { ErrorState } from '../../shared/ErrorState';
-import { calculateWeightedAverageFairOdds, getOddsDivisor, getFairOddsValueForOutcome } from '@/lib/utils/value-calculations';
-import type { BookieOdds } from '@/lib/utils/value-analysis';
+import { getOddsDivisor } from '@/lib/utils/value-calculations';
 
 /**
  * Checks if all values in an array are valid (not null and greater than 1)
@@ -18,8 +17,6 @@ function areAllOddsValid(values: number[]): boolean {
 interface FixtureOddsProps {
   fixture?: any; // Made flexible to support different fixture formats
   oddsData?: OddsData | null;
-  ratios?: any[]; // For value opportunities that have ratios data
-  minRatio?: number;
   fairOddsBookies?: Array<{bookie: string, required: boolean, multiplier: number}>;
   filterMethod?: 'above_all' | 'average';
 }
@@ -45,30 +42,11 @@ interface OddsData {
   }>;
 }
 
-interface RatioData {
-  fair_odds_bookie: string;
-  odds_bookie: string;
-  ratios_x12?: number[];
-  ratios_ah?: {
-    ratios_ah_a?: number[];
-    ratios_ah_h?: number[];
-  };
-  ratios_ou?: {
-    ratios_ou_o?: number[];
-    ratios_ou_u?: number[];
-  };
-  ratios_lines?: {
-    ah?: number[];
-    ou?: number[];
-  };
-}
 
 
 export function FixtureOdds({
   fixture,
   oddsData: propOddsData,
-  ratios: propRatios,
-  minRatio = 1.0,
   fairOddsBookies = [{bookie: 'Pinnacle', required: false, multiplier: 1}],
   filterMethod = 'above_all'
 }: FixtureOddsProps) {
@@ -86,8 +64,6 @@ export function FixtureOdds({
   // EventSource ref for streaming
   const eventSourceRef = React.useRef<EventSource | null>(null);
 
-  // Use propRatios if provided, otherwise fall back to fixture.ratios
-  const ratios = propRatios || fixture?.ratios || [];
 
   // Handle odds data updates from props
   useEffect(() => {
@@ -556,18 +532,54 @@ export function FixtureOdds({
 
     // Get the latest data from each array for regular bookmakers
     // Handle both old format (array of objects) and new format (single object)
+    // For future fixtures, find the odds entry that matches the latest timestamp
     const latestX12 = Array.isArray(bookmaker.odds_x12)
-      ? bookmaker.odds_x12?.[bookmaker.odds_x12.length - 1]
+      ? bookmaker.odds_x12?.find(entry => entry.t === bookmaker.latest_t?.x12_ts) || bookmaker.odds_x12?.[bookmaker.odds_x12.length - 1]
       : bookmaker.odds_x12;
     const latestAH = Array.isArray(bookmaker.odds_ah)
-      ? bookmaker.odds_ah?.[bookmaker.odds_ah.length - 1]
+      ? bookmaker.odds_ah?.find(entry => entry.t === bookmaker.latest_t?.ah_ts) || bookmaker.odds_ah?.[bookmaker.odds_ah.length - 1]
       : bookmaker.odds_ah;
     const latestOU = Array.isArray(bookmaker.odds_ou)
-      ? bookmaker.odds_ou?.[bookmaker.odds_ou.length - 1]
+      ? bookmaker.odds_ou?.find(entry => entry.t === bookmaker.latest_t?.ou_ts) || bookmaker.odds_ou?.[bookmaker.odds_ou.length - 1]
       : bookmaker.odds_ou;
-    const latestLines = Array.isArray(bookmaker.lines)
-      ? bookmaker.lines?.[bookmaker.lines.length - 1]
-      : bookmaker.lines;
+    
+    // Find lines entry that matches the latest odds timestamps
+    // For OU and AH, we need to find lines that correspond to when those odds were last updated
+    let latestLines = null;
+    if (Array.isArray(bookmaker.lines)) {
+      // If OU odds exist, find the lines entry with OU lines at or before the OU odds timestamp
+      if (latestOU?.t) {
+        // First try exact match
+        let ouLinesEntry = bookmaker.lines.find(entry => entry.t === latestOU.t);
+        // If no exact match or empty OU array, find the most recent lines entry with OU lines before/at this timestamp
+        if (!ouLinesEntry || !ouLinesEntry.ou || ouLinesEntry.ou.length === 0) {
+          ouLinesEntry = bookmaker.lines
+            .filter(entry => entry.t <= latestOU.t && entry.ou && entry.ou.length > 0)
+            .sort((a, b) => b.t - a.t)[0];
+        }
+        if (ouLinesEntry && ouLinesEntry.ou && ouLinesEntry.ou.length > 0) {
+          latestLines = ouLinesEntry;
+        }
+      }
+      // If no OU match, try AH odds timestamp
+      if (!latestLines && latestAH?.t) {
+        let ahLinesEntry = bookmaker.lines.find(entry => entry.t === latestAH.t);
+        if (!ahLinesEntry || !ahLinesEntry.ah || ahLinesEntry.ah.length === 0) {
+          ahLinesEntry = bookmaker.lines
+            .filter(entry => entry.t <= latestAH.t && entry.ah && entry.ah.length > 0)
+            .sort((a, b) => b.t - a.t)[0];
+        }
+        if (ahLinesEntry) {
+          latestLines = ahLinesEntry;
+        }
+      }
+      // Fallback to latest_t.lines_ts or last entry
+      if (!latestLines) {
+        latestLines = bookmaker.lines?.find(entry => entry.t === bookmaker.latest_t?.lines_ts) || bookmaker.lines?.[bookmaker.lines.length - 1];
+      }
+    } else {
+      latestLines = bookmaker.lines;
+    }
 
     if (!acc[bookmaker.bookie]) {
       acc[bookmaker.bookie] = {
@@ -637,19 +649,6 @@ export function FixtureOdds({
     return 'bg-black'; // Dark background for other bookies
   };
 
-  // Helper to get text color class for ratio based on value and filter
-  const getRatioTextColorClass = (ratio: number): string => {
-    // Use small epsilon for floating point comparison
-    const epsilon = 0.0001;
-
-    if (ratio >= (minRatio - epsilon)) {
-      return 'text-green-400'; // Green if above or equal to filter
-    } else if (ratio >= (1.0 - epsilon)) {
-      return 'text-yellow-400'; // Yellow if above or equal to 1.0 but below filter
-    } else {
-      return 'text-red-400'; // Red if below filter and below 1.0
-    }
-  };
 
 
   // Generic helper function for simple markets (1X2)
@@ -658,67 +657,6 @@ export function FixtureOdds({
     if (!hasData) return null;
 
     // Get ratio for X12 outcomes using Top odds / Fair odds
-    const getTopRatio = (outcomeIndex: number) => {
-      if (!fixture?.fair_odds) return null;
-
-      // Find the bookie with the top odds for this outcome
-      const topOddsData = getTopOdds(outcomeIndex);
-      if (!topOddsData) return null;
-
-      // Calculate fair odds for each selected fair odds bookie
-      const availableFairOdds: Array<{fairBookie: string, fairOdds: number}> = [];
-
-      fixture.fair_odds.forEach((fairOddsData: BookieOdds) => {
-        // Only consider selected fair odds bookies
-        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === fairOddsData.bookie);
-        if (!isSelectedFairBookie) return;
-
-        // Validate fair odds data
-        if (fairOddsData.fair_odds_x12 && areAllOddsValid(fairOddsData.fair_odds_x12.x12) &&
-            (!fairOddsData.odds_x12 || fairOddsData.fair_odds_x12.t === fairOddsData.odds_x12[0].t) &&
-            (!fairOddsData.odds_x12 || areAllOddsValid(fairOddsData.odds_x12[0].x12))) {
-
-          // Get the fair odds for this outcome
-          if (fairOddsData.fair_odds_x12.x12[outcomeIndex] > 0) {
-            const fairOddsDecimal = fairOddsData.fair_odds_x12.x12[outcomeIndex] / Math.pow(10, fairOddsData.decimals);
-
-            availableFairOdds.push({
-              fairBookie: fairOddsData.bookie,
-              fairOdds: fairOddsDecimal
-            });
-          }
-        }
-      });
-
-      if (availableFairOdds.length === 0) return null;
-
-      // Check required bookies criterion
-      const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
-      if (requiredFairBookies.length > 0) {
-        const hasRequiredBookie = requiredFairBookies.some(requiredBookie =>
-          availableFairOdds.some(f => f.fairBookie === requiredBookie)
-        );
-        if (!hasRequiredBookie) return null;
-      }
-
-      // Apply filter method - calculate average fair odds first, then divide by top odds
-      let avgFairOdds = 0;
-
-      if (filterMethod === 'average') {
-        avgFairOdds = calculateWeightedAverageFairOdds(availableFairOdds, fairOddsBookies);
-      } else if (filterMethod === 'above_all') {
-        // For above_all, use the highest fair odds (most conservative)
-        avgFairOdds = Math.max(...availableFairOdds.map(f => f.fairOdds));
-      } else {
-        // Individual - use the lowest fair odds (least conservative)
-        avgFairOdds = Math.min(...availableFairOdds.map(f => f.fairOdds));
-      }
-
-      const topOddsDecimal = topOddsData.odds;
-      const displayRatio = avgFairOdds > 0 ? topOddsDecimal / avgFairOdds : 0;
-
-      return displayRatio > 0 ? { ratio: displayRatio, bookie: '' } : null;
-    };
 
     // Get top odds
     const getTopOdds = (outcomeIndex: number) => {
@@ -751,11 +689,6 @@ export function FixtureOdds({
                 <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
                   Top
                 </th>
-                {ratios && ratios.length > 0 && (
-                  <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
-                    Ratios
-                  </th>
-                )}
               </tr>
             </thead>
             <tbody>
@@ -778,7 +711,12 @@ export function FixtureOdds({
                             {value}
                           </button>
                         ) : (
-                          <span className="text-gray-500">-</span>
+                          <button
+                            onClick={(e) => handleOddsClick(e, bm.bookie, marketName, outcome.label, undefined, bm.decimals)}
+                            className={`text-gray-500 hover:text-gray-700 px-1 py-0 rounded transition-colors cursor-pointer`}
+                          >
+                            -
+                          </button>
                         )}
                       </td>
                     );
@@ -798,30 +736,6 @@ export function FixtureOdds({
                       );
                     })()}
                   </td>
-                  {ratios && ratios.length > 0 && (
-                    <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
-                      const topRatioData = getTopRatio(index);
-                      if (!topRatioData) return 'bg-black';
-
-                      const ratioColorClass = getRatioTextColorClass(topRatioData.ratio);
-                      // Convert text color classes to background color classes
-                      if (ratioColorClass === 'text-green-400') return 'bg-green-600';
-                      if (ratioColorClass === 'text-yellow-400') return 'bg-yellow-700';
-                      if (ratioColorClass === 'text-red-400') return 'bg-red-600';
-                      return 'bg-black';
-                    })()}`}>
-                      {(() => {
-                        const topRatioData = getTopRatio(index);
-                        if (!topRatioData) return <span className="text-gray-500">-</span>;
-
-                        return (
-                          <span className="font-mono text-xs px-1 rounded text-white">
-                            {topRatioData.ratio.toFixed(3)}
-                          </span>
-                        );
-                      })()}
-                    </td>
-                  )}
                 </tr>
               ))}
             </tbody>
@@ -852,14 +766,6 @@ export function FixtureOdds({
       }
     });
 
-    // Also include lines from ratios data
-    if (ratios) {
-      ratios.forEach((ratioData: RatioData) => {
-        if (ratioData.ratios_lines?.[linesKey]) {
-          ratioData.ratios_lines[linesKey].forEach((line: number) => allLines.add(line));
-        }
-      });
-    }
 
     const sortedLines = Array.from(allLines).sort((a, b) => a - b);
 
@@ -894,82 +800,6 @@ export function FixtureOdds({
     };
 
     // Helper to get the ratio for a specific line and side using Top odds / Fair odds
-    const getTopRatio = (line: number, sideKey: 'ratios_ah_a' | 'ratios_ah_h' | 'ratios_ou_o' | 'ratios_ou_u') => {
-      if (!fixture?.fair_odds) return null;
-
-      // Find the bookie with the top odds for this line and side
-      const oddsKey = linesKey === 'ah'
-        ? (sideKey === 'ratios_ah_h' ? 'ah_h' : 'ah_a')
-        : (sideKey === 'ratios_ou_o' ? 'ou_o' : 'ou_u');
-      const topOddsData = getTopOdds(line, oddsKey);
-      if (!topOddsData) return null;
-
-      // Calculate fair odds for each selected fair odds bookie
-      const availableFairOdds: Array<{fairBookie: string, fairOdds: number}> = [];
-
-      fixture.fair_odds.forEach((fairOddsData: BookieOdds) => {
-        // Only consider selected fair odds bookies
-        const isSelectedFairBookie = fairOddsBookies.some(config => config.bookie === fairOddsData.bookie);
-        if (!isSelectedFairBookie) return;
-
-        // Validate fair odds data for AH/OU markets
-        let isValidFairOdds = false;
-        if (linesKey === 'ah' && fairOddsData.fair_odds_ah) {
-          isValidFairOdds = fairOddsData.fair_odds_ah.fair_ah_a && fairOddsData.fair_odds_ah.fair_ah_h &&
-                           (!fairOddsData.odds_ah || fairOddsData.fair_odds_ah.t === fairOddsData.odds_ah[0].t);
-        } else if (linesKey === 'ou' && fairOddsData.fair_odds_ou) {
-          isValidFairOdds = fairOddsData.fair_odds_ou.fair_ou_o && fairOddsData.fair_odds_ou.fair_ou_u &&
-                           (!fairOddsData.odds_ou || fairOddsData.fair_odds_ou.t === fairOddsData.odds_ou[0].t);
-        }
-
-        if (!isValidFairOdds) return;
-
-        // Get the fair odds for this line and side
-        const fairLinesObj = fairOddsData.fair_odds_lines?.[0];
-        const fairOddsLines = fairLinesObj?.[linesKey] || [];
-        const lineIndex = fairOddsLines.findIndex((l: number) => Math.abs(l - line) < 0.0001);
-
-        if (lineIndex >= 0) {
-          const fairOddsValue = getFairOddsValueForOutcome(fairOddsData, linesKey, sideKey === 'ratios_ah_a' || sideKey === 'ratios_ou_o' ? 0 : 1, line, fairLinesObj);
-
-          if (fairOddsValue > 1) {
-            availableFairOdds.push({
-              fairBookie: fairOddsData.bookie,
-              fairOdds: fairOddsValue
-            });
-          }
-        }
-      });
-
-      if (availableFairOdds.length === 0) return null;
-
-      // Check required bookies criterion
-      const requiredFairBookies = fairOddsBookies.filter(config => config.required).map(config => config.bookie);
-      if (requiredFairBookies.length > 0) {
-        const hasRequiredBookie = requiredFairBookies.some(requiredBookie =>
-          availableFairOdds.some(f => f.fairBookie === requiredBookie)
-        );
-        if (!hasRequiredBookie) return null;
-      }
-
-      // Apply filter method - calculate average fair odds first, then divide by top odds
-      let avgFairOdds = 0;
-
-      if (filterMethod === 'average') {
-        avgFairOdds = calculateWeightedAverageFairOdds(availableFairOdds, fairOddsBookies);
-      } else if (filterMethod === 'above_all') {
-        // For above_all, use the highest fair odds (most conservative)
-        avgFairOdds = Math.max(...availableFairOdds.map(f => f.fairOdds));
-      } else {
-        // Individual - use the lowest fair odds (least conservative)
-        avgFairOdds = Math.min(...availableFairOdds.map(f => f.fairOdds));
-      }
-
-      const topOddsDecimal = topOddsData.odds;
-      const displayRatio = avgFairOdds > 0 ? topOddsDecimal / avgFairOdds : 0;
-
-      return displayRatio > 0 ? { ratio: displayRatio, bookie: '' } : null;
-    };
 
     // Helper to get top odds for a specific line and side (excluding Prediction)
     const getTopOdds = (line: number, oddsKey: string) => {
@@ -1002,11 +832,6 @@ export function FixtureOdds({
                 <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
                   Top
                 </th>
-                {ratios && ratios.length > 0 && (
-                  <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[80px] font-bold">
-                    Ratios
-                  </th>
-                )}
                 <th className="px-1 py-0.5 text-left text-bg-black border border-gray-600">{side2.label}</th>
                 {bookmakers.map(bm => (
                   <th key={`${side2.label}-${bm.bookie}`} className="px-1 py-0.5 text-center text-bg-black border border-gray-600 min-w-[60px]">
@@ -1016,17 +841,10 @@ export function FixtureOdds({
                 <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
                   Top
                 </th>
-                {ratios && ratios.length > 0 && (
-                  <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[80px] font-bold">
-                    Ratios
-                  </th>
-                )}
               </tr>
             </thead>
             <tbody>
               {linesWithData.map((line, _index) => {
-                const side1TopRatio = getTopRatio(line, linesKey === 'ah' ? 'ratios_ah_h' : 'ratios_ou_o');
-                const side2TopRatio = getTopRatio(line, linesKey === 'ah' ? 'ratios_ah_a' : 'ratios_ou_u');
 
                 return (
                   <tr key={line}>
@@ -1072,28 +890,6 @@ export function FixtureOdds({
                         );
                       })()}
                     </td>
-                    {ratios && ratios.length > 0 && (
-                      <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
-                        if (!side1TopRatio) return 'bg-black';
-
-                        const ratioColorClass = getRatioTextColorClass(side1TopRatio.ratio);
-                        // Convert text color classes to background color classes
-                        if (ratioColorClass === 'text-green-400') return 'bg-green-600';
-                        if (ratioColorClass === 'text-yellow-400') return 'bg-yellow-700';
-                        if (ratioColorClass === 'text-red-400') return 'bg-red-600';
-                        return 'bg-black';
-                      })()}`}>
-                        {(() => {
-                          if (!side1TopRatio) return <span className="text-gray-500">-</span>;
-
-                          return (
-                            <span className="font-mono text-xs px-1 rounded text-white">
-                              {side1TopRatio.ratio.toFixed(3)}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                    )}
                     <td className="px-1 py-0.5 text-gray-300 border border-gray-600 font-medium">
                       {side2.lineFormatter(line)}
                     </td>
@@ -1136,28 +932,6 @@ export function FixtureOdds({
                         );
                       })()}
                     </td>
-                    {ratios && ratios.length > 0 && (
-                      <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
-                        if (!side2TopRatio) return 'bg-black';
-
-                        const ratioColorClass = getRatioTextColorClass(side2TopRatio.ratio);
-                        // Convert text color classes to background color classes
-                        if (ratioColorClass === 'text-green-400') return 'bg-green-600';
-                        if (ratioColorClass === 'text-yellow-400') return 'bg-yellow-700';
-                        if (ratioColorClass === 'text-red-400') return 'bg-red-600';
-                        return 'bg-black';
-                      })()}`}>
-                        {(() => {
-                          if (!side2TopRatio) return <span className="text-gray-500">-</span>;
-
-                          return (
-                            <span className="font-mono text-xs px-1 rounded text-white">
-                              {side2TopRatio.ratio.toFixed(3)}
-                            </span>
-                          );
-                        })()}
-                      </td>
-                    )}
                   </tr>
                 );
               })}

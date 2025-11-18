@@ -95,32 +95,6 @@ export function parseBooleanParam(searchParams: URLSearchParams, paramName: stri
 }
 
 /**
- * Parse numeric parameters with validation
- */
-export function parseNumericParam(searchParams: URLSearchParams, paramName: string, defaultValue?: number): {
-  value: number | null;
-  error?: NextResponse;
-} {
-  const param = searchParams.get(paramName);
-  if (!param) {
-    return { value: defaultValue ?? null };
-  }
-
-  const parsed = parseFloat(param);
-  if (isNaN(parsed)) {
-    return {
-      value: null,
-      error: NextResponse.json(
-        { error: `Invalid ${paramName}: must be a number` },
-        { status: 400 }
-      )
-    };
-  }
-
-  return { value: parsed };
-}
-
-/**
  * Parse league ID parameter
  */
 export function parseLeagueId(searchParams: URLSearchParams): {
@@ -145,66 +119,6 @@ export function parseLeagueId(searchParams: URLSearchParams): {
   }
 
   return { leagueId };
-}
-
-/**
- * Build WHERE clause conditions for fixture queries
- */
-export function buildFixtureWhereClause(
-  fixtureIds: number[],
-  leagueId?: number | null,
-  statusFilter?: string[],
-  dateFilter?: { from?: Date; to?: Date }
-): {
-  whereClause: string;
-  params: any[];
-  paramIndex: number;
-} {
-  const conditions: string[] = [];
-  const params: any[] = [];
-  let paramIndex = 1;
-
-  if (fixtureIds.length > 0) {
-    conditions.push(`f.id = ANY($${paramIndex})`);
-    params.push(fixtureIds);
-    paramIndex++;
-  }
-
-  if (leagueId) {
-    conditions.push(`f.league_id = $${paramIndex}`);
-    params.push(leagueId);
-    paramIndex++;
-  }
-
-  if (statusFilter && statusFilter.length > 0) {
-    conditions.push(`f.status_short = ANY($${paramIndex})`);
-    params.push(statusFilter);
-    paramIndex++;
-  }
-
-  if (dateFilter) {
-    if (dateFilter.from) {
-      conditions.push(`f.date >= $${paramIndex}`);
-      params.push(dateFilter.from);
-      paramIndex++;
-    }
-    if (dateFilter.to) {
-      conditions.push(`f.date <= $${paramIndex}`);
-      params.push(dateFilter.to);
-      paramIndex++;
-    }
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  return { whereClause, params, paramIndex };
-}
-
-/**
- * Standard API response wrapper
- */
-export function createApiResponse(data: any, status = 200): NextResponse {
-  return NextResponse.json(data, { status });
 }
 
 /**

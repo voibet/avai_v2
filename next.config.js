@@ -1,3 +1,9 @@
-// Re-export Next.js config from config directory
-export { default } from './config/next.config.js';
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  experimental: {
+    instrumentationHook: true,
+  },
+}
+
+export default nextConfig
 

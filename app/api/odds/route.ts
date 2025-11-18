@@ -67,8 +67,8 @@ async function getFixtureOdds(request: Request) {
           ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
           AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
-          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+          ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
       `;
     } else {
       // Original count query for full historical data
@@ -95,8 +95,8 @@ async function getFixtureOdds(request: Request) {
           ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
           ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
-          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+          ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
       `;
     } else {
       // Original count query for full historical data
@@ -156,8 +156,8 @@ async function getFixtureOdds(request: Request) {
           ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
           AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
-          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+          ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
         ORDER BY ff.date, ff.id, COALESCE(fo.bookie, ffo.bookie)
       `;
     } else {
@@ -234,8 +234,8 @@ async function getFixtureOdds(request: Request) {
           ${fixtureIds.length > 0 ? `AND ff.id IN (${fixturePlaceholders})` : ''}
           ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
-          -- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)
+          ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
+          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
         ORDER BY ff.date, ff.id, fo.bookie
       `;
     } else {
@@ -662,6 +662,7 @@ async function createFixtureOdds(request: Request) {
       finalOuOdds = mergedOu;
     }
 
+    // Merge lines: preserve existing lines and merge with new ones
     if (existing.lines) {
       const existingLines = JSON.parse(existing.lines);
       const mergedLines = [...existingLines];
@@ -677,7 +678,11 @@ async function createFixtureOdds(request: Request) {
       });
 
       finalLines = mergedLines;
+    } else if (lines.length > 0) {
+      // If no existing lines but we have new lines, use the new lines
+      finalLines = lines;
     }
+    // If existing.lines is null and lines is empty, finalLines stays as empty array (will be saved as null)
 
     // Merge latest_t
     if (existing.latest_t) {

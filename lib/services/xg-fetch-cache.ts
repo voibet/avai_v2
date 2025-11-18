@@ -55,7 +55,8 @@ export function shouldSkipXGFetch(fixtureId: number, expiryMs: number = DEFAULT_
 
   // Check if the last attempt was within the cache expiry window
   if (now - attempt.lastAttempt < expiryMs) {
-    console.log(`[XG Cache] Skipping XG fetch for fixture ${fixtureId} - last attempted ${Math.round((now - attempt.lastAttempt) / 1000 / 60)} minutes ago (${attempt.attempts} total attempts)`);
+    const time = new Date().toTimeString().slice(0, 8); // HH:MM:SS format
+    console.log(`${time} [XG Cache] Skipping XG fetch for fixture ${fixtureId} - last attempted ${Math.round((now - attempt.lastAttempt) / 1000 / 60)} minutes ago (${attempt.attempts} total attempts)`);
     return true;
   }
 

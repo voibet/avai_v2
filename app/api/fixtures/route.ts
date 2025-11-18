@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { withErrorHandler, executeQuery } from '../../../lib/database/db-utils';
 import { parseTableParams, executeTableQuery } from '../../../lib/utils/server-table-utils';
-import { Fixture } from '../../../types/database';
+import { Fixture } from '@/types';
 
 
 export const dynamic = 'force-dynamic';

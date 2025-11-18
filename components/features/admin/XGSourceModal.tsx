@@ -1,4 +1,4 @@
-import { League } from '../../../types/database';
+import { League } from '@/types';
 
 
 interface XGSourceModalProps {

@@ -109,7 +109,7 @@ async function getFixtureLineups(_request: Request, { params }: { params: { id: 
 
     return NextResponse.json(lineups);
   } catch (error: any) {
-    console.error('Error fetching lineups:', error);
+    console.error('Error fetching lineups');
 
     if (error.response?.status === 404) {
       // Lineups not available for this fixture

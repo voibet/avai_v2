@@ -21,7 +21,7 @@ export async function POST() {
         };
 
         // Start fetching for all current seasons (no selected seasons)
-        const result = await fetcher.fetchAndUpdateFixtures(onProgress);
+        const result = await fetcher.fetchAndUpdateFixturesForCurrentSeasons(onProgress);
 
         // Send final result
         const finalData = {

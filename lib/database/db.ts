@@ -15,11 +15,6 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000, // Increased timeout for connection acquisition
 });
 
-// Log pool events for monitoring
-pool.on('connect', (client) => {
-  console.log(`Database client connected (total: ${pool.totalCount}, idle: ${pool.idleCount}, waiting: ${pool.waitingCount})`);
-});
-
 pool.on('error', (err, client) => {
   console.error('Unexpected error on idle client', err);
 });

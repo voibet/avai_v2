@@ -10,6 +10,7 @@ import { calculateHomeAdvantage } from './home-advantage';
 import { calculateRollingXG } from './rolling-xg';
 import { calculateMarketXG } from './market-xg';
 import { calculateOddsFromPredictions } from './prediction-odds';
+import { calculateFairOdds } from './fair-odds';
 import { cleanupPastFixturesOdds } from './cleanup-odds';
 
 export type CalculationFunction =
@@ -22,6 +23,7 @@ export type CalculationFunction =
   | 'market-xg'
   | 'prediction-odds'
   | 'odds'
+  | 'fair-odds'
   | 'cleanup-odds'
   | 'all';
 
@@ -78,6 +80,9 @@ export async function runCalculations(
         case 'odds':
           count = await calculateOddsFromPredictions(fixtureIds);
           break;
+        case 'fair-odds':
+          count = await calculateFairOdds(fixtureIds);
+          break;
         case 'cleanup-odds':
           const cleanupResult = await cleanupPastFixturesOdds();
           count = cleanupResult.cleanedRecords;
@@ -115,6 +120,7 @@ export async function runCalculations(
     await runFunction('rolling-xg', 'Rolling windows xG calculations');
     await runFunction('market-xg', 'Market XG calculations');
     await runFunction('prediction-odds', 'Prediction odds calculations');
+    await runFunction('fair-odds', 'Fair odds calculations');
     await runFunction('cleanup-odds', 'Odds cleanup');
 
     console.log(`✅ All calculations completed: ${totalCount} fixtures processed total`);
@@ -133,6 +139,7 @@ export async function runCalculations(
         'market-xg': 'Market XG calculations',
         'prediction-odds': 'Prediction odds calculations',
         'odds': 'Prediction odds calculations',
+        'fair-odds': 'Fair odds calculations',
         'cleanup-odds': 'Odds cleanup',
         'all': 'All calculations'
       };
@@ -155,6 +162,7 @@ export {
   calculateRollingXG,
   calculateMarketXG,
   calculateOddsFromPredictions,
+  calculateFairOdds,
   cleanupPastFixturesOdds
 };
 

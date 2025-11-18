@@ -151,7 +151,7 @@ async function getFixtureCoaches(_request: Request, { params }: { params: { id: 
     });
 
   } catch (error: any) {
-    console.error('Error fetching coaches:', error);
+    console.error('Error fetching coaches');
 
     if (error.response?.status === 404) {
       // Coaches not available

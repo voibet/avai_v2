@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/database/db.ts';
-import { calculateOddsFromPredictions } from '@/calculators/prediction-odds.js';
+import { calculateOddsFromPredictions } from '@/lib/calculations/prediction-odds';
 
 export async function GET(
   _request: Request,

@@ -1,8 +1,17 @@
 import axios from 'axios';
 import { executeQuery } from '../database/db-utils';
-import { Fixture } from '../../types/database';
+import { Fixture } from '@/types';
 import { IN_PAST } from '../constants';
 import { shouldSkipXGFetch, recordXGFetchAttempt, getXGCacheExpiry } from './xg-fetch-cache';
+
+/**
+ * Helper for consistent logging with timestamp and service prefix
+ */
+function log(message: string): void {
+  const now = new Date();
+  const time = now.toTimeString().slice(0, 8); // HH:MM:SS format
+  console.log(`${time} XGFetcher: ${message}`);
+}
 
 interface XGData {
   home: number;
@@ -156,15 +165,6 @@ export class XGFetcher {
         };
       }
 
-      // Get league's XG source configuration
-      const leagueConfig = await this.getLeagueXGConfig(leagueId);
-      if (!leagueConfig) {
-        return {
-          success: false,
-          message: 'No XG source configuration found for this league'
-        };
-      }
-
       let totalUpdated = 0;
       const allUpdatedIds: number[] = [];
       const batchSize = 10; // Process fixtures in batches to avoid overwhelming APIs
@@ -181,7 +181,7 @@ export class XGFetcher {
         }
 
         try {
-          const batchResult = await this.processBatch(batch, leagueConfig);
+          const batchResult = await this.processBatch(batch);
           totalUpdated += batchResult.count;
           allUpdatedIds.push(...batchResult.updatedIds);
 
@@ -214,7 +214,7 @@ export class XGFetcher {
     onProgress?: (league: string, current: number, total: number) => void
   ): Promise<{ success: boolean; message: string; updatedCount?: number; updatedFixtureIds?: number[] }> {
     try {
-      console.log('Starting XG fetch for all leagues...');
+      log('Starting XG fetch for all leagues...');
 
       // Get all leagues with XG source configuration
       const leagues = await this.getLeaguesWithXGConfig();
@@ -278,7 +278,6 @@ export class XGFetcher {
       AND LOWER(f.status_short) IN ('${IN_PAST.join("', '")}')
       AND (f.xg_home IS NULL OR f.xg_away IS NULL)
       AND l.seasons::jsonb ? f.season::text
-      AND (l.seasons::jsonb -> f.season::text ->> 'current')::boolean = true
     `;
     const params: any[] = [];
 
@@ -325,117 +324,47 @@ export class XGFetcher {
     return result.rows;
   }
 
-  private async processBatch(fixtures: Fixture[], leagueConfig: any): Promise<{ count: number; updatedIds: number[] }> {
+  private async processBatch(fixtures: Fixture[]): Promise<{ count: number; updatedIds: number[] }> {
     let updatedCount = 0;
     const updatedIds: number[] = [];
 
-    // Group fixtures by XG source to optimize caching
-    const fixturesBySource = new Map<string, Fixture[]>();
-    
     for (const fixture of fixtures) {
-
-      const seasonStr = fixture.season.toString();
-      const xgSourceConfig = leagueConfig.xgSource[seasonStr];
-      
-      if (xgSourceConfig && xgSourceConfig.rounds) {
-        // Extract base round name by cutting off everything after " - "
-        const baseRoundName = fixture.round ? fixture.round.split(' - ')[0] : '';
-        const roundConfig = xgSourceConfig.rounds[baseRoundName] || xgSourceConfig.rounds['ALL'];
-        
-        if (roundConfig) {
-          const sourceKey = roundConfig.url;
-          if (!fixturesBySource.has(sourceKey)) {
-            fixturesBySource.set(sourceKey, []);
-          }
-          fixturesBySource.get(sourceKey)!.push(fixture);
+      try {
+        const xgData = await this.fetchXGForFixture(fixture);
+        if (xgData) {
+          console.log(`Found XG data for fixture ${fixture.id}: Home ${xgData.home}, Away ${xgData.away}`);
+          await this.updateFixtureXG(fixture.id, xgData);
+          updatedCount++;
+          updatedIds.push(fixture.id);
         }
+      } catch (error) {
+        console.error(`Error processing fixture ${fixture.id}:`, error);
+        // Continue with next fixture
       }
-    }
 
-    // Process each source group efficiently
-    for (const [_sourceUrl, sourceFixtures] of Array.from(fixturesBySource.entries())) {
-      for (const fixture of sourceFixtures) {
-        try {
-          const xgData = await this.fetchXGForFixture(fixture, leagueConfig, sourceFixtures);
-          if (xgData) {
-            console.log(`Found XG data for fixture ${fixture.id}: Home ${xgData.home}, Away ${xgData.away}`);
-            await this.updateFixtureXG(fixture.id, xgData);
-            updatedCount++;
-            updatedIds.push(fixture.id);
-          }
-        } catch (error) {
-          console.error(`Error processing fixture ${fixture.id}:`, error);
-          // Continue with next fixture
-        }
-
-        // Rate limiting: 4 requests per second (250ms between requests)
-        await new Promise(resolve => setTimeout(resolve, 250));
-      }
+      // Rate limiting: 4 requests per second (250ms between requests)
+      await new Promise(resolve => setTimeout(resolve, 250));
     }
 
     return { count: updatedCount, updatedIds };
   }
 
-  private async fetchXGForFixture(fixture: Fixture, leagueConfig: any, allFixturesForSource?: Fixture[]): Promise<XGData | null> {
+  private async fetchXGForFixture(fixture: Fixture): Promise<XGData | null> {
     try {
-      const seasonStr = fixture.season.toString();
-      const xgSourceConfig = leagueConfig.xgSource[seasonStr];
-
-      if (!xgSourceConfig || !xgSourceConfig.rounds) {
-        console.log(`No xG source configuration for fixture ${fixture.id} (Season: ${seasonStr})`);
-        recordXGFetchAttempt(fixture.id, false);
+      // Check cache to prevent repeated attempts within 5 minutes
+      if (shouldSkipXGFetch(fixture.id, 5 * 60 * 1000)) {
         return null;
       }
 
-      // Extract base round name by cutting off everything after " - "
-      const baseRoundName = fixture.round ? fixture.round.split(' - ')[0] : '';
+      log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name}`);
 
-      // Check if fixture's base round or ALL rounds have XG source
-      const roundConfig = xgSourceConfig.rounds[baseRoundName] || xgSourceConfig.rounds['ALL'];
-
-      if (!roundConfig) {
-        console.log(`No xG source for fixture ${fixture.id} (Round: ${baseRoundName})`);
-        recordXGFetchAttempt(fixture.id, false);
-        return null;
-      }
-
-      const xgSourceUrl = roundConfig.url;
-
-      // Get cache expiry time for this source
-      const cacheExpiryMs = getXGCacheExpiry(xgSourceUrl);
-
-      // Check cache to prevent repeated attempts within the appropriate time window
-      if (shouldSkipXGFetch(fixture.id, cacheExpiryMs)) {
-        return null;
-      }
-
-      // Determine source type for logging
-      let sourceType = 'Unknown';
-      if (xgSourceUrl === 'NATIVE') {
-        sourceType = 'NATIVE (API-Football)';
-      } else if (xgSourceUrl.includes('-')) {
-        sourceType = `Sofascore (${xgSourceUrl})`;
-      } else {
-        sourceType = `Flashlive (${xgSourceUrl})`;
-      }
-
-      console.log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name} - xG Source: ${sourceType} (Cache: ${Math.round(cacheExpiryMs / 1000 / 60)}min)`);
-
-      let result: XGData | null = null;
-
-      if (xgSourceUrl === 'NATIVE') {
-        result = await this.fetchNativeXG(fixture);
-      } else if (xgSourceUrl.includes('-')) {
-        result = await this.fetchSofascoreXG(fixture, xgSourceUrl, allFixturesForSource);
-      } else {
-        result = await this.fetchFlashliveXG(fixture, xgSourceUrl, allFixturesForSource);
-      }
+      const result = await this.fetchNativeXG(fixture);
 
       // Record the attempt result
-      recordXGFetchAttempt(fixture.id, result !== null);
+      recordXGFetchAttempt(fixture.id, !!result);
       return result;
     } catch (error) {
-      console.error(`Error fetching XG for fixture ${fixture.id}:`);
+      console.error(`Error fetching XG for fixture ${fixture.id}:`, error);
       recordXGFetchAttempt(fixture.id, false);
       return null;
     }
@@ -574,7 +503,7 @@ export class XGFetcher {
       // Find matching fixture using mappings + fuzzy matching
       const matchingEvent = await this.findMatchingSofascoreFixture(fixture, allMatches, teamMappings);
       if (!matchingEvent) {
-        console.log(`No matching Sofascore fixture found for fixture ${fixture.id}`);
+        log(`No matching Sofascore fixture found for fixture ${fixture.id}`);
         return null;
       }
 
@@ -597,7 +526,7 @@ export class XGFetcher {
       
       // Check if statistics exists and is iterable
       if (!statsData.statistics || !Array.isArray(statsData.statistics)) {
-        console.log(`No xG statistics available for match ${matchingEvent.id}`);
+        log(`No xG statistics available for match ${matchingEvent.id}`);
         return null;
       }
       

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import axios from 'axios';
 import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
 import { IN_PAST } from '@/lib/constants';
-import { calculateExpectedPoints, calculatePositionPercentagesFromProjectedPoints } from '../../../../calculators/market-xg.js';
+import { calculateExpectedPoints, calculatePositionPercentagesFromProjectedPoints } from '@/lib/calculations/market-xg';
 
 export const dynamic = 'force-dynamic';
 
@@ -549,7 +549,7 @@ async function getLeagueWithStandings(request: Request, { params }: { params: { 
     });
 
   } catch (error) {
-    console.error('Failed to fetch league with standings:', error);
+    console.error('Failed to fetch league with standings:');
 
     if (axios.isAxiosError(error)) {
       return NextResponse.json(

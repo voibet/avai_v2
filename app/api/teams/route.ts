@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { executeQuery, withErrorHandler } from '@/lib/database/db-utils';
-import { Team } from '@/types/database';
+import { Team } from '@/types';
 import { parseLeagueId } from '@/lib/utils/api-utils';
 
 export const dynamic = 'force-dynamic';

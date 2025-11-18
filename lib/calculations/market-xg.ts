@@ -27,7 +27,7 @@ function calculateMarketXgFromOdds(
   over25Odds: number | null = null,
   leagueAvgGoals: number | null = null
 ): MarketXGResult {
-  // Convert fair odds to probabilities (keep over-round - don't normalize!)
+  // Convert fair odds to probabilities (keep over-roun)
   // Odds are already in decimal format (e.g., 2.48) from SQL conversion using decimals column
   const homeProb = 1.0 / homeOdds;
   const drawProb = 1.0 / drawOdds;
@@ -122,7 +122,210 @@ function calculateMarketXgFromOdds(
  * Only processes fixtures that have started (excludes NS, TBD)
  * @param fixtureIds - Array of fixture IDs to process, or null for all fixtures
  */
+/**
+ * Calculate expected points from XG values
+ * Points system: Win = 3, Draw = 1, Loss = 0
+ */
+export function calculateExpectedPoints(homeXg: number, awayXg: number) {
+  // Get match outcome probabilities using Dixon-Coles Poisson model
+  const probs = poissonProbabilities(homeXg, awayXg, 2.5, 10, true, -0.1);
+
+  // Calculate expected points
+  const homeExpectedPoints = (probs.homeWin * 3) + (probs.draw * 1) + (probs.awayWin * 0);
+  const awayExpectedPoints = (probs.awayWin * 3) + (probs.draw * 1) + (probs.homeWin * 0);
+
+  return {
+    homeExpectedPoints: Math.round(homeExpectedPoints * 100) / 100,
+    awayExpectedPoints: Math.round(awayExpectedPoints * 100) / 100,
+    probabilities: {
+      homeWin: Math.round(probs.homeWin * 1000) / 1000,
+      draw: Math.round(probs.draw * 1000) / 1000,
+      awayWin: Math.round(probs.awayWin * 1000) / 1000
+    }
+  };
+}
+
+/**
+ * Calculate title win probabilities from projected season-end expected points using Monte Carlo simulation
+ * Properly models uncertainty based on fixtures remaining - current points have no variance, only future fixtures do
+ */
+export function calculatePositionPercentagesFromProjectedPoints(
+  standings: Array<{
+    team: { id: number; name: string };
+    points: number;
+    xg_stats: {
+      expected_points_projected: number;
+      fixtures_remaining: number;
+    };
+  }>,
+  options: {
+    variancePerGame?: number;
+    nSims?: number;
+    seed?: number | null;
+    tieBreak?: 'jitter' | 'equal';
+    discretePerGame?: boolean;
+  } = {}
+) {
+  const {
+    variancePerGame = 1.9,
+    nSims = 20000,
+    seed = null,
+    tieBreak = 'jitter',
+    discretePerGame = false
+  } = options;
+
+  if (!standings?.length) return [];
+
+  // Simple seedable PRNG (xorshift32) for reproducibility
+  function makeRNG(seed: number | null = null) {
+    if (seed == null) {
+      return {
+        random: () => Math.random()
+      };
+    }
+    let x = seed >>> 0;
+    if (x === 0) x = 2463534242; // avoid zero seed
+    return {
+      random: () => {
+        x ^= x << 13;
+        x ^= x >>> 17;
+        x ^= x << 5;
+        return ((x >>> 0) / 4294967296);
+      }
+    };
+  }
+
+  // Replace Math.random usage in the normal sampler using the rng.random()
+  function makeNormalSampler(rng: any) {
+    let spare: number | null = null;
+    let hasSpare = false;
+    return function() {
+      if (hasSpare) {
+        hasSpare = false;
+        return spare!;
+      }
+      let u, v, s;
+      do {
+        u = rng.random() * 2 - 1;
+        v = rng.random() * 2 - 1;
+        s = u * u + v * v;
+      } while (s >= 1 || s === 0);
+      const mul = Math.sqrt(-2.0 * Math.log(s) / s);
+      spare = v * mul;
+      hasSpare = true;
+      return u * mul;
+    };
+  }
+
+  const rng = makeRNG(seed);
+  const normalSampler = makeNormalSampler(rng);
+
+  const n = standings.length;
+  const positionCounts = new Array(n).fill(0).map(() => new Float64Array(n)); // positionCounts[teamIndex][positionIndex]
+  const sampledPoints = new Float64Array(n);
+
+  const teams = standings.map((standing, idx) => {
+    const currentPoints = Number(standing.points || 0);
+    const projectedTotal = Number((standing.xg_stats?.expected_points_projected ?? currentPoints));
+    const fixturesRemaining = Number(standing.xg_stats?.fixtures_remaining ?? 0);
+    const projectedRemaining = projectedTotal - currentPoints;
+    const stdDev = fixturesRemaining > 0 ? Math.sqrt(fixturesRemaining * variancePerGame) : 0;
+    return {
+      index: idx,
+      teamId: standing.team?.id,
+      teamName: standing.team?.name,
+      currentPoints,
+      projectedRemaining,
+      stdDev,
+      projectedTotal,
+      fixturesRemaining
+    };
+  });
+
+  // Helper to cap remaining points in realistic bounds [0, 3 * fixturesRemaining]
+  function capRemaining(val: number, fixtures: number) {
+    const mx = fixtures * 3;
+    return Math.min(Math.max(val, 0), mx);
+  }
+
+  // Optional: discrete per-game simulation using a normal-based PMF approximation
+  function sampleDiscreteRemaining(fixtures: number, meanRemaining: number, rng: any, normalSampler: any) {
+    if (fixtures === 0) return 0;
+    const meanPerGame = meanRemaining / fixtures;
+    const mpg = Math.min(Math.max(meanPerGame, 0), 3);
+    // Simple mapping: assume draw rate d = 0.25, adjust win probability
+    const drawRate = 0.25;
+    const p_win = Math.max(0, Math.min(1, (mpg - drawRate) / 2));
+    const p_draw = Math.max(0, Math.min(1 - p_win, drawRate));
+    // Sample fixtures
+    let total = 0;
+    for (let g = 0; g < fixtures; g++) {
+      const r = rng.random();
+      if (r < p_win) total += 3;
+      else if (r < p_win + p_draw) total += 1;
+      // else 0
+    }
+    return total;
+  }
+
+  for (let sim = 0; sim < nSims; sim++) {
+    // Sample totals for all teams
+    for (let i = 0; i < n; i++) {
+      const t = teams[i];
+      let remainingSample;
+      if (t.stdDev === 0) {
+        remainingSample = t.projectedRemaining;
+      } else if (discretePerGame) {
+        remainingSample = sampleDiscreteRemaining(t.fixturesRemaining, t.projectedRemaining, rng, normalSampler);
+      } else {
+        remainingSample = t.projectedRemaining + t.stdDev * normalSampler();
+      }
+      // Realistic bounds
+      remainingSample = capRemaining(remainingSample, t.fixturesRemaining);
+      const total = t.currentPoints + remainingSample;
+      sampledPoints[i] = total;
+    }
+
+    // Sort teams by final points to determine positions (1-indexed, 1 = best)
+    const sortedIndices = Array.from({ length: n }, (_, i) => i)
+      .sort((a, b) => sampledPoints[b] - sampledPoints[a]);
+
+    // Handle ties using jitter if needed
+    if (tieBreak === 'jitter') {
+      // Add tiny jitter to break ties
+      const jittered = sortedIndices.map(idx => ({
+        index: idx,
+        points: sampledPoints[idx] + (1e-6 * normalSampler())
+      }));
+      jittered.sort((a, b) => b.points - a.points);
+      sortedIndices.length = 0;
+      sortedIndices.push(...jittered.map(item => item.index));
+    }
+
+    // Record positions for each team (0-indexed in array, but represents 1st, 2nd, 3rd place, etc.)
+    sortedIndices.forEach((teamIndex, position) => {
+      positionCounts[teamIndex][position] += 1.0;
+    });
+  }
+
+  // Assemble results - return position probabilities for each team
+  const results = teams.map((t, i) => {
+    const positionProbabilities = Array.from({ length: n }, (_, pos) => positionCounts[i][pos] / nSims);
+    return {
+      teamId: t.teamId,
+      teamName: t.teamName,
+      currentPoints: t.currentPoints,
+      projectedTotal: Math.round(t.projectedTotal * 100) / 100,
+      fixturesRemaining: t.fixturesRemaining,
+      positionProbabilities: positionProbabilities.map(prob => Math.round(prob * 10000) / 100)
+    };
+  });
+
+  return results;
+}
+
 export async function calculateMarketXG(fixtureIds: number[] | null = null): Promise<number> {
+  console.log('Running market XG calculations...');
   try {
     // Build query to get fixtures with fair odds (excludes IN_FUTURE: NS, TBD)
     // Priority: pinnacle > betfair  > any other
@@ -253,6 +456,7 @@ export async function calculateMarketXG(fixtureIds: number[] | null = null): Pro
         }
       }
     }
+    console.log(`✅ Market XG calculations completed: ${calculated} fixtures processed`);
     return calculated;
 
   } catch (error: any) {

@@ -132,12 +132,16 @@ function calculateOverUnder(
         overProb += prob;
       } else if (totalGoals < line) {
         underProb += prob;
-      } else {
-        // Push to both sides for exact line
-        overProb += prob / 2;
-        underProb += prob / 2;
       }
+      // If equal, it's a push (refunded) - not counted in either probability
     }
+  }
+
+  // Normalize probabilities (exclude push scenarios)
+  const totalProb = overProb + underProb;
+  if (totalProb > 0) {
+    overProb /= totalProb;
+    underProb /= totalProb;
   }
 
   // Apply user rho adjustment if specified
@@ -159,6 +163,7 @@ function calculateOverUnder(
  * @param fixtureIds - Array of fixture IDs to process, or null for all fixtures
  */
 export async function calculateOddsFromPredictions(fixtureIds: number[] | null = null): Promise<number> {
+  console.log('Running prediction odds calculations...');
   try {
     // Get predictions that need odds calculated
     let query = `
@@ -166,12 +171,16 @@ export async function calculateOddsFromPredictions(fixtureIds: number[] | null =
         fp.fixture_id,
         fp.home_pred,
         fp.away_pred,
-        f.home_team_name,
-        f.away_team_name
+        fp.home_adjustment,
+        fp.draw_adjustment,
+        fp.away_adjustment,
+        f.date
       FROM football_predictions fp
       JOIN football_fixtures f ON fp.fixture_id = f.id
       WHERE fp.home_pred IS NOT NULL
         AND fp.away_pred IS NOT NULL
+        AND fp.home_pred > 0
+        AND fp.away_pred > 0
     `;
 
     const params: any[] = [];
@@ -182,8 +191,6 @@ export async function calculateOddsFromPredictions(fixtureIds: number[] | null =
 
     const result = await pool.query(query, params);
     const predictions = result.rows;
-
-    console.log(`📊 Processing ${predictions.length} predictions for odds calculation`);
 
     let calculated = 0;
     let errors = 0;
@@ -196,40 +203,44 @@ export async function calculateOddsFromPredictions(fixtureIds: number[] | null =
       for (const prediction of batch) {
         try {
           // Convert predictions to XG values (assume they represent Poisson means)
-          const homeXg = prediction.home_pred;
-          const awayXg = prediction.away_pred;
+          const homeXg = parseFloat(prediction.home_pred);
+          const awayXg = parseFloat(prediction.away_pred);
 
-          // Apply home/away adjustments (slight home advantage in predictions)
-          const homeAdjustment = 1.02; // 2% home advantage
-          const awayAdjustment = 0.98; // 2% away disadvantage
+          // Apply adjustments if they exist
+          const homeAdjustment = prediction.home_adjustment ? parseFloat(prediction.home_adjustment) : 1;
+          const awayAdjustment = prediction.away_adjustment ? parseFloat(prediction.away_adjustment) : 1;
+          const userRho = prediction.draw_adjustment ? parseFloat(prediction.draw_adjustment) : 0;
 
           // Get match outcome probabilities using Dixon-Coles Poisson model
-          const probs = poissonProbabilities(homeXg, awayXg, 2.5, 10, true, -0.1, homeAdjustment, awayAdjustment);
+          const probs = poissonProbabilities(homeXg, awayXg, 2.5, 10, true, -0.1, homeAdjustment, awayAdjustment, userRho);
 
-          // Convert to betting odds (decimal format)
-          const homeOdds = 1.0 / probs.homeWin;
-          const drawOdds = 1.0 / probs.draw;
-          const awayOdds = 1.0 / probs.awayWin;
+          // Convert to betting odds (decimal format) and round to integers
+          const homeOdds = Math.round((1.0 / probs.homeWin) * 1000);
+          const drawOdds = Math.round((1.0 / probs.draw) * 1000);
+          const awayOdds = Math.round((1.0 / probs.awayWin) * 1000);
 
           // Generate Over/Under 2.5 odds
           const ouLines: number[] = [];
           const ouOddsOver: number[] = [];
           const ouOddsUnder: number[] = [];
 
-          // Generate OU lines from 1.5 to 4.5 with 0.25 increments
-          for (let i = 6; i <= 18; i++) {
+          // Generate Over/Under lines from 1.0 to 5.5 with 0.25 increments
+          for (let i = 4; i <= 22; i++) {
             const line = i * 0.25;
-            const ouProbs = calculateOverUnder(homeXg, awayXg, line, 10, true, -0.1, homeAdjustment, awayAdjustment);
+            const ouProbs = calculateOverUnder(homeXg, awayXg, line, 10, true, -0.1, homeAdjustment, awayAdjustment, userRho);
 
             // Calculate odds
-            const overOdds = 1.0 / ouProbs.overProb;
-            const underOdds = 1.0 / ouProbs.underProb;
+            const totalProb = ouProbs.overProb + ouProbs.underProb;
+            if (totalProb > 0) {
+              const overOdds = (1.0 / ouProbs.overProb);
+              const underOdds = (1.0 / ouProbs.underProb);
 
-            // Only add line if both odds are within acceptable range (1.09 to 5.5)
-            if (overOdds >= 1.09 && overOdds <= 5.5 && underOdds >= 1.09 && underOdds <= 5.5) {
-              ouLines.push(line);
-              ouOddsOver.push(Math.round(overOdds * 1000));
-              ouOddsUnder.push(Math.round(underOdds * 1000));
+              // Only add line if both odds are within acceptable range (1.09 to 5.5)
+              if (overOdds >= 1.09 && overOdds <= 5.5 && underOdds >= 1.09 && underOdds <= 5.5) {
+                ouLines.push(line);
+                ouOddsOver.push(Math.round(overOdds * 1000));
+                ouOddsUnder.push(Math.round(underOdds * 1000));
+              }
             }
           }
 
@@ -241,7 +252,7 @@ export async function calculateOddsFromPredictions(fixtureIds: number[] | null =
           // Generate lines carefully to avoid floating point issues
           for (let i = -18; i <= 18; i++) {
             const line = i * 0.25;
-            const ahProbs = calculateAsianHandicap(homeXg, awayXg, line, 10, true, -0.1, homeAdjustment, awayAdjustment);
+            const ahProbs = calculateAsianHandicap(homeXg, awayXg, line, 10, true, -0.1, homeAdjustment, awayAdjustment, userRho);
 
             // Calculate odds
             const totalProb = ahProbs.homeWinProb + ahProbs.awayWinProb;
@@ -410,6 +421,7 @@ export async function calculateOddsFromPredictions(fixtureIds: number[] | null =
       LIMIT 3
     `);
 
+    console.log(`✅ Prediction odds calculations completed: ${calculated} fixtures processed`);
     return calculated;
 
   } catch (error: any) {

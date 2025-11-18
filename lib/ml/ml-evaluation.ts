@@ -36,6 +36,7 @@ export interface TrainAndPredictOptions {
   epochs?: number;
   batchSize?: number;
   calculateMetrics?: boolean;
+  verbose?: boolean;
 }
 
 export interface TrainAndPredictResult {
@@ -54,7 +55,8 @@ export async function trainAndPredict(options: TrainAndPredictOptions): Promise<
     trainingData,
     predictionData,
     features,
-    calculateMetrics = false
+    calculateMetrics = false,
+    verbose = false
   } = options;
 
   console.log(`[Process] Starting ${calculateMetrics ? 'test' : 'training'} with ${trainingData.length} training fixtures, ${predictionData.length} prediction fixtures`);
@@ -62,8 +64,8 @@ export async function trainAndPredict(options: TrainAndPredictOptions): Promise<
   // Train model
   const epochs = options.epochs || 150;
   const batchSize = options.batchSize || 1024;
-  console.log(`[Process] Training model with epochs=${epochs}, batchSize=${batchSize}, verbose=${calculateMetrics}`);
-  const modelData = await trainModel(trainingData, features, epochs, batchSize, calculateMetrics);
+  console.log(`[Process] Training model with epochs=${epochs}, batchSize=${batchSize}, verbose=${verbose}`);
+  const modelData = await trainModel(trainingData, features, epochs, batchSize, verbose);
 
   // Make predictions
   console.log(`[Process] Making predictions on ${predictionData.length} fixtures`);

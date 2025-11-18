@@ -10,8 +10,7 @@ import {
   ProgressPanel,
   ResultsPanel
 } from '../../components/features/admin';
-import { League } from '../../types/database';
-import { AdminTab } from '../../types/admin';
+import { League, AdminTab } from '@/types';
 
 interface AvailableLeague {
   id: number;

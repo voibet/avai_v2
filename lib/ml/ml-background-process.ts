@@ -24,55 +24,118 @@ async function runTask() {
         
         if (mode === 'train') {
           // TRAINING MODE
-          console.log(`[Process] Starting training with ${trainingData.length} training fixtures`);
-          
-          const result = await trainAndPredict({
-            trainingData,
-            predictionData,
-            features,
-            calculateMetrics: false
-          });
+          // Redirect ALL console output to stderr so stdout contains only JSON results
+          const originalConsoleLog = console.log;
+          const originalConsoleError = console.error;
+          console.log = (...args) => originalConsoleError(...args);
+          console.error = (...args) => originalConsoleError(...args);
 
-          const { modelData, predictions } = result;
-          
-          // Save model to disk (shared storage between processes)
-          await saveModelToDisk(modelData);
-          console.log('[Process] ✓ Model saved to disk');
+          let result;
+          try {
+            console.error(`[Process] Starting training with ${trainingData.length} training fixtures`);
 
-          const savedCount = await savePredictions(predictions);
-          console.log(`[Process] ✓ Saved ${savedCount} predictions to database`);
-          console.log(`[Process] Training complete: ${predictions.length} predictions generated`);
-          
-          // Cleanup tensors
-          modelData.model.dispose();
-          modelData.minVals.dispose();
-          modelData.maxVals.dispose();
-          modelData.range.dispose();
+            result = await trainAndPredict({
+              trainingData,
+              predictionData,
+              features,
+              epochs: 150,
+              batchSize: 1024,
+              calculateMetrics: false,
+              verbose: true
+            });
+
+            const { modelData, predictions } = result;
+
+            // Save model to disk (shared storage between processes)
+            await saveModelToDisk(modelData);
+            console.error('[Process] ✓ Model saved to disk');
+
+            const savedCount = await savePredictions(predictions);
+            console.error(`[Process] ✓ Saved ${savedCount} predictions to database`);
+            console.error(`[Process] Training complete: ${predictions.length} predictions generated`);
+
+            // Output results to parent process via stdout (JSON only)
+            const trainResults = {
+              success: true,
+              message: 'Model training completed successfully',
+              config: {
+                features,
+                epochs: 150,
+                batchSize: 1024
+              },
+              data: {
+                totalFixtures: trainingData.length + predictionData.length,
+                trainFixtures: trainingData.length,
+                predictionFixtures: predictionData.length,
+                predictionsSaved: savedCount
+              }
+            };
+
+            // Write results to stdout for parent process to capture
+            process.stdout.write(JSON.stringify(trainResults));
+          } finally {
+            // Restore console methods
+            console.log = originalConsoleLog;
+            console.error = originalConsoleError;
+
+            // Cleanup tensors
+            if (result && result.modelData) {
+              result.modelData.model.dispose();
+              result.modelData.minVals.dispose();
+              result.modelData.maxVals.dispose();
+              result.modelData.range.dispose();
+            }
+          }
           
         } else if (mode === 'predict') {
           // PREDICTION MODE
-          console.log(`[Process] Starting predictions with ${predictionData.length} fixtures`);
-          
-          const modelData = await getCachedModel();
-          if (!modelData) {
-            throw new Error('No cached model available');
+          // Redirect ALL console output to stderr so stdout contains only JSON results
+          const originalConsoleLog = console.log;
+          const originalConsoleError = console.error;
+          console.log = (...args) => originalConsoleError(...args);
+          console.error = (...args) => originalConsoleError(...args);
+
+          try {
+            console.error(`[Process] Starting predictions with ${predictionData.length} fixtures`);
+
+            const modelData = await getCachedModel();
+            if (!modelData) {
+              throw new Error('No cached model available');
+            }
+
+            const predictions = await makePredictions(
+              modelData.model,
+              modelData.minVals,
+              modelData.maxVals,
+              modelData.range,
+              modelData.features,
+              predictionData
+            );
+
+            console.error(`[Process] Generated ${predictions.length} predictions`);
+
+            const savedCount = await savePredictions(predictions);
+            console.error(`[Process] ✓ Saved ${savedCount} predictions to database`);
+            console.error(`[Process] Prediction complete`);
+
+            // Output results to parent process via stdout (JSON only)
+            const predictResults = {
+              success: true,
+              message: 'Predictions generated successfully',
+              data: {
+                fixturesProcessed: predictionData.length,
+                predictionsGenerated: predictions.length,
+                predictionsSaved: savedCount
+              }
+            };
+
+            // Write results to stdout for parent process to capture
+            process.stdout.write(JSON.stringify(predictResults));
+          } finally {
+            // Restore console methods
+            console.log = originalConsoleLog;
+            console.error = originalConsoleError;
           }
-
-          const predictions = await makePredictions(
-            modelData.model,
-            modelData.minVals,
-            modelData.maxVals,
-            modelData.range,
-            modelData.features,
-            predictionData
-          );
-
-          console.log(`[Process] Generated ${predictions.length} predictions`);
-          
-          const savedCount = await savePredictions(predictions);
-          console.log(`[Process] ✓ Saved ${savedCount} predictions to database`);
-          console.log(`[Process] Prediction complete`);
-          
         } else if (mode === 'test') {
           // TEST MODE (with metrics and prediction saving)
           // Redirect ALL console output to stderr so stdout contains only JSON results

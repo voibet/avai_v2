@@ -200,18 +200,11 @@ export class MonacoOddsService {
       }
     }, 60 * 60 * 1000);
 
-    // Resubscribe to market updates every 15 minutes to keep WebSocket connection alive
+    // Resubscribe to market status updates every 5 minutes to keep WebSocket connection alive
     this.marketResubscribeInterval = setInterval(async () => {
       try {
         if (this.websocket && this.websocket.readyState === 1) { // WebSocket.OPEN
           await this.checkSubscriptionRateLimit();
-          this.websocket.send(JSON.stringify({
-            action: 'subscribe',
-            subscriptionType: 'MarketPriceUpdate',
-            subscriptionIds: ['*']
-          }));
-          this.log('WebSocket RESUBSCRIBE - MarketPriceUpdate (*)');
-
           this.websocket.send(JSON.stringify({
             action: 'subscribe',
             subscriptionType: 'MarketStatusUpdateMessage',
@@ -220,9 +213,33 @@ export class MonacoOddsService {
           this.log('WebSocket RESUBSCRIBE - MarketStatusUpdateMessage (*)');
         }
       } catch (error) {
-        console.error('Error resubscribing to Monaco market updates:', error);
+        console.error('Error resubscribing to Monaco market status updates:', error);
+
+        // Check authentication and retry after 5 seconds
+        try {
+          await this.ensureAuthenticated();
+          this.log('Authentication verified, retrying resubscription in 5 seconds...');
+
+          setTimeout(async () => {
+            try {
+              if (this.websocket && this.websocket.readyState === 1 && this.isRunning) {
+                await this.checkSubscriptionRateLimit();
+                this.websocket.send(JSON.stringify({
+                  action: 'subscribe',
+                  subscriptionType: 'MarketStatusUpdateMessage',
+                  subscriptionIds: ['*']
+                }));
+                this.log('WebSocket RESUBSCRIBE RETRY - MarketStatusUpdateMessage (*)');
+              }
+            } catch (retryError) {
+              console.error('Error on resubscription retry:', retryError);
+            }
+          }, 5000);
+        } catch (authError) {
+          console.error('Authentication check failed during resubscription error handling:', authError);
+        }
       }
-    }, 15 * 60 * 1000);
+    }, 5 * 60 * 1000);
 
     this.log('Service started');
   }

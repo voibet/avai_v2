@@ -8,41 +8,27 @@ export interface QueryResult<T = any> {
 }
 
 /**
- * Execute a database query with automatic connection handling and retry logic
+ * Execute a database query with timeout protection
  */
 export async function executeQuery<T = any>(
   query: string,
   params: any[] = [],
-  retries: number = 2
+  timeout: number = 30000
 ): Promise<QueryResult<T>> {
-  let lastError: any;
+  const client = await pool.connect();
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const client = await pool.connect();
-    try {
-      const result = await client.query(query, params);
-      return {
-        rows: result.rows,
-        rowCount: result.rowCount || 0
-      };
-    } catch (error: any) {
-      lastError = error;
-      console.error(`Database query error (attempt ${attempt + 1}/${retries + 1}):`, error.message);
+  try {
+    // Set statement timeout for this query
+    await client.query(`SET LOCAL statement_timeout = ${timeout}`);
 
-      // If it's a "too many clients" error, wait before retrying
-      if (error.code === '53300' && attempt < retries) {
-        console.log(`Retrying in ${Math.pow(2, attempt) * 1000}ms due to connection limit...`);
-        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
-        continue;
-      }
-
-      throw error;
-    } finally {
-      client.release();
-    }
+    const result = await client.query(query, params);
+    return {
+      rows: result.rows,
+      rowCount: result.rowCount || 0
+    };
+  } finally {
+    client.release();
   }
-
-  throw lastError;
 }
 
 /**
@@ -59,39 +45,29 @@ export function getPoolStats() {
 /**
  * Health check for database connectivity
  */
-export async function checkDatabaseHealth(): Promise<{
-  healthy: boolean;
-  poolStats: any;
-  message: string;
-}> {
+export async function checkDatabaseHealth(): Promise<boolean> {
   try {
     // Simple query to test connectivity
     await executeQuery('SELECT 1 as health_check', [], 0);
-    return {
-      healthy: true,
-      poolStats: getPoolStats(),
-      message: 'Database connection is healthy'
-    };
-  } catch (error: any) {
-    return {
-      healthy: false,
-      poolStats: getPoolStats(),
-      message: `Database health check failed: ${error.message}`
-    };
+    return true;
+  } catch (error) {
+    return false;
   }
 }
 
 /**
- * Execute multiple queries in a transaction
+ * Execute multiple queries in a transaction with timeout
  */
 export async function executeTransaction<T>(
-  queries: Array<{ query: string; params: any[] }>
+  queries: Array<{ query: string; params: any[] }>,
+  timeout: number = 60000
 ): Promise<QueryResult<T>[]> {
   const client = await pool.connect();
   const results: QueryResult<T>[] = [];
 
   try {
     await client.query('BEGIN');
+    await client.query(`SET LOCAL statement_timeout = ${timeout}`);
 
     for (const { query, params } of queries) {
       const result = await client.query(query, params);

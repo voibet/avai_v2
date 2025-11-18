@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { calculateOddsFromPredictions } from '../../../../../calculators/prediction-odds.js';
+import { calculateOddsFromPredictions } from '@/lib/calculations/prediction-odds';
 
 
 export const dynamic = 'force-dynamic';

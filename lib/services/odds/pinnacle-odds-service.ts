@@ -237,7 +237,7 @@ class PinnacleOddsService {
 
     if (existingOddsResult.rows.length > 0) {
       // Update existing odds
-      await this.updateExistingOdds(event.event_id, period);
+      await this.updateExistingOdds(event.event_id, period, event.home, event.away);
       return { updated: true };
     }
 
@@ -263,7 +263,7 @@ class PinnacleOddsService {
     this.log(`Found matching fixture ${fixtureId} for event ${event.event_id}`);
 
     // Create new odds entry
-    await this.createNewOddsEntry(fixtureId, event.event_id, period);
+    await this.createNewOddsEntry(fixtureId, event.event_id, period, event.home, event.away);
     return { updated: true };
   }
 
@@ -305,9 +305,39 @@ class PinnacleOddsService {
   }
 
   /**
+   * Helper to check if two arrays are deeply equal
+   */
+  private arraysEqual(a: any[], b: any[]): boolean {
+    if (a.length !== b.length) return false;
+    return a.every((val, index) => {
+      if (Array.isArray(val) && Array.isArray(b[index])) {
+        return this.arraysEqual(val, b[index]);
+      }
+      if (typeof val === 'object' && typeof b[index] === 'object') {
+        return JSON.stringify(val) === JSON.stringify(b[index]);
+      }
+      return val === b[index];
+    });
+  }
+
+  /**
+   * Helper to check if new odds data is different from the last entry
+   */
+  private isNewDataDifferent(existingArray: any[], newData: any): boolean {
+    if (existingArray.length === 0) return true;
+    const lastEntry = existingArray[existingArray.length - 1];
+
+    // Remove timestamp from comparison
+    const { t: _, ...lastData } = lastEntry;
+    const { t: __, ...newDataWithoutTime } = newData;
+
+    return !this.arraysEqual([lastData], [newDataWithoutTime]);
+  }
+
+  /**
    * Updates existing odds for a Pinnacle event
    */
-  private async updateExistingOdds(eventId: number, period: PinnaclePeriod): Promise<void> {
+  private async updateExistingOdds(eventId: number, period: PinnaclePeriod, homeTeam: string, awayTeam: string): Promise<void> {
     const timestamp = Math.floor(Date.now() / 1000);
 
     // Transform Pinnacle odds to our format (decimals = 3, multiply by 1000)
@@ -353,6 +383,9 @@ class PinnacleOddsService {
     let maxStakes = parseJsonArray(row.max_stakes);
     let latestT = row.latest_t || {};
 
+    // Track what was updated
+    const updatedFields: string[] = [];
+
     // Update X12 odds
     if (period.money_line) {
       const newX12Entry = {
@@ -363,11 +396,17 @@ class PinnacleOddsService {
           transformOdds(period.money_line.away)
         ]
       };
-      x12Odds.push(newX12Entry);
-      latestT.x12_ts = timestamp;
+
+      if (this.isNewDataDifferent(x12Odds, newX12Entry)) {
+        x12Odds.push(newX12Entry);
+        latestT.x12_ts = timestamp;
+        updatedFields.push('x12');
+      }
     }
 
     // Collect line data for both AH and OU
+    // First, get the previous lines entry to preserve AH/OU lines that aren't being updated
+    const previousLinesEntry = lines.length > 0 ? lines[lines.length - 1] : null;
     let combinedLineEntry: any = { t: timestamp };
     let combinedIdEntry: any = { t: timestamp, line_id: period.line_id, line_ids: {} };
 
@@ -394,10 +433,19 @@ class PinnacleOddsService {
         ah_a: ahAway
       };
 
-      ahOdds.push(newAhEntry);
-      combinedLineEntry.ah = ahLineValues;
-      combinedIdEntry.line_ids.ah = ahAltLineIds;
-      latestT.ah_ts = timestamp;
+      if (this.isNewDataDifferent(ahOdds, newAhEntry)) {
+        ahOdds.push(newAhEntry);
+        combinedLineEntry.ah = ahLineValues;
+        combinedIdEntry.line_ids.ah = ahAltLineIds;
+        latestT.ah_ts = timestamp;
+        updatedFields.push('ah');
+      } else if (previousLinesEntry?.ah) {
+        // Preserve previous AH lines if AH odds didn't change
+        combinedLineEntry.ah = previousLinesEntry.ah;
+      }
+    } else if (previousLinesEntry?.ah) {
+      // Preserve previous AH lines if no AH spreads in this update
+      combinedLineEntry.ah = previousLinesEntry.ah;
     }
 
     // Update OU odds
@@ -423,22 +471,53 @@ class PinnacleOddsService {
         ou_u: ouUnder
       };
 
-      ouOdds.push(newOuEntry);
-      combinedLineEntry.ou = ouLineValues;
-      combinedIdEntry.line_ids.ou = ouAltLineIds;
-      latestT.ou_ts = timestamp;
+      if (this.isNewDataDifferent(ouOdds, newOuEntry)) {
+        ouOdds.push(newOuEntry);
+        combinedLineEntry.ou = ouLineValues;
+        combinedIdEntry.line_ids.ou = ouAltLineIds;
+        latestT.ou_ts = timestamp;
+        updatedFields.push('ou');
+      } else if (previousLinesEntry?.ou) {
+        // Preserve previous OU lines if OU odds didn't change
+        combinedLineEntry.ou = previousLinesEntry.ou;
+      }
+    } else if (previousLinesEntry?.ou) {
+      // Preserve previous OU lines if no OU totals in this update
+      combinedLineEntry.ou = previousLinesEntry.ou;
     }
 
-    // Add combined line entry if we have any lines
-    if (combinedLineEntry.ah || combinedLineEntry.ou) {
-      lines.push(combinedLineEntry);
-      latestT.lines_ts = timestamp;
+    // Add combined line entry if we have any lines (and AH/OU data was actually updated)
+    if ((combinedLineEntry.ah || combinedLineEntry.ou) && (updatedFields.includes('ah') || updatedFields.includes('ou'))) {
+      if (this.isNewDataDifferent(lines, combinedLineEntry)) {
+        lines.push(combinedLineEntry);
+        latestT.lines_ts = timestamp;
+        updatedFields.push('lines');
+      }
     }
 
-    // Add combined ID entry if we have any IDs
-    if (Object.keys(combinedIdEntry.line_ids).length > 0) {
-      ids.push(combinedIdEntry);
-      latestT.ids_ts = timestamp;
+    // Preserve previous IDs for markets that weren't updated
+    const previousIdEntry = ids.length > 0 ? ids[ids.length - 1] : null;
+    if (previousIdEntry?.line_ids) {
+      if (!combinedIdEntry.line_ids.ah && previousIdEntry.line_ids.ah) {
+        combinedIdEntry.line_ids.ah = previousIdEntry.line_ids.ah;
+      }
+      if (!combinedIdEntry.line_ids.ou && previousIdEntry.line_ids.ou) {
+        combinedIdEntry.line_ids.ou = previousIdEntry.line_ids.ou;
+      }
+    }
+
+    // Add combined ID entry if we have any IDs (and AH/OU data was actually updated)
+    if (Object.keys(combinedIdEntry.line_ids).length > 0 && (updatedFields.includes('ah') || updatedFields.includes('ou'))) {
+      if (this.isNewDataDifferent(ids, combinedIdEntry)) {
+        // For IDs, overwrite the latest entry instead of keeping history
+        if (ids.length > 0) {
+          ids[ids.length - 1] = combinedIdEntry;
+        } else {
+          ids.push(combinedIdEntry);
+        }
+        latestT.ids_ts = timestamp;
+        updatedFields.push('ids');
+      }
     }
 
     // Update max stakes
@@ -449,29 +528,38 @@ class PinnacleOddsService {
         max_stake_ah: period.meta.max_spread ? { h: [period.meta.max_spread], a: [period.meta.max_spread] } : {},
         max_stake_ou: period.meta.max_total ? { o: [period.meta.max_total], u: [period.meta.max_total] } : {}
       };
-      maxStakes.push(newMaxStakeEntry);
-      latestT.stakes_ts = timestamp;
+
+      if (this.isNewDataDifferent(maxStakes, newMaxStakeEntry)) {
+        maxStakes.push(newMaxStakeEntry);
+        latestT.stakes_ts = timestamp;
+        updatedFields.push('max_stakes');
+      }
     }
 
-    // Update the database
-    const updateQuery = `
-      UPDATE football_odds
-      SET odds_x12 = $1, odds_ah = $2, odds_ou = $3, lines = $4, ids = $5, max_stakes = $6, latest_t = $7, updated_at = now()
-      WHERE bookie_id = $8 AND bookie = 'Pinnacle'
-    `;
+    // Only update database if there were actual changes
+    if (updatedFields.length > 0) {
+      // Update the database
+      const updateQuery = `
+        UPDATE football_odds
+        SET odds_x12 = $1, odds_ah = $2, odds_ou = $3, lines = $4, ids = $5, max_stakes = $6, latest_t = $7, updated_at = now()
+        WHERE bookie_id = $8 AND bookie = 'Pinnacle'
+      `;
 
-    await executeQuery(updateQuery, [
-      x12Odds.length > 0 ? JSON.stringify(x12Odds) : null,
-      ahOdds.length > 0 ? JSON.stringify(ahOdds) : null,
-      ouOdds.length > 0 ? JSON.stringify(ouOdds) : null,
-      lines.length > 0 ? JSON.stringify(lines) : null,
-      ids.length > 0 ? JSON.stringify(ids) : null,
-      maxStakes.length > 0 ? JSON.stringify(maxStakes) : null,
-      JSON.stringify(latestT),
-      eventId
-    ]);
+      await executeQuery(updateQuery, [
+        x12Odds.length > 0 ? JSON.stringify(x12Odds) : null,
+        ahOdds.length > 0 ? JSON.stringify(ahOdds) : null,
+        ouOdds.length > 0 ? JSON.stringify(ouOdds) : null,
+        lines.length > 0 ? JSON.stringify(lines) : null,
+        ids.length > 0 ? JSON.stringify(ids) : null,
+        maxStakes.length > 0 ? JSON.stringify(maxStakes) : null,
+        JSON.stringify(latestT),
+        eventId
+      ]);
 
-    this.log(`Updated event ${eventId}`);
+      this.log(`Updated ${homeTeam} v ${awayTeam} - ${updatedFields.join(', ')}`);
+    } else {
+      this.log(`No changes for ${homeTeam} v ${awayTeam} - data unchanged`);
+    }
   }
 
   /**
@@ -480,7 +568,9 @@ class PinnacleOddsService {
   private async createNewOddsEntry(
     fixtureId: number,
     eventId: number,
-    period: PinnaclePeriod
+    period: PinnaclePeriod,
+    homeTeam: string,
+    awayTeam: string
   ): Promise<void> {
     const timestamp = Math.floor(Date.now() / 1000);
 
@@ -488,6 +578,9 @@ class PinnacleOddsService {
     const transformOdds = (odds: number): number => {
       return Math.round(odds * 1000);
     };
+
+    // Track what was created
+    const createdFields: string[] = [];
 
     // Prepare X12 odds (money line)
     let x12Odds: any[] = [];
@@ -500,6 +593,7 @@ class PinnacleOddsService {
           transformOdds(period.money_line.away)
         ]
       });
+      createdFields.push('x12');
     }
 
     // Prepare AH odds (spreads)
@@ -536,6 +630,7 @@ class PinnacleOddsService {
 
       combinedLineEntry.ah = ahLineValues;
       combinedIdEntry.line_ids.ah = ahAltLineIds;
+      createdFields.push('ah');
     }
 
     if (period.totals && Object.keys(period.totals).length > 0) {
@@ -562,15 +657,18 @@ class PinnacleOddsService {
 
       combinedLineEntry.ou = ouLineValues;
       combinedIdEntry.line_ids.ou = ouAltLineIds;
+      createdFields.push('ou');
     }
 
     // Add combined entries
     if (combinedLineEntry.ah || combinedLineEntry.ou) {
       lines.push(combinedLineEntry);
+      createdFields.push('lines');
     }
 
     if (Object.keys(combinedIdEntry.line_ids).length > 0) {
       ids.push(combinedIdEntry);
+      createdFields.push('ids');
     }
 
     // Prepare max stakes
@@ -582,6 +680,7 @@ class PinnacleOddsService {
         max_stake_ah: period.meta.max_spread ? { h: [period.meta.max_spread], a: [period.meta.max_spread] } : {},
         max_stake_ou: period.meta.max_total ? { o: [period.meta.max_total], u: [period.meta.max_total] } : {}
       });
+      createdFields.push('max_stakes');
     }
 
     // Prepare latest_t
@@ -615,7 +714,7 @@ class PinnacleOddsService {
       JSON.stringify(latestT)
     ]);
 
-    this.log(`Created new odds entry for fixture ${fixtureId}, event ${eventId}`);
+    this.log(`Created new odds entry for ${homeTeam} v ${awayTeam} - ${createdFields.join(', ')}`);
   }
 
 
@@ -673,31 +772,7 @@ class PinnacleOddsService {
     await runFetch();
   }
 
-  /**
-   * Stops continuous odds fetching
-   */
-  stopContinuousFetching(): void {
-    if (!this.isRunning) {
-      this.log('Service is not running');
-      return;
-    }
 
-    this.isRunning = false;
-    if (this.runInterval) {
-      clearTimeout(this.runInterval);
-      this.runInterval = null;
-    }
-
-    this.log('Service stopped');
-  }
-
-
-  /**
-   * Gets the current running status
-   */
-  isContinuousFetchingRunning(): boolean {
-    return this.isRunning;
-  }
 }
 
 export const pinnacleOddsService = new PinnacleOddsService();

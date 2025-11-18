@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { executeQuery, executeTransaction } from '../database/db-utils';
-import { League } from '../../types/database';
+import { League } from '@/types';
 import { CANCELLED, IN_PAST } from '../constants';
 
 /**
@@ -119,86 +119,80 @@ export class FixtureFetcher {
     return month === 6 || month === 7;
   }
 
+  async fetchAndUpdateFixturesForSelectedSeasons(
+    selectedSeasons: Record<string, string[]>,
+    onProgress?: (info: string) => void
+  ): Promise<{ success: boolean; message: string; updatedCount?: number; statusChangedToPastCount?: number; updatedFixtureIds?: number[] }> {
+    const leagueSeasons = await this.convertSelectedSeasonsToLeagueSeasons(selectedSeasons);
+    return this.fetchAndUpdateFixtures(leagueSeasons, onProgress);
+  }
+
+  async fetchAndUpdateFixturesForCurrentSeasons(
+    onProgress?: (info: string) => void
+  ): Promise<{ success: boolean; message: string; updatedCount?: number; statusChangedToPastCount?: number; updatedFixtureIds?: number[] }> {
+    const leagueSeasons = await this.getCurrentLeaguesAndSeasons();
+    return this.fetchAndUpdateFixtures(leagueSeasons, onProgress);
+  }
+
+  private async convertSelectedSeasonsToLeagueSeasons(selectedSeasons: Record<string, string[]>): Promise<Array<{id: number, name: string, season: number}>> {
+    const leagueIds = Object.keys(selectedSeasons).map(id => parseInt(id));
+    const leagueResult = await executeQuery(`
+      SELECT id, name FROM football_leagues WHERE id = ANY($1)
+    `, [leagueIds]);
+
+    const leagueMap = new Map(leagueResult.rows.map(row => [row.id, row.name]));
+    const leagueSeasons: Array<{id: number, name: string, season: number}> = [];
+
+    Object.entries(selectedSeasons).forEach(([leagueId, seasons]) => {
+      const leagueIdNum = parseInt(leagueId);
+      const leagueName = leagueMap.get(leagueIdNum) || `League ${leagueId}`;
+
+      seasons.forEach(season => {
+        leagueSeasons.push({
+          id: leagueIdNum,
+          name: leagueName,
+          season: parseInt(season)
+        });
+      });
+    });
+
+    return leagueSeasons;
+  }
+
   async fetchAndUpdateFixtures(
-    onProgress?: (info: string) => void,
-    selectedSeasons?: Record<string, string[]>
+    leagueSeasons: Array<{id: number, name: string, season: number}>,
+    onProgress?: (info: string) => void
   ): Promise<{ success: boolean; message: string; updatedCount?: number; statusChangedToPastCount?: number; updatedFixtureIds?: number[] }> {
     try {
-
-      let leaguesToProcess: Array<{id: number, name: string, season: number}> = [];
-
-      if (selectedSeasons && Object.keys(selectedSeasons).length > 0) {
-
-        // Get league names for the selected league IDs
-        const leagueIds = Object.keys(selectedSeasons).map(id => parseInt(id));
-        const leagueResult = await executeQuery(`
-          SELECT id, name FROM football_leagues WHERE id = ANY($1)
-        `, [leagueIds]);
-
-        const leagueMap = new Map(leagueResult.rows.map(row => [row.id, row.name]));
-
-        // Create processing list from selected seasons
-        Object.entries(selectedSeasons).forEach(([leagueId, seasons]) => {
-          const leagueIdNum = parseInt(leagueId);
-          const leagueName = leagueMap.get(leagueIdNum) || `League ${leagueId}`;
-
-          seasons.forEach(season => {
-            leaguesToProcess.push({
-              id: leagueIdNum,
-              name: leagueName,
-              season: parseInt(season)
-            });
-          });
-        });
-      } else {
-        // Fall back to current seasons
-        log('No selected seasons provided, using current seasons');
-        leaguesToProcess = await this.getCurrentLeaguesAndSeasons();
-      }
-
-      if (leaguesToProcess.length === 0) {
+      if (leagueSeasons.length === 0) {
         log('No leagues to process');
         return {
           success: false,
-          message: 'No leagues selected or no current seasons found'
+          message: 'No leagues provided'
         };
       }
 
-      // Fetch fixtures for each league
       let totalUpdated = 0;
       let totalStatusChangedToPast = 0;
       const totalUpdatedFixtureIds: number[] = [];
 
-      for (let i = 0; i < leaguesToProcess.length; i++) {
-        const leagueInfo = leaguesToProcess[i];
+      for (const leagueInfo of leagueSeasons) {
+        const apiFixtures = await this.fetchFixturesFromAPI(leagueInfo.id, leagueInfo.season);
+        const result = await this.updateDatabaseWithFixtures(apiFixtures);
 
+        // Remove fixtures from database that are not in the API response (duplicates/outdated)
+        const apiFixtureIds = apiFixtures.map(f => f.fixture.id);
+        const deletedCount = await this.removeOrphanedFixtures(leagueInfo.id, leagueInfo.season, apiFixtureIds);
+        if (deletedCount > 0) {
+          log(`Removed ${deletedCount} orphaned fixtures for league ${leagueInfo.id}, season ${leagueInfo.season}`);
+        }
 
-        try {
-          const apiFixtures = await this.fetchFixturesFromAPI(leagueInfo.id, leagueInfo.season);
+        totalUpdated += result.updatedCount;
+        totalStatusChangedToPast += result.statusChangedToPastCount;
+        totalUpdatedFixtureIds.push(...(result.updatedFixtureIds || []));
 
-          const result = await this.updateDatabaseWithFixtures(apiFixtures);
-
-          // Remove fixtures from database that are not in the API response (duplicates/outdated)
-          const apiFixtureIds = apiFixtures.map(f => f.fixture.id);
-          const deletedCount = await this.removeOrphanedFixtures(leagueInfo.id, leagueInfo.season, apiFixtureIds);
-          if (deletedCount > 0) {
-            log(`Removed ${deletedCount} orphaned fixtures for league ${leagueInfo.id}, season ${leagueInfo.season}`);
-          }
-
-          totalUpdated += result.updatedCount;
-          totalStatusChangedToPast += result.statusChangedToPastCount;
-          totalUpdatedFixtureIds.push(...(result.updatedFixtureIds || []));
-
-          // Call progress callback with fetched count info
-          if (onProgress) {
-            onProgress(`${apiFixtures.length} fixtures from API for ${leagueInfo.name}`);
-          }
-        } catch (error) {
-          const errorMessage = `Failed to process league ${leagueInfo.name}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-          console.error(errorMessage);
-
-          // Re-throw the error to propagate it to the UI
-          throw new Error(errorMessage);
+        if (onProgress) {
+          onProgress(`${apiFixtures.length} fixtures from API for ${leagueInfo.name}`);
         }
       }
 
@@ -328,7 +322,8 @@ export class FixtureFetcher {
           },
           params: {
             id: teamId
-          }
+          },
+          timeout: 15000 // 15 second timeout
         });
 
         const teams = response.data.response || [];
@@ -390,7 +385,8 @@ export class FixtureFetcher {
           'x-rapidapi-key': this.apiKey,
           'x-rapidapi-host': 'v3.football.api-sports.io'
         },
-        params
+        params,
+        timeout: 15000 // 15 second timeout
       });
 
       const fixtures = response.data.response || [];
@@ -400,197 +396,196 @@ export class FixtureFetcher {
 
       return fixtures;
     } catch (error: any) {
-      console.error('API call failed:', error.response?.data || error.message);
+      console.error('API call failed');
       throw error;
     }
   }
 
   private async updateDatabaseWithFixtures(apiFixtures: ApiFootballFixture[]): Promise<{ updatedCount: number; statusChangedToPastCount: number; updatedFixtureIds: number[] }> {
-    let updatedCount = 0;
-    let statusChangedToPastCount = 0;
-    const updatedFixtureIds: number[] = [];
+    const validFixtures = this.filterValidFixtures(apiFixtures);
+    await this.deleteCancelledFixtures(apiFixtures);
 
-    if (apiFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0, updatedFixtureIds: [] };
+    if (validFixtures.length === 0) {
+      return { updatedCount: 0, statusChangedToPastCount: 0, updatedFixtureIds: [] };
+    }
 
-    // Filter out fixtures from excluded leagues during July-August. These are european competition qualifiers.
-    const nonSummerFixtures = apiFixtures.filter(fixture =>
-      !this.EXCLUDED_LEAGUES_SUMMER.includes(fixture.league.id) ||
-      !this.isJulyAugust(fixture.fixture.timestamp)
-    );
+    const teamCountryMap = await this.fetchMissingTeamCountries(this.extractTeamIds(validFixtures));
+    const { queries, statusChanges } = await this.buildFixtureUpsertQueries(validFixtures, teamCountryMap);
+    const results = await executeTransaction(queries, 120000);
+    const { updatedCount, statusChangedToPastCount, updatedFixtureIds } = this.processTransactionResults(results, validFixtures, statusChanges);
+    
+    return { updatedCount, statusChangedToPastCount, updatedFixtureIds };
+  }
 
-    // Filter out cancelled fixtures - don't add them if they don't exist
-    const validFixtures = nonSummerFixtures.filter(fixture =>
+  private filterValidFixtures(apiFixtures: ApiFootballFixture[]): ApiFootballFixture[] {
+    return apiFixtures.filter(fixture =>
+      (!this.EXCLUDED_LEAGUES_SUMMER.includes(fixture.league.id) || !this.isJulyAugust(fixture.fixture.timestamp)) &&
       !CANCELLED.includes(fixture.fixture.status.short.toLowerCase())
     );
+  }
 
-    // Identify cancelled fixtures that may need to be deleted from database
+  private async deleteCancelledFixtures(apiFixtures: ApiFootballFixture[]): Promise<void> {
     const cancelledFixtures = apiFixtures.filter(fixture =>
       CANCELLED.includes(fixture.fixture.status.short.toLowerCase())
     );
 
-    // Delete cancelled fixtures that exist in the database
     if (cancelledFixtures.length > 0) {
       const cancelledIds = cancelledFixtures.map(f => f.fixture.id);
       try {
-        await executeQuery(
-          'DELETE FROM football_fixtures WHERE id = ANY($1)',
-          [cancelledIds]
-        );
-        log(`Deleted ${cancelledFixtures.length} cancelled fixtures from database`);
+        const result = await executeQuery('DELETE FROM football_fixtures WHERE id = ANY($1)', [cancelledIds]);
+        if (result.rowCount > 0) {
+          log(`Deleted ${result.rowCount} cancelled fixtures from database`);
+        }
       } catch (error) {
         console.error('Error deleting cancelled fixtures:', error);
       }
     }
+  }
 
-    if (validFixtures.length === 0) return { updatedCount: 0, statusChangedToPastCount: 0, updatedFixtureIds: [] };
-
-    // Get all unique team IDs from valid fixtures
-    const allTeamIds = Array.from(new Set([
-      ...validFixtures.map(f => f.teams.home.id),
-      ...validFixtures.map(f => f.teams.away.id)
+  private extractTeamIds(fixtures: ApiFootballFixture[]): number[] {
+    return Array.from(new Set([
+      ...fixtures.map(f => f.teams.home.id),
+      ...fixtures.map(f => f.teams.away.id)
     ]));
+  }
 
-    // Fetch team countries for all teams in these fixtures
-    const teamCountryMap = await this.fetchMissingTeamCountries(allTeamIds);
-
-    // Build transaction queries and track status changes sequentially to avoid connection overload
-    const fixtureStatusChanges: boolean[] = [];
+  private async buildFixtureUpsertQueries(fixtures: ApiFootballFixture[], teamCountryMap: Map<number, string>): Promise<{ queries: any[], statusChanges: boolean[] }> {
     const queries: any[] = [];
+    const statusChanges: boolean[] = [];
 
-    // Process fixtures sequentially to avoid overwhelming the database
-    for (const fixture of validFixtures) {
-      // Get existing fixture to preserve xg_home, xg_away and check for status change to past
-      let existingXG = null;
-      let existingStatus = null;
-      try {
-        const existingResult = await executeQuery(`
-          SELECT xg_home, xg_away, status_short FROM football_fixtures WHERE id = $1
-        `, [fixture.fixture.id]);
+    for (const fixture of fixtures) {
+      const existingFixture = await this.getExistingFixture(fixture.fixture.id);
+      const query = this.buildFixtureUpsertQuery(fixture, teamCountryMap, existingFixture);
 
-        existingXG = existingResult.rows[0];
-        existingStatus = existingResult.rows[0]?.status_short;
-      } catch (error) {
-        log(`No existing fixture found for ID ${fixture.fixture.id}, will create new`);
-        existingXG = null;
-        existingStatus = null;
-      }
+      const isNewlyInPast = existingFixture &&
+                           !IN_PAST.includes(existingFixture.status_short.toLowerCase()) &&
+                           IN_PAST.includes(fixture.fixture.status.short.toLowerCase());
+      statusChanges.push(!!isNewlyInPast);
 
-      // Check if status changed to "in past"
-      const newStatus = fixture.fixture.status.short;
-      const isNewlyInPast = existingStatus &&
-                           !IN_PAST.includes(existingStatus.toLowerCase()) &&
-                           IN_PAST.includes(newStatus.toLowerCase());
-      fixtureStatusChanges.push(isNewlyInPast);
-
-      const query = `
-        INSERT INTO football_fixtures (
-          id, referee, timestamp, date, venue_name, status_long, status_short,
-          home_team_id, home_team_name, home_country, away_team_id, away_team_name, away_country,
-          goals_home, goals_away,
-          score_halftime_home, score_halftime_away,
-          score_fulltime_home, score_fulltime_away,
-          score_extratime_home, score_extratime_away,
-          score_penalty_home, score_penalty_away,
-          league_id, league_name, league_country, season, round,
-          xg_home, xg_away
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-          $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          referee = EXCLUDED.referee,
-          timestamp = EXCLUDED.timestamp,
-          date = EXCLUDED.date,
-          venue_name = EXCLUDED.venue_name,
-          status_long = EXCLUDED.status_long,
-          status_short = EXCLUDED.status_short,
-          home_team_id = EXCLUDED.home_team_id,
-          home_team_name = EXCLUDED.home_team_name,
-          home_country = EXCLUDED.home_country,
-          away_team_id = EXCLUDED.away_team_id,
-          away_team_name = EXCLUDED.away_team_name,
-          away_country = EXCLUDED.away_country,
-          goals_home = EXCLUDED.goals_home,
-          goals_away = EXCLUDED.goals_away,
-          score_halftime_home = EXCLUDED.score_halftime_home,
-          score_halftime_away = EXCLUDED.score_halftime_away,
-          score_fulltime_home = EXCLUDED.score_fulltime_home,
-          score_fulltime_away = EXCLUDED.score_fulltime_away,
-          score_extratime_home = EXCLUDED.score_extratime_home,
-          score_extratime_away = EXCLUDED.score_extratime_away,
-          score_penalty_home = EXCLUDED.score_penalty_home,
-          score_penalty_away = EXCLUDED.score_penalty_away,
-          league_id = EXCLUDED.league_id,
-          league_name = EXCLUDED.league_name,
-          league_country = EXCLUDED.league_country,
-          season = EXCLUDED.season,
-          round = EXCLUDED.round,
-          xg_home = COALESCE(EXCLUDED.xg_home, football_fixtures.xg_home),
-          xg_away = COALESCE(EXCLUDED.xg_away, football_fixtures.xg_away),
-          updated_at = NOW()
-        WHERE (
-          football_fixtures.status_short IS DISTINCT FROM EXCLUDED.status_short OR
-          football_fixtures.timestamp IS DISTINCT FROM EXCLUDED.timestamp OR
-          football_fixtures.goals_home IS DISTINCT FROM EXCLUDED.goals_home OR
-          football_fixtures.goals_away IS DISTINCT FROM EXCLUDED.goals_away OR
-          football_fixtures.score_halftime_home IS DISTINCT FROM EXCLUDED.score_halftime_home OR
-          football_fixtures.score_halftime_away IS DISTINCT FROM EXCLUDED.score_halftime_away OR
-          football_fixtures.score_fulltime_home IS DISTINCT FROM EXCLUDED.score_fulltime_home OR
-          football_fixtures.score_fulltime_away IS DISTINCT FROM EXCLUDED.score_fulltime_away OR
-          football_fixtures.referee IS DISTINCT FROM EXCLUDED.referee OR
-          football_fixtures.venue_name IS DISTINCT FROM EXCLUDED.venue_name
-        )
-      `;
-
-      const params = [
-        fixture.fixture.id,
-        fixture.fixture.referee,
-        fixture.fixture.timestamp,
-        fixture.fixture.date,
-        fixture.fixture.venue?.name,
-        fixture.fixture.status.long,
-        fixture.fixture.status.short,
-        fixture.teams.home.id,
-        fixture.teams.home.name,
-        teamCountryMap.get(fixture.teams.home.id) || null, // home_country
-        fixture.teams.away.id,
-        fixture.teams.away.name,
-        teamCountryMap.get(fixture.teams.away.id) || null, // away_country
-        fixture.goals.home,
-        fixture.goals.away,
-        fixture.score.halftime?.home,
-        fixture.score.halftime?.away,
-        fixture.score.fulltime?.home,
-        fixture.score.fulltime?.away,
-        fixture.score.extratime?.home,
-        fixture.score.extratime?.away,
-        fixture.score.penalty?.home,
-        fixture.score.penalty?.away,
-        fixture.league.id,
-        fixture.league.name,
-        fixture.league.country,
-        fixture.league.season,
-        fixture.league.round,
-        existingXG?.xg_home || null,
-        existingXG?.xg_away || null
-      ];
-
-      queries.push({ query, params });
+      queries.push(query);
     }
 
-    // Execute all queries in a transaction and track status changes
-    const results = await executeTransaction(queries);
+    return { queries, statusChanges };
+  }
 
-    // Count updated rows and status changes to past
+  private async getExistingFixture(fixtureId: number): Promise<{ xg_home: number; xg_away: number; status_short: string } | null> {
+    try {
+      const result = await executeQuery('SELECT xg_home, xg_away, status_short FROM football_fixtures WHERE id = $1', [fixtureId]);
+      return result.rows[0] || null;
+    } catch (error) {
+      log(`No existing fixture found for ID ${fixtureId}, will create new`);
+      return null;
+    }
+  }
+
+  private buildFixtureUpsertQuery(fixture: ApiFootballFixture, teamCountryMap: Map<number, string>, existingFixture: any): { query: string; params: any[] } {
+    const query = `
+      INSERT INTO football_fixtures (
+        id, referee, timestamp, date, venue_name, status_long, status_short,
+        home_team_id, home_team_name, home_country, away_team_id, away_team_name, away_country,
+        goals_home, goals_away,
+        score_halftime_home, score_halftime_away,
+        score_fulltime_home, score_fulltime_away,
+        score_extratime_home, score_extratime_away,
+        score_penalty_home, score_penalty_away,
+        league_id, league_name, league_country, season, round,
+        xg_home, xg_away
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        referee = EXCLUDED.referee,
+        timestamp = EXCLUDED.timestamp,
+        date = EXCLUDED.date,
+        venue_name = EXCLUDED.venue_name,
+        status_long = EXCLUDED.status_long,
+        status_short = EXCLUDED.status_short,
+        home_team_id = EXCLUDED.home_team_id,
+        home_team_name = EXCLUDED.home_team_name,
+        home_country = EXCLUDED.home_country,
+        away_team_id = EXCLUDED.away_team_id,
+        away_team_name = EXCLUDED.away_team_name,
+        away_country = EXCLUDED.away_country,
+        goals_home = EXCLUDED.goals_home,
+        goals_away = EXCLUDED.goals_away,
+        score_halftime_home = EXCLUDED.score_halftime_home,
+        score_halftime_away = EXCLUDED.score_halftime_away,
+        score_fulltime_home = EXCLUDED.score_fulltime_home,
+        score_fulltime_away = EXCLUDED.score_fulltime_away,
+        score_extratime_home = EXCLUDED.score_extratime_home,
+        score_extratime_away = EXCLUDED.score_extratime_away,
+        score_penalty_home = EXCLUDED.score_penalty_home,
+        score_penalty_away = EXCLUDED.score_penalty_away,
+        league_id = EXCLUDED.league_id,
+        league_name = EXCLUDED.league_name,
+        league_country = EXCLUDED.league_country,
+        season = EXCLUDED.season,
+        round = EXCLUDED.round,
+        xg_home = COALESCE(EXCLUDED.xg_home, football_fixtures.xg_home),
+        xg_away = COALESCE(EXCLUDED.xg_away, football_fixtures.xg_away),
+        updated_at = NOW()
+      WHERE (
+        football_fixtures.status_short IS DISTINCT FROM EXCLUDED.status_short OR
+        football_fixtures.timestamp IS DISTINCT FROM EXCLUDED.timestamp OR
+        football_fixtures.goals_home IS DISTINCT FROM EXCLUDED.goals_home OR
+        football_fixtures.goals_away IS DISTINCT FROM EXCLUDED.goals_away OR
+        football_fixtures.score_halftime_home IS DISTINCT FROM EXCLUDED.score_halftime_home OR
+        football_fixtures.score_halftime_away IS DISTINCT FROM EXCLUDED.score_halftime_away OR
+        football_fixtures.score_fulltime_home IS DISTINCT FROM EXCLUDED.score_fulltime_home OR
+        football_fixtures.score_fulltime_away IS DISTINCT FROM EXCLUDED.score_fulltime_away OR
+        football_fixtures.referee IS DISTINCT FROM EXCLUDED.referee OR
+        football_fixtures.venue_name IS DISTINCT FROM EXCLUDED.venue_name
+      )
+    `;
+
+    const params = [
+      fixture.fixture.id,
+      fixture.fixture.referee,
+      fixture.fixture.timestamp,
+      fixture.fixture.date,
+      fixture.fixture.venue?.name,
+      fixture.fixture.status.long,
+      fixture.fixture.status.short,
+      fixture.teams.home.id,
+      fixture.teams.home.name,
+      teamCountryMap.get(fixture.teams.home.id) || null,
+      fixture.teams.away.id,
+      fixture.teams.away.name,
+      teamCountryMap.get(fixture.teams.away.id) || null,
+      fixture.goals.home,
+      fixture.goals.away,
+      fixture.score.halftime?.home,
+      fixture.score.halftime?.away,
+      fixture.score.fulltime?.home,
+      fixture.score.fulltime?.away,
+      fixture.score.extratime?.home,
+      fixture.score.extratime?.away,
+      fixture.score.penalty?.home,
+      fixture.score.penalty?.away,
+      fixture.league.id,
+      fixture.league.name,
+      fixture.league.country,
+      fixture.league.season,
+      fixture.league.round,
+      existingFixture?.xg_home || null,
+      existingFixture?.xg_away || null
+    ];
+
+    return { query, params };
+  }
+
+  private processTransactionResults(results: any[], fixtures: ApiFootballFixture[], statusChanges: boolean[]): { updatedCount: number; statusChangedToPastCount: number; updatedFixtureIds: number[] } {
+    const updatedFixtureIds: number[] = [];
+    let updatedCount = 0;
+    let statusChangedToPastCount = 0;
+
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
-
       if (result.rowCount && result.rowCount > 0) {
         updatedCount++;
-        updatedFixtureIds.push(validFixtures[i].fixture.id);
-
-        // Check if this fixture changed status to "in past"
-        if (fixtureStatusChanges[i]) {
+        updatedFixtureIds.push(fixtures[i].fixture.id);
+        if (statusChanges[i]) {
           statusChangedToPastCount++;
         }
       }

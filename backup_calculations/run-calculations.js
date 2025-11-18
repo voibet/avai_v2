@@ -1804,8 +1804,6 @@ async function runCalculations() {
         console.log(`📊 Found ${fixtureIds.length} fixtures with odds data`);
 
         if (fixtureIds.length > 0) {
-
-
             // Populate fair_odds table
             console.log('Populating fair_odds table...');
             for (let i = 0; i < fixtureIds.length; i += 50) {
