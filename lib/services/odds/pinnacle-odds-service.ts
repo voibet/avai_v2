@@ -486,8 +486,8 @@ class PinnacleOddsService {
       combinedLineEntry.ou = previousLinesEntry.ou;
     }
 
-    // Add combined line entry if we have any lines (and AH/OU data was actually updated)
-    if ((combinedLineEntry.ah || combinedLineEntry.ou) && (updatedFields.includes('ah') || updatedFields.includes('ou'))) {
+    // Only add combined line entry if line values have actually changed
+    if (combinedLineEntry.ah || combinedLineEntry.ou) {
       if (this.isNewDataDifferent(lines, combinedLineEntry)) {
         lines.push(combinedLineEntry);
         latestT.lines_ts = timestamp;
@@ -506,8 +506,8 @@ class PinnacleOddsService {
       }
     }
 
-    // Add combined ID entry if we have any IDs (and AH/OU data was actually updated)
-    if (Object.keys(combinedIdEntry.line_ids).length > 0 && (updatedFields.includes('ah') || updatedFields.includes('ou'))) {
+    // Only update ID entry if ID values have actually changed
+    if (Object.keys(combinedIdEntry.line_ids).length > 0) {
       if (this.isNewDataDifferent(ids, combinedIdEntry)) {
         // For IDs, overwrite the latest entry instead of keeping history
         if (ids.length > 0) {
@@ -520,7 +520,7 @@ class PinnacleOddsService {
       }
     }
 
-    // Update max stakes
+    // Only update max stakes if values have actually changed
     if (period.meta) {
       const newMaxStakeEntry = {
         t: timestamp,
