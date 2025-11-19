@@ -8,27 +8,31 @@ nav a {
 
 /* Odds flash animations */
 @keyframes flash-up {
-  0%, 100% {
-    background-color: transparent;
+  0% {
+    background-color: rgba(34, 197, 94, 0.7); /* Green-500 with opacity */
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
   }
-  50% {
-    background-color: rgba(34, 197, 94, 0.4);
+  100% {
+    background-color: transparent;
+    box-shadow: none;
   }
 }
 
 @keyframes flash-down {
-  0%, 100% {
-    background-color: transparent;
+  0% {
+    background-color: rgba(239, 68, 68, 0.7); /* Red-500 with opacity */
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
   }
-  50% {
-    background-color: rgba(239, 68, 68, 0.4);
+  100% {
+    background-color: transparent;
+    box-shadow: none;
   }
 }
 
 .odds-flash-up {
-  animation: flash-up 2s ease-in-out;
+  animation: flash-up 2.5s ease-out;
 }
 
 .odds-flash-down {
-  animation: flash-down 2s ease-in-out;
+  animation: flash-down 2.5s ease-out;
 }

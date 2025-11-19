@@ -9,7 +9,7 @@ const pool = new Pool({
   database: process.env.DB_NAME,
   ssl: process.env.DB_SSL === 'true' ? true : false,
   // Connection pool settings optimized for high-frequency updates
-  max: 50, // Reduced maximum connections to prevent database overload
+  max: 25, // Reduced maximum connections to prevent database overload
   min: 2,   // Minimum connections to keep warm
   idleTimeoutMillis: 10000, // Close idle clients after 10 seconds
   connectionTimeoutMillis: 5000, // Increased timeout for connection acquisition

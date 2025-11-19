@@ -27,5 +27,5 @@ export function initializeSchedulers() {
   // Start scheduler after delay
   setTimeout(() => {
     startAutoRefreshScheduler();
-  }, 0 * 60 * 1000); // 5 minutes in milliseconds
+  }, 1 * 60 * 1000); // 1 minutes in milliseconds
 }
