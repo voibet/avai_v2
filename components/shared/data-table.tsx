@@ -139,7 +139,7 @@ export default function DataTable<T>({
     return dataTransformer ? dataTransformer(rawData) : rawData;
   }, [rawData, dataTransformer]);
   const isUsingClientData = !!data;
-  
+
   // UI state
   const [expandedRows, setExpandedRows] = useState<Set<string | number>>(new Set());
   const [showFilterDropdown, setShowFilterDropdown] = useState<string | null>(null);
@@ -155,7 +155,7 @@ export default function DataTable<T>({
   const fetchServerData = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const queryParams = new URLSearchParams();
 
@@ -194,20 +194,20 @@ export default function DataTable<T>({
         for (const [key, value] of Array.from(searchParams.entries())) {
           // Skip parameters that are already handled by the component
           if (!['page', 'sortColumn', 'sortDirection'].includes(key) &&
-              !key.startsWith('filters[')) {
+            !key.startsWith('filters[')) {
             queryParams.append(key, value);
           }
         }
       }
 
       const response = await fetch(`${apiEndpoint}?${queryParams}`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const result = await response.json();
-      
+
       setServerData(result.data || []);
       setTotalCount(result.total || 0);
       setTotalPages(result.totalPages || 1);
@@ -222,7 +222,7 @@ export default function DataTable<T>({
     }
   };
 
-  
+
   const dropdownRef = useRef<HTMLDivElement>(null);
   const dropdownTriggerRef = useRef<HTMLDivElement>(null);
   const [dropdownHorizontalPosition, setDropdownHorizontalPosition] = useState<'left' | 'right'>('left');
@@ -499,7 +499,7 @@ export default function DataTable<T>({
   return (
     <div className={`space-y-1 ${className}`} style={{ pointerEvents: 'none' }}>
       {/* Header */}
-      <div className={`flex justify-between items-center py-2 border-b border-gray-600 ${headerClassName}`}>
+      <div className={`flex justify-between items-center py-4 border-b border-gray-800 ${headerClassName}`}>
         <h1 className="text-lg font-bold text-gray-200 font-mono">{title}</h1>
         <div className="flex items-center gap-4">
           {selectable && selectedIds.size > 0 && (
@@ -533,7 +533,7 @@ export default function DataTable<T>({
       </div>
 
       {/* Column Headers */}
-      <div ref={dropdownRef} className={`relative flex gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white`}>
+      <div ref={dropdownRef} className={`relative flex gap-1 py-2 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 text-[11px] font-bold text-gray-400 uppercase tracking-wider`}>
         {selectable && (
           <div className="w-6 flex-shrink-0">
             <input
@@ -562,9 +562,8 @@ export default function DataTable<T>({
             <div
               key={column.key}
               ref={showFilterDropdown === column.key ? dropdownTriggerRef : null}
-              className={`${getFlexBasis(column.span)} ${getColumnMinWidth(column.span)} ${column.className || ''} relative px-2 ${
-                isSortable ? 'cursor-pointer hover:bg-gray-700 transition-colors' : ''
-              }`}
+              className={`${getFlexBasis(column.span)} ${getColumnMinWidth(column.span)} ${column.className || ''} relative px-2 ${isSortable ? 'cursor-pointer hover:bg-gray-700 transition-colors' : ''
+                }`}
               onClick={() => isSortable && handleSort(column)}
               style={{
                 pointerEvents: isSortable ? 'auto' : 'none',
@@ -589,9 +588,8 @@ export default function DataTable<T>({
                         e.stopPropagation();
                         setShowFilterDropdown(showFilterDropdown === column.key ? null : column.key);
                       }}
-                      className={`text-xs px-1 hover:bg-gray-600 rounded transition-colors ${
-                        hasFilter ? 'text-yellow-400' : 'text-gray-500'
-                      }`}
+                      className={`text-xs px-1 hover:bg-gray-600 rounded transition-colors ${hasFilter ? 'text-yellow-400' : 'text-gray-500'
+                        }`}
                       title={hasFilter ? `Filtered (${currentFilters[column.key]?.size} selected)` : 'Filter'}
                       style={{ pointerEvents: 'auto' }}
                     >
@@ -605,146 +603,145 @@ export default function DataTable<T>({
               {showFilterDropdown === column.key && isFilterable && (
                 <div
                   ref={dropdownRef}
-                  className={`absolute top-full mt-1 z-40 bg-gray-800 border border-gray-600 rounded shadow-lg min-w-48 max-h-80 overflow-hidden ${
-                    dropdownHorizontalPosition === 'right' ? 'right-0' : 'left-0'
-                  }`}
+                  className={`absolute top-full mt-1 z-40 bg-gray-800 border border-gray-600 rounded shadow-lg min-w-48 max-h-80 overflow-hidden ${dropdownHorizontalPosition === 'right' ? 'right-0' : 'left-0'
+                    }`}
                 >
                   {column.customFilterRenderer ? (
                     column.customFilterRenderer({
                       column,
                       currentFilters,
-                      onFilterChange: onFilterChange || (() => {}),
+                      onFilterChange: onFilterChange || (() => { }),
                       onClose: () => setShowFilterDropdown(null)
                     })
                   ) : (
                     <>
                       <div className="p-2 border-b border-gray-600">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-mono text-white">Filter {column.header}</span>
-                      {hasFilter && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            clearColumnFilter(column.key);
-                          }}
-                          className="text-xs text-red-400 hover:text-red-300 font-mono"
-                          style={{ pointerEvents: 'auto' }}
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-                    {/* Hide search input for date column since it has predefined options */}
-                    {column.key !== 'date' && (
-                      <input
-                        type="text"
-                        placeholder="Search..."
-                        value={filterSearchTerms[column.key] || ''}
-                        onChange={(e) => handleFilterSearchChange(column.key, e.target.value)}
-                        className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ pointerEvents: 'auto' }}
-                      />
-                    )}
-                  </div>
-                  <div className="max-h-48 overflow-y-auto">
-                    {(() => {
-                      // Custom date filter options for date column
-                      if (column.key === 'date') {
-                        const dateOptions = [
-                          { value: 'yesterday', label: 'Yesterday' },
-                          { value: 'today', label: 'Today' },
-                          { value: 'tomorrow', label: 'Tomorrow' },
-                          { value: 'last7', label: 'Last 7 days' },
-                          { value: 'next7', label: 'Next 7 days' },
-                          { value: 'last14', label: 'Last 14 days' },
-                          { value: 'next14', label: 'Next 14 days' },
-                        ];
-
-                        return dateOptions.map((option) => {
-                          const isSelected = currentFilters[column.key]?.has(option.value) ?? false;
-                          return (
-                            <label
-                              key={option.value}
-                              className="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 cursor-pointer"
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-mono text-white">Filter {column.header}</span>
+                          {hasFilter && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                clearColumnFilter(column.key);
+                              }}
+                              className="text-xs text-red-400 hover:text-red-300 font-mono"
                               style={{ pointerEvents: 'auto' }}
                             >
-                              <input
-                                type="radio"
-                                name={`filter-${column.key}`}
-                                checked={isSelected}
-                                onChange={() => toggleFilterValue(column.key, option.value)}
-                                className="rounded-full border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-600"
-                                style={{ pointerEvents: 'auto' }}
-                              />
-                              <span className="text-xs font-mono text-gray-300 truncate">
-                                {option.label}
-                              </span>
-                            </label>
-                          );
-                        });
-                      }
-
-                      // Default behavior for other columns
-                      const fieldKey = column.sortKey || column.key;
-                      const values = apiFilterValues[fieldKey] || [];
-                      const isLoading = loadingFilterValues.has(fieldKey);
-                      const searchTerm = filterSearchTerms[column.key] || '';
-
-                      if (isLoading) {
-                        return (
-                          <div className="px-2 py-1 text-xs font-mono text-gray-500">
-                            Loading...
-                          </div>
-                        );
-                      }
-
-                      if (values.length === 0) {
-                        return (
-                          <div className="px-2 py-1 text-xs font-mono text-gray-500">
-                            No values available
-                          </div>
-                        );
-                      }
-
-                      // Filter values based on search term
-                      const filteredValues = searchTerm
-                        ? values.filter(value =>
-                            value.toLowerCase().includes(searchTerm.toLowerCase())
-                          )
-                        : values;
-
-                      if (filteredValues.length === 0) {
-                        return (
-                          <div className="px-2 py-1 text-xs font-mono text-gray-500">
-                            No matches found
-                          </div>
-                        );
-                      }
-
-                      return filteredValues.map((value) => {
-                        const isSelected = currentFilters[column.key]?.has(value) ?? false;
-                        return (
-                          <label
-                            key={value}
-                            className="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 cursor-pointer"
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        {/* Hide search input for date column since it has predefined options */}
+                        {column.key !== 'date' && (
+                          <input
+                            type="text"
+                            placeholder="Search..."
+                            value={filterSearchTerms[column.key] || ''}
+                            onChange={(e) => handleFilterSearchChange(column.key, e.target.value)}
+                            className="w-full px-2 py-1 bg-gray-700 border border-gray-600 text-white text-xs font-mono rounded focus:outline-none focus:border-blue-400"
+                            onClick={(e) => e.stopPropagation()}
                             style={{ pointerEvents: 'auto' }}
-                          >
-                            <input
-                              type="radio"
-                              name={`filter-${column.key}`}
-                              checked={isSelected}
-                              onChange={() => toggleFilterValue(column.key, value)}
-                              className="rounded-full border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-600"
-                              style={{ pointerEvents: 'auto' }}
-                            />
-                            <span className="text-xs font-mono text-gray-300 truncate">
-                              {value}
-                            </span>
-                          </label>
-                        );
-                      });
-                    })()}
+                          />
+                        )}
+                      </div>
+                      <div className="max-h-48 overflow-y-auto">
+                        {(() => {
+                          // Custom date filter options for date column
+                          if (column.key === 'date') {
+                            const dateOptions = [
+                              { value: 'yesterday', label: 'Yesterday' },
+                              { value: 'today', label: 'Today' },
+                              { value: 'tomorrow', label: 'Tomorrow' },
+                              { value: 'last7', label: 'Last 7 days' },
+                              { value: 'next7', label: 'Next 7 days' },
+                              { value: 'last14', label: 'Last 14 days' },
+                              { value: 'next14', label: 'Next 14 days' },
+                            ];
+
+                            return dateOptions.map((option) => {
+                              const isSelected = currentFilters[column.key]?.has(option.value) ?? false;
+                              return (
+                                <label
+                                  key={option.value}
+                                  className="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 cursor-pointer"
+                                  style={{ pointerEvents: 'auto' }}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={`filter-${column.key}`}
+                                    checked={isSelected}
+                                    onChange={() => toggleFilterValue(column.key, option.value)}
+                                    className="rounded-full border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-600"
+                                    style={{ pointerEvents: 'auto' }}
+                                  />
+                                  <span className="text-xs font-mono text-gray-300 truncate">
+                                    {option.label}
+                                  </span>
+                                </label>
+                              );
+                            });
+                          }
+
+                          // Default behavior for other columns
+                          const fieldKey = column.sortKey || column.key;
+                          const values = apiFilterValues[fieldKey] || [];
+                          const isLoading = loadingFilterValues.has(fieldKey);
+                          const searchTerm = filterSearchTerms[column.key] || '';
+
+                          if (isLoading) {
+                            return (
+                              <div className="px-2 py-1 text-xs font-mono text-gray-500">
+                                Loading...
+                              </div>
+                            );
+                          }
+
+                          if (values.length === 0) {
+                            return (
+                              <div className="px-2 py-1 text-xs font-mono text-gray-500">
+                                No values available
+                              </div>
+                            );
+                          }
+
+                          // Filter values based on search term
+                          const filteredValues = searchTerm
+                            ? values.filter(value =>
+                              value.toLowerCase().includes(searchTerm.toLowerCase())
+                            )
+                            : values;
+
+                          if (filteredValues.length === 0) {
+                            return (
+                              <div className="px-2 py-1 text-xs font-mono text-gray-500">
+                                No matches found
+                              </div>
+                            );
+                          }
+
+                          return filteredValues.map((value) => {
+                            const isSelected = currentFilters[column.key]?.has(value) ?? false;
+                            return (
+                              <label
+                                key={value}
+                                className="flex items-center gap-2 px-2 py-1 hover:bg-gray-700 cursor-pointer"
+                                style={{ pointerEvents: 'auto' }}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`filter-${column.key}`}
+                                  checked={isSelected}
+                                  onChange={() => toggleFilterValue(column.key, value)}
+                                  className="rounded-full border-gray-600 bg-gray-700 text-blue-600 focus:ring-blue-600"
+                                  style={{ pointerEvents: 'auto' }}
+                                />
+                                <span className="text-xs font-mono text-gray-300 truncate">
+                                  {value}
+                                </span>
+                              </label>
+                            );
+                          });
+                        })()}
                       </div>
                     </>
                   )}
@@ -769,7 +766,7 @@ export default function DataTable<T>({
 
             const RowContent = (
               <div
-                className={`flex gap-1 py-1 border-b border-gray-600 text-xs font-mono ${rowClassName} ${expandable ? 'cursor-pointer hover:bg-gray-800' : ''} ${expandable && isExpanded ? 'bg-gray-900' : ''}`}
+                className={`flex gap-1 py-2 border-b border-gray-800/50 text-xs font-mono ${rowClassName} ${expandable ? 'cursor-pointer hover:bg-gray-800/50 transition-colors duration-150' : ''} ${expandable && isExpanded ? 'bg-gray-800/80' : ''}`}
                 onClick={expandable ? () => toggleRowExpansion(itemId, item) : undefined}
                 style={{ pointerEvents: expandable ? 'auto' : 'none' }}
               >
@@ -797,7 +794,7 @@ export default function DataTable<T>({
             );
 
             const ExpandedContent = isExpanded && renderExpandedContent ? (
-              <div className={`border-b border-gray-700 ${getExpandedRowClassName?.(item) || 'bg-gray-850'}`} style={{ pointerEvents: 'auto' }}>
+              <div className={`border-b border-gray-800 ${getExpandedRowClassName?.(item) || 'bg-gray-900/50'}`} style={{ pointerEvents: 'auto' }}>
                 {renderExpandedContent(item, index)}
               </div>
             ) : null;
@@ -878,11 +875,10 @@ export default function DataTable<T>({
                   <button
                     key={i}
                     onClick={() => onPageChange && onPageChange(i)}
-                    className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
-                      i === currentPage
+                    className={`px-2 py-1 text-xs font-mono rounded transition-colors ${i === currentPage
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-                    }`}
+                      }`}
                     style={{ pointerEvents: 'auto' }}
                   >
                     {i}

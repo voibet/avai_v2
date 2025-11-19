@@ -71,7 +71,7 @@ function FixturesPageContent() {
   const currentSort = useMemo(() => {
     const sortBy = searchParams.get('sort_by')
     const sortDirection = searchParams.get('sort_direction') as 'asc' | 'desc' | null
-    
+
     if (sortBy && sortDirection) {
       return { key: sortBy, direction: sortDirection }
     }
@@ -461,13 +461,13 @@ function FixturesPageContent() {
   // Handle sorting changes - update URL  
   const handleSortChange = useCallback((sortKey: string, direction: 'asc' | 'desc') => {
     const params = new URLSearchParams(searchParams.toString())
-    
+
     params.set('sort_by', sortKey)
     params.set('sort_direction', direction)
-    
+
     // Reset to page 1 when sorting changes
     params.set('page', '1')
-    
+
     router.push(`/fixtures?${params.toString()}`)
   }, [searchParams, router])
 
@@ -617,20 +617,20 @@ function FixturesPageContent() {
     return (
       <div className="px-2 py-2">
         {/* Team Headers */}
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex-1 text-center">
-              <h3 className="text-xs font-bold text-gray-200 font-mono">
-                {fixture.home_team_name}
-                {home.formation && <span className="text-xs text-gray-400 ml-2">({home.formation})</span>}
-              </h3>
-            </div>
-            <div className="flex-1 text-center">
-              <h3 className="text-xs font-bold text-gray-200 font-mono">
-                {fixture.away_team_name}
-                {away.formation && <span className="text-xs text-gray-400 ml-2">({away.formation})</span>}
-              </h3>
-            </div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex-1 text-center">
+            <h3 className="text-xs font-bold text-gray-200 font-mono">
+              {fixture.home_team_name}
+              {home.formation && <span className="text-xs text-gray-400 ml-2">({home.formation})</span>}
+            </h3>
           </div>
+          <div className="flex-1 text-center">
+            <h3 className="text-xs font-bold text-gray-200 font-mono">
+              {fixture.away_team_name}
+              {away.formation && <span className="text-xs text-gray-400 ml-2">({away.formation})</span>}
+            </h3>
+          </div>
+        </div>
 
         {/* Coaches Section */}
         <div className="mb-2">
@@ -713,18 +713,18 @@ function FixturesPageContent() {
             {home.startXI.length > 0 ? (
               <div className="space-y-0.5">
                 {/* Header */}
-                <div className="grid grid-cols-9 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-1 text-gray-400 text-center">#</div>
-                  <div className="col-span-4 text-gray-400">PLAYER</div>
-                  <div className="col-span-2 text-gray-400 text-center">POS</div>
-                  <div className="col-span-2 text-gray-400 text-center">GRID</div>
+                <div className="grid grid-cols-9 gap-1 py-1 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  <div className="col-span-1 text-center">#</div>
+                  <div className="col-span-4">PLAYER</div>
+                  <div className="col-span-2 text-center">POS</div>
+                  <div className="col-span-2 text-center">GRID</div>
                 </div>
 
                 {/* Players */}
                 {home.startXI.map((player) => (
-                  <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                  <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900/30 transition-colors">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                    <div 
+                    <div
                       className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
                       onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
                     >
@@ -745,9 +745,9 @@ function FixturesPageContent() {
                 <h4 className="text-xs font-bold text-gray-400 font-mono mb-1">SUBSTITUTES</h4>
                 <div className="space-y-0.5">
                   {home.substitutes.map((player) => (
-                    <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-700 text-xs font-mono">
+                    <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900/30 transition-colors">
                       <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                      <div 
+                      <div
                         className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
                         onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
                       >
@@ -770,18 +770,18 @@ function FixturesPageContent() {
             {away.startXI.length > 0 ? (
               <div className="space-y-0.5">
                 {/* Header */}
-                <div className="grid grid-cols-9 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                  <div className="col-span-1 text-gray-400 text-center">#</div>
-                  <div className="col-span-4 text-gray-400">PLAYER</div>
-                  <div className="col-span-2 text-gray-400 text-center">POS</div>
-                  <div className="col-span-2 text-gray-400 text-center">GRID</div>
+                <div className="grid grid-cols-9 gap-1 py-1 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                  <div className="col-span-1 text-center">#</div>
+                  <div className="col-span-4">PLAYER</div>
+                  <div className="col-span-2 text-center">POS</div>
+                  <div className="col-span-2 text-center">GRID</div>
                 </div>
 
                 {/* Players */}
                 {away.startXI.map((player) => (
-                  <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                  <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900/30 transition-colors">
                     <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                    <div 
+                    <div
                       className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
                       onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
                     >
@@ -802,9 +802,9 @@ function FixturesPageContent() {
                 <h4 className="text-xs font-bold text-gray-400 font-mono mb-1">SUBSTITUTES</h4>
                 <div className="space-y-0.5">
                   {away.substitutes.map((player) => (
-                    <div key={player.id} className="grid grid-cols-9 gap-1 py-0.5 border-b border-gray-700 text-xs font-mono">
+                    <div key={player.id} className="grid grid-cols-9 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900/30 transition-colors">
                       <div className="col-span-1 text-gray-300 text-center">{player.number}</div>
-                      <div 
+                      <div
                         className="col-span-4 text-gray-100 font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
                         onClick={() => setSelectedPlayer({ id: player.id, name: player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
                       >
@@ -860,15 +860,15 @@ function FixturesPageContent() {
               return filteredInjuries.length > 0 ? (
                 <div className="space-y-0.5">
                   {/* Header */}
-                  <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                    <div className="col-span-3 text-gray-400">PLAYER</div>
-                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                    <div className="col-span-2 text-gray-400 text-center">STATUS</div>
-                    <div className="col-span-2 text-gray-400 text-center">SINCE</div>
-                    <div className="col-span-2 text-gray-400 text-center">MISSED</div>
+                  <div className="grid grid-cols-12 gap-1 py-1 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    <div className="col-span-3">PLAYER</div>
+                    <div className="col-span-3 text-center">REASON</div>
+                    <div className="col-span-2 text-center">STATUS</div>
+                    <div className="col-span-2 text-center">SINCE</div>
+                    <div className="col-span-2 text-center">MISSED</div>
                   </div>
                   {filteredInjuries.map((injury) => (
-                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900/30 transition-colors">
                       <div
                         className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
                         onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.home_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
@@ -929,15 +929,15 @@ function FixturesPageContent() {
               return filteredInjuries.length > 0 ? (
                 <div className="space-y-0.5">
                   {/* Header */}
-                  <div className="grid grid-cols-12 gap-1 py-0.5 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
-                    <div className="col-span-3 text-gray-400">PLAYER</div>
-                    <div className="col-span-3 text-gray-400 text-center">REASON</div>
-                    <div className="col-span-2 text-gray-400 text-center">STATUS</div>
-                    <div className="col-span-2 text-gray-400 text-center">SINCE</div>
-                    <div className="col-span-2 text-gray-400 text-center">MISSED</div>
+                  <div className="grid grid-cols-12 gap-1 py-1 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                    <div className="col-span-3">PLAYER</div>
+                    <div className="col-span-3 text-center">REASON</div>
+                    <div className="col-span-2 text-center">STATUS</div>
+                    <div className="col-span-2 text-center">SINCE</div>
+                    <div className="col-span-2 text-center">MISSED</div>
                   </div>
                   {filteredInjuries.map((injury) => (
-                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-0.5 border-b border-gray-600 text-xs font-mono">
+                    <div key={injury.player.id} className="grid grid-cols-12 gap-1 py-1 border-b border-gray-800 text-xs font-mono hover:bg-gray-900/30 transition-colors">
                       <div
                         className="col-span-3 text-white font-bold truncate cursor-pointer hover:text-blue-400 transition-colors"
                         onClick={() => setSelectedPlayer({ id: injury.player.id, name: injury.player.name, teamId: fixture.away_team_id?.toString(), leagueId: fixture.league_id?.toString() })}
@@ -1055,7 +1055,7 @@ function FixturesPageContent() {
         away: '',
         info: stats.league_elo?.toString() || '-',
         show: true
-      },  
+      },
       {
         id: 'home_advantage',
         label: 'Home Advantage',
@@ -1088,25 +1088,25 @@ function FixturesPageContent() {
         info: '',
         show: true
       }
-      
+
     ];
 
     return (
       <div className="">
         {/* First Row - Stats Table */}
         <div className="">
-          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-800">
             {/* Headers */}
             {firstRowStats.map((item) => (
-              <div key={`header-${item.id}`} className="border-r border-gray-700 px-1 py-0.5 text-gray-300 font-bold text-[12px] bg-gray-900 font-mono truncate">
+              <div key={`header-${item.id}`} className="border-r border-gray-800 px-2 py-1 text-gray-400 font-bold text-[10px] uppercase tracking-wider bg-gray-900/50 font-mono truncate">
                 {item.label}
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-800">
             {/* Values */}
             {firstRowStats.map((item) => (
-              <div key={`value-${item.id}`} className="border-r border-gray-700 px-1 py-1 text-gray-100 text-[11px] font-mono truncate">
+              <div key={`value-${item.id}`} className="border-r border-gray-800 px-2 py-1.5 text-gray-200 text-[11px] font-mono truncate">
                 {item.home && item.away ? `${item.home} - ${item.away}` : (item.home || item.away || item.info || '-')}
               </div>
             ))}
@@ -1115,18 +1115,18 @@ function FixturesPageContent() {
 
         {/* Second Row - Stats Table */}
         <div className="">
-          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-800">
             {/* Headers */}
             {secondRowStats.map((item) => (
-              <div key={`header-${item.id}`} className="border-r border-gray-700 px-1 py-0.5 text-gray-300 font-bold text-[12px] bg-gray-900 font-mono truncate">
+              <div key={`header-${item.id}`} className="border-r border-gray-800 px-2 py-1 text-gray-400 font-bold text-[10px] uppercase tracking-wider bg-gray-900/50 font-mono truncate">
                 {item.label}
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+          <div className="grid grid-cols-5 gap-0 border-b border-gray-800">
             {/* Values */}
             {secondRowStats.map((item) => (
-              <div key={`value-${item.id}`} className="border-r border-gray-700 px-1 py-1 text-gray-100 text-[11px] font-mono truncate">
+              <div key={`value-${item.id}`} className="border-r border-gray-800 px-2 py-1.5 text-gray-200 text-[11px] font-mono truncate">
                 {item.home && item.away ? `${item.home} - ${item.away}` : (item.home || item.away || item.info || '-')}
               </div>
             ))}
@@ -1294,149 +1294,149 @@ function FixturesPageContent() {
         {/* Standings Table */}
         <div className="px-1 py-1">
           {/* Header */}
-          <div className="grid grid-cols-18 gap-1 py-1 bg-gray-800 border-b border-gray-600 text-xs font-mono font-bold text-white">
+          <div className="grid grid-cols-18 gap-1 py-1 bg-gray-900/80 backdrop-blur-sm border-b border-gray-800 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('rank')}
             >
               #
               {standingsSortColumn === 'rank' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-3 text-gray-400 cursor-pointer hover:text-white transition-colors flex items-center gap-1"
+              className="col-span-3 cursor-pointer hover:text-white transition-colors flex items-center gap-1"
               onClick={() => handleColumnSort('name')}
             >
               TEAM
               {standingsSortColumn === 'name' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('played')}
             >
               PL
               {standingsSortColumn === 'played' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('wins')}
             >
               W
               {standingsSortColumn === 'wins' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('draws')}
             >
               D
               {standingsSortColumn === 'draws' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('losses')}
             >
               L
               {standingsSortColumn === 'losses' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
-            <div className="col-span-1 text-gray-400 text-center">GF-GA</div>
+            <div className="col-span-1 text-center">GF-GA</div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('gd')}
             >
               GD
               {standingsSortColumn === 'gd' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
-            <div className="col-span-1 text-gray-400 text-center">FORM</div>
+            <div className="col-span-1 text-center">FORM</div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('xg')}
             >
               xG
               {standingsSortColumn === 'xg' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('xpts')}
             >
               xPTS
               {standingsSortColumn === 'xpts' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('points')}
             >
               PTS
               {standingsSortColumn === 'points' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
-            <div className="col-span-1 text-gray-400 text-center">xPTS-PTS</div>
+            <div className="col-span-1 text-center">xPTS-PTS</div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('projected')}
             >
               PROJ
               {standingsSortColumn === 'projected' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('elo')}
             >
               ELO
               {standingsSortColumn === 'elo' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
             </div>
             <div
-              className="col-span-1 text-gray-400 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
+              className="col-span-1 text-center cursor-pointer hover:text-white transition-colors flex items-center justify-center gap-1"
               onClick={() => handleColumnSort('win_pct')}
             >
               WIN%
               {standingsSortColumn === 'win_pct' && (
-                <span className="text-xs">
+                <span className="text-[10px]">
                   {standingsSortDirection === 'asc' ? '↑' : '↓'}
                 </span>
               )}
@@ -1458,90 +1458,86 @@ function FixturesPageContent() {
             return (
               <div key={standing.team.id}>
                 <div
-                  className={`grid grid-cols-18 gap-1 py-1 ${hasDivider ? 'border-b-2 border-gray-500' : 'border-b border-gray-800'} text-xs font-mono hover:bg-gray-900 ${
-                    isParticipatingTeam ? 'bg-gray-700' : ''
-                  }`}
+                  className={`grid grid-cols-18 gap-1 py-1 ${hasDivider ? 'border-b-2 border-gray-500' : 'border-b border-gray-800'} text-xs font-mono hover:bg-gray-900/30 transition-colors ${isParticipatingTeam ? 'bg-gray-800/50' : ''
+                    }`}
                 >
-                <div className="col-span-1 text-gray-300 text-center font-bold">
-                  {standing.rank}
+                  <div className="col-span-1 text-gray-300 text-center font-bold">
+                    {standing.rank}
+                  </div>
+                  <div
+                    className="col-span-3 text-gray-100 font-bold truncate flex items-center gap-2 cursor-pointer hover:text-blue-400 transition-colors"
+                    onClick={() => {
+                      if (standing.description_percentages) {
+                        setSelectedTeamStandings({
+                          team: standing.team,
+                          descriptionPercentages: standing.description_percentages,
+                          winPercentage: standing.win_percentage || null
+                        });
+                      }
+                    }}
+                  >
+                    {standing.team.logo && (
+                      <img
+                        src={standing.team.logo}
+                        alt={standing.team.name}
+                        className="w-4 h-4 object-contain"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                        }}
+                      />
+                    )}
+                    {standing.team.name}
+                  </div>
+                  <div className="col-span-1 text-gray-400 text-center">{standing.all.played}</div>
+                  <div className="col-span-1 text-green-400 text-center">{standing.all.win}</div>
+                  <div className="col-span-1 text-yellow-400 text-center">{standing.all.draw}</div>
+                  <div className="col-span-1 text-red-400 text-center">{standing.all.lose}</div>
+                  <div className="col-span-1 text-gray-300 text-center">{standing.all.goals.for}-{standing.all.goals.against}</div>
+                  <div className={`col-span-1 text-center font-bold ${standing.goalsDiff > 0 ? 'text-green-400' :
+                    standing.goalsDiff < 0 ? 'text-red-400' :
+                      'text-gray-400'
+                    }`}>
+                    {standing.goalsDiff > 0 ? '+' : ''}{standing.goalsDiff}
+                  </div>
+                  <div className="col-span-1 flex gap-0.5 justify-center">
+                    {standing.form.split('').map((result, index) => (
+                      <span
+                        key={index}
+                        className={`w-3 h-3 rounded-full text-xs font-bold flex items-center justify-center ${result === 'W' ? 'bg-green-600 text-white' :
+                          result === 'D' ? 'bg-yellow-600 text-white' :
+                            result === 'L' ? 'bg-red-600 text-white' :
+                              'bg-gray-600 text-white'
+                          }`}
+                      >
+                        {result}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="col-span-1 text-gray-300 text-center text-xs">
+                    {standing.xg_stats.all.xg_for.toFixed(1)}-{standing.xg_stats.all.xg_against.toFixed(1)}
+                  </div>
+                  <div className="col-span-1 text-blue-400 text-center text-xs">
+                    {standing.xg_stats.expected_points_total.toFixed(1)}
+                  </div>
+                  <div className="col-span-1 text-gray-200 text-center font-bold">{standing.points}</div>
+                  <div className={`col-span-1 text-center text-xs font-bold ${(standing.xg_stats.expected_points_total - standing.points) > 0 ? 'text-green-400' :
+                    (standing.xg_stats.expected_points_total - standing.points) < 0 ? 'text-red-400' :
+                      'text-gray-400'
+                    }`}>
+                    {(standing.xg_stats.expected_points_total - standing.points).toFixed(1)}
+                  </div>
+                  <div className="col-span-1 text-orange-400 text-center text-xs">
+                    {standing.xg_stats.expected_points_projected.toFixed(1)}
+                  </div>
+                  <div className="col-span-1 text-cyan-400 text-center text-xs">
+                    {eloMap.get(standing.team.id) ? eloMap.get(standing.team.id)?.toFixed(1) : '-'}
+                  </div>
+                  <div className="col-span-1 text-purple-400 text-center text-xs">
+                    {standing.win_percentage?.toFixed(1)}%
+                  </div>
                 </div>
-                <div
-                  className="col-span-3 text-gray-100 font-bold truncate flex items-center gap-2 cursor-pointer hover:text-blue-400 transition-colors"
-                  onClick={() => {
-                    if (standing.description_percentages) {
-                      setSelectedTeamStandings({
-                        team: standing.team,
-                        descriptionPercentages: standing.description_percentages,
-                        winPercentage: standing.win_percentage || null
-                      });
-                    }
-                  }}
-                >
-                  {standing.team.logo && (
-                    <img
-                      src={standing.team.logo}
-                      alt={standing.team.name}
-                      className="w-4 h-4 object-contain"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.style.display = 'none';
-                      }}
-                    />
-                  )}
-                  {standing.team.name}
-                </div>
-                <div className="col-span-1 text-gray-400 text-center">{standing.all.played}</div>
-                <div className="col-span-1 text-green-400 text-center">{standing.all.win}</div>
-                <div className="col-span-1 text-yellow-400 text-center">{standing.all.draw}</div>
-                <div className="col-span-1 text-red-400 text-center">{standing.all.lose}</div>
-                <div className="col-span-1 text-gray-300 text-center">{standing.all.goals.for}-{standing.all.goals.against}</div>
-                <div className={`col-span-1 text-center font-bold ${
-                  standing.goalsDiff > 0 ? 'text-green-400' :
-                  standing.goalsDiff < 0 ? 'text-red-400' :
-                  'text-gray-400'
-                }`}>
-                  {standing.goalsDiff > 0 ? '+' : ''}{standing.goalsDiff}
-                </div>
-                <div className="col-span-1 flex gap-0.5 justify-center">
-                  {standing.form.split('').map((result, index) => (
-                    <span
-                      key={index}
-                      className={`w-3 h-3 rounded-full text-xs font-bold flex items-center justify-center ${
-                        result === 'W' ? 'bg-green-600 text-white' :
-                        result === 'D' ? 'bg-yellow-600 text-white' :
-                        result === 'L' ? 'bg-red-600 text-white' :
-                        'bg-gray-600 text-white'
-                      }`}
-                    >
-                      {result}
-                    </span>
-                  ))}
-                </div>
-                <div className="col-span-1 text-gray-300 text-center text-xs">
-                  {standing.xg_stats.all.xg_for.toFixed(1)}-{standing.xg_stats.all.xg_against.toFixed(1)}
-                </div>
-                <div className="col-span-1 text-blue-400 text-center text-xs">
-                  {standing.xg_stats.expected_points_total.toFixed(1)}
-                </div>
-                <div className="col-span-1 text-gray-200 text-center font-bold">{standing.points}</div>
-                <div className={`col-span-1 text-center text-xs font-bold ${
-                  (standing.xg_stats.expected_points_total - standing.points) > 0 ? 'text-green-400' :
-                  (standing.xg_stats.expected_points_total - standing.points) < 0 ? 'text-red-400' :
-                  'text-gray-400'
-                }`}>
-                  {(standing.xg_stats.expected_points_total - standing.points).toFixed(1)}
-                </div>
-                <div className="col-span-1 text-orange-400 text-center text-xs">
-                  {standing.xg_stats.expected_points_projected.toFixed(1)}
-                </div>
-                <div className="col-span-1 text-cyan-400 text-center text-xs">
-                  {eloMap.get(standing.team.id) ? eloMap.get(standing.team.id)?.toFixed(1) : '-'}
-                </div>
-                <div className="col-span-1 text-purple-400 text-center text-xs">
-                  {standing.win_percentage?.toFixed(1)}%
-                </div>
-                </div>
-            </div>
+              </div>
             );
           })}
         </div>
@@ -1640,22 +1636,27 @@ function FixturesPageContent() {
     <div className="fixed inset-0 top-[57px] left-0 right-0 bottom-0 bg-black overflow-auto">
       <div className="w-full px-4">
         {/* Search Bar */}
-        <div className="py-4">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1 max-w-md">
+        <div className="py-6 sticky top-0 z-10 bg-black/80 backdrop-blur-md -mx-4 px-4 border-b border-gray-800 mb-4">
+          <div className="flex items-center gap-4 max-w-7xl mx-auto">
+            <div className="relative flex-1 max-w-md group">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg className="h-4 w-4 text-gray-500 group-focus-within:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
               <input
                 type="text"
                 placeholder="Search teams or leagues..."
                 value={searchTerm}
                 onChange={handleSearchChange}
                 onKeyDown={handleSearchSubmit}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
+                className="w-full pl-10 pr-10 py-2.5 bg-gray-900/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 font-mono text-sm transition-all shadow-sm"
                 disabled={searchDataLoading}
               />
               {searchTerm && (
                 <button
                   onClick={handleClearSearch}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-white transition-colors"
                   title="Clear search"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1666,47 +1667,48 @@ function FixturesPageContent() {
               )}
             </div>
             {searchDataLoading && (
-              <div className="text-xs text-gray-400 font-mono">
-                Loading search data...
+              <div className="flex items-center gap-2 text-xs text-gray-400 font-mono animate-pulse">
+                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                Updating...
               </div>
             )}
           </div>
         </div>
 
         <DataTable
-        title="FIXTURES"
-        data={fixturesData}
-        columns={fixturesColumns}
-        getItemId={(fixture) => fixture.id || `${fixture.home_team_name}-${fixture.away_team_name}-${fixture.date}`}
-        emptyMessage=""
-        filterable={true}
-        currentFilters={currentFilters}
-        currentSort={currentSort}
-        onFilterChange={handleFilterChange}
-        onSortChange={handleSortChange}
-        onClearAllFilters={handleClearAllFilters}
-        filterValueApi={getFilterValueApiUrl}
-        expandable={true}
-        singleExpansion={true}
-        renderExpandedContent={renderExpandedContent}
-        getExpandedRowClassName={() => 'bg-gray-850'}
-        onRowExpand={useCallback((fixtureId: string | number, isExpanded: boolean, item?: any) => {
-          if (isExpanded) {
-            setExpandedFixtureId(fixtureId.toString());
-            setCurrentFixtureData(item); // Store the fixture data for lineups/injuries
-            setLineupsExpanded(false); // Reset lineups section when switching fixtures
-            setStandingsExpanded(false); // Reset standings section when switching fixtures
-            setStandingsSortColumn('rank'); // Reset sort to default
-            setStandingsSortDirection('asc');
-          } else {
-            setExpandedFixtureId(null);
-            setCurrentFixtureData(null);
-            setLineupsExpanded(false); // Reset lineups section when row is collapsed
-            setStandingsExpanded(false); // Reset standings section when row is collapsed
-            setStandingsSortColumn('rank'); // Reset sort to default
-            setStandingsSortDirection('asc');
-          }
-        }, [])}
+          title="FIXTURES"
+          data={fixturesData}
+          columns={fixturesColumns}
+          getItemId={(fixture) => fixture.id || `${fixture.home_team_name}-${fixture.away_team_name}-${fixture.date}`}
+          emptyMessage=""
+          filterable={true}
+          currentFilters={currentFilters}
+          currentSort={currentSort}
+          onFilterChange={handleFilterChange}
+          onSortChange={handleSortChange}
+          onClearAllFilters={handleClearAllFilters}
+          filterValueApi={getFilterValueApiUrl}
+          expandable={true}
+          singleExpansion={true}
+          renderExpandedContent={renderExpandedContent}
+          getExpandedRowClassName={() => 'bg-gray-900/80 shadow-inner border-y border-gray-800'}
+          onRowExpand={useCallback((fixtureId: string | number, isExpanded: boolean, item?: any) => {
+            if (isExpanded) {
+              setExpandedFixtureId(fixtureId.toString());
+              setCurrentFixtureData(item); // Store the fixture data for lineups/injuries
+              setLineupsExpanded(false); // Reset lineups section when switching fixtures
+              setStandingsExpanded(false); // Reset standings section when switching fixtures
+              setStandingsSortColumn('rank'); // Reset sort to default
+              setStandingsSortDirection('asc');
+            } else {
+              setExpandedFixtureId(null);
+              setCurrentFixtureData(null);
+              setLineupsExpanded(false); // Reset lineups section when row is collapsed
+              setStandingsExpanded(false); // Reset standings section when row is collapsed
+              setStandingsSortColumn('rank'); // Reset sort to default
+              setStandingsSortDirection('asc');
+            }
+          }, [])}
         />
 
         {/* Edit Modal */}
@@ -1737,30 +1739,41 @@ function FixturesPageContent() {
 
         {/* Manual Pagination Controls */}
         {totalFixturesPages > 1 && (
-          <div className="flex items-center justify-between py-2 border-gray-600">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between py-6 border-t border-gray-800 mt-6 bg-black/50 backdrop-blur-sm rounded-b-xl">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage <= 1 || fixturesLoading}
-                className="px-3 py-1 text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white rounded transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 disabled:text-gray-600 text-gray-300 rounded-lg transition-all border border-gray-700 hover:border-gray-600 disabled:border-gray-800"
               >
-                ← Previous
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                PREV
               </button>
 
-              <span className="text-xs font-mono text-gray-400">
-                Page {currentPage} of {totalFixturesPages} ({totalFixturesCount} total)
-              </span>
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 rounded-lg border border-gray-800">
+                <span className="text-xs font-mono text-gray-400">
+                  PAGE <span className="text-white font-bold">{currentPage}</span> OF <span className="text-white font-bold">{totalFixturesPages}</span>
+                </span>
+                <span className="text-[10px] font-mono text-gray-600 border-l border-gray-700 pl-2 ml-1">
+                  {totalFixturesCount} ITEMS
+                </span>
+              </div>
 
               <button
                 onClick={() => handlePageChange(currentPage + 1)}
                 disabled={currentPage >= totalFixturesPages || fixturesLoading}
-                className="px-3 py-1 text-xs font-mono bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-500 text-white rounded transition-colors"
+                className="flex items-center gap-2 px-4 py-2 text-xs font-mono font-bold bg-gray-800 hover:bg-gray-700 disabled:bg-gray-900 disabled:text-gray-600 text-gray-300 rounded-lg transition-all border border-gray-700 hover:border-gray-600 disabled:border-gray-800"
               >
-                Next →
+                NEXT
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
               </button>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               {/* Page number buttons */}
               {(() => {
                 const pages = []
@@ -1779,11 +1792,10 @@ function FixturesPageContent() {
                       key={i}
                       onClick={() => handlePageChange(i)}
                       disabled={fixturesLoading}
-                      className={`px-2 py-1 text-xs font-mono rounded transition-colors ${
-                        i === currentPage
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:bg-gray-800 disabled:text-gray-500'
-                      }`}
+                      className={`w-8 h-8 flex items-center justify-center text-xs font-mono font-bold rounded-lg transition-all border ${i === currentPage
+                        ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/20'
+                        : 'bg-gray-800 hover:bg-gray-700 text-gray-400 border-gray-700 hover:border-gray-600'
+                        }`}
                     >
                       {i}
                     </button>

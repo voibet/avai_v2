@@ -347,3 +347,4 @@ export async function calculateFairOdds(fixtureIds: number[] | null = null): Pro
   console.log('✅ Fair odds table populated successfully');
   return processedCount;
 }
+

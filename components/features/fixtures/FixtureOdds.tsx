@@ -17,7 +17,7 @@ function areAllOddsValid(values: number[]): boolean {
 interface FixtureOddsProps {
   fixture?: any; // Made flexible to support different fixture formats
   oddsData?: OddsData | null;
-  fairOddsBookies?: Array<{bookie: string, required: boolean, multiplier: number}>;
+  fairOddsBookies?: Array<{ bookie: string, required: boolean, multiplier: number }>;
   filterMethod?: 'above_all' | 'average';
 }
 
@@ -47,7 +47,7 @@ interface OddsData {
 export function FixtureOdds({
   fixture,
   oddsData: propOddsData,
-  fairOddsBookies = [{bookie: 'Pinnacle', required: false, multiplier: 1}],
+  fairOddsBookies = [{ bookie: 'Pinnacle', required: false, multiplier: 1 }],
   filterMethod = 'above_all'
 }: FixtureOddsProps) {
   const [oddsData, setOddsData] = useState<OddsData | null>(propOddsData || null);
@@ -229,7 +229,7 @@ export function FixtureOdds({
   // Helper function to detect odds changes
   const detectOddsChanges = (oldData: OddsData, newData: OddsData): Record<string, 'up' | 'down'> => {
     const changes: Record<string, 'up' | 'down'> = {};
-    
+
     newData.odds.forEach(newBookie => {
       const oldBookie = oldData.odds.find(b => b.bookie === newBookie.bookie);
       if (!oldBookie) return;
@@ -244,7 +244,7 @@ export function FixtureOdds({
       if (oldX12 && newX12 && oldX12.x12 && newX12.x12) {
         ['Home', 'Draw', 'Away'].forEach((outcome, idx) => {
           if (oldX12.x12[idx] !== undefined && newX12.x12[idx] !== undefined &&
-              oldX12.x12[idx] !== newX12.x12[idx]) {
+            oldX12.x12[idx] !== newX12.x12[idx]) {
             const key = `${newBookie.bookie}:1X2:${outcome}`;
             changes[key] = newX12.x12[idx] > oldX12.x12[idx] ? 'up' : 'down';
           }
@@ -264,22 +264,22 @@ export function FixtureOdds({
       const newLines = Array.isArray(newBookie.lines)
         ? newBookie.lines?.[newBookie.lines.length - 1]
         : newBookie.lines;
-      
+
       if (oldAH && newAH && oldLines && newLines && oldLines.ah && newLines.ah &&
-          oldAH.ah_h && oldAH.ah_a && newAH.ah_h && newAH.ah_a) {
+        oldAH.ah_h && oldAH.ah_a && newAH.ah_h && newAH.ah_a) {
         newLines.ah.forEach((line, newLineIdx) => {
           // Find the same line in old lines by value, not by index
           const oldLineIdx = oldLines.ah.indexOf(line);
 
           if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
-              oldAH.ah_h[oldLineIdx] !== undefined && newAH.ah_h[newLineIdx] !== undefined &&
-              oldAH.ah_h[oldLineIdx] !== newAH.ah_h[newLineIdx]) {
+            oldAH.ah_h[oldLineIdx] !== undefined && newAH.ah_h[newLineIdx] !== undefined &&
+            oldAH.ah_h[oldLineIdx] !== newAH.ah_h[newLineIdx]) {
             const key = `${newBookie.bookie}:Asian Handicap:Home:${line}`;
             changes[key] = newAH.ah_h[newLineIdx] > oldAH.ah_h[oldLineIdx] ? 'up' : 'down';
           }
           if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
-              oldAH.ah_a[oldLineIdx] !== undefined && newAH.ah_a[newLineIdx] !== undefined &&
-              oldAH.ah_a[oldLineIdx] !== newAH.ah_a[newLineIdx]) {
+            oldAH.ah_a[oldLineIdx] !== undefined && newAH.ah_a[newLineIdx] !== undefined &&
+            oldAH.ah_a[oldLineIdx] !== newAH.ah_a[newLineIdx]) {
             const key = `${newBookie.bookie}:Asian Handicap:Away:${line}`;
             changes[key] = newAH.ah_a[newLineIdx] > oldAH.ah_a[oldLineIdx] ? 'up' : 'down';
           }
@@ -293,22 +293,22 @@ export function FixtureOdds({
       const newOU = Array.isArray(newBookie.odds_ou)
         ? newBookie.odds_ou?.[newBookie.odds_ou.length - 1]
         : newBookie.odds_ou;
-      
+
       if (oldOU && newOU && oldLines && newLines && oldLines.ou && newLines.ou &&
-          oldOU.ou_o && oldOU.ou_u && newOU.ou_o && newOU.ou_u) {
+        oldOU.ou_o && oldOU.ou_u && newOU.ou_o && newOU.ou_u) {
         newLines.ou.forEach((line, newLineIdx) => {
           // Find the same line in old lines by value, not by index
           const oldLineIdx = oldLines.ou.indexOf(line);
 
           if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
-              oldOU.ou_o[oldLineIdx] !== undefined && newOU.ou_o[newLineIdx] !== undefined &&
-              oldOU.ou_o[oldLineIdx] !== newOU.ou_o[newLineIdx]) {
+            oldOU.ou_o[oldLineIdx] !== undefined && newOU.ou_o[newLineIdx] !== undefined &&
+            oldOU.ou_o[oldLineIdx] !== newOU.ou_o[newLineIdx]) {
             const key = `${newBookie.bookie}:Over/Under:Over:${line}`;
             changes[key] = newOU.ou_o[newLineIdx] > oldOU.ou_o[oldLineIdx] ? 'up' : 'down';
           }
           if (oldLineIdx !== undefined && oldLineIdx >= 0 &&
-              oldOU.ou_u[oldLineIdx] !== undefined && newOU.ou_u[newLineIdx] !== undefined &&
-              oldOU.ou_u[oldLineIdx] !== newOU.ou_u[newLineIdx]) {
+            oldOU.ou_u[oldLineIdx] !== undefined && newOU.ou_u[newLineIdx] !== undefined &&
+            oldOU.ou_u[oldLineIdx] !== newOU.ou_u[newLineIdx]) {
             const key = `${newBookie.bookie}:Over/Under:Under:${line}`;
             changes[key] = newOU.ou_u[newLineIdx] > oldOU.ou_u[oldLineIdx] ? 'up' : 'down';
           }
@@ -318,7 +318,7 @@ export function FixtureOdds({
 
     return changes;
   };
-  
+
   // State for odds chart
   const [chartData, setChartData] = useState<{
     isOpen: boolean;
@@ -542,7 +542,7 @@ export function FixtureOdds({
     const latestOU = Array.isArray(bookmaker.odds_ou)
       ? bookmaker.odds_ou?.find(entry => entry.t === bookmaker.latest_t?.ou_ts) || bookmaker.odds_ou?.[bookmaker.odds_ou.length - 1]
       : bookmaker.odds_ou;
-    
+
     // Find lines entry that matches the latest odds timestamps
     // For OU and AH, we need to find lines that correspond to when those odds were last updated
     let latestLines = null;
@@ -679,14 +679,14 @@ export function FixtureOdds({
         <div className="overflow-x-auto">
           <table className="w-full text-[11px] font-mono">
             <thead>
-              <tr className="bg-black">
-                <th className="px-1 py-0.5 text-left text-gray-300 border border-gray-600"></th>
+              <tr className="bg-gray-900/80 backdrop-blur-sm">
+                <th className="px-2 py-1 text-left text-gray-400 border border-gray-800 font-bold uppercase tracking-wider"></th>
                 {bookmakers.map(bm => (
-                  <th key={bm.bookie} className="px-1 py-0.5 text-center text-gray-300 border border-gray-600 min-w-[60px]">
-                    {bm.bookie === 'Prediction' ? 'Prediction' : bm.bookie}
+                  <th key={bm.bookie} className="px-2 py-1 text-center text-gray-400 border border-gray-800 min-w-[60px] font-bold uppercase tracking-wider">
+                    {bm.bookie === 'Prediction' ? 'Pred' : bm.bookie}
                   </th>
                 ))}
-                <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
+                <th className="px-2 py-1 text-center text-white border border-gray-800 min-w-[60px] font-bold uppercase tracking-wider bg-blue-900/20">
                   Top
                 </th>
               </tr>
@@ -694,7 +694,7 @@ export function FixtureOdds({
             <tbody>
               {outcomes.map((outcome, index) => (
                 <tr key={index}>
-                  <td className="px-1 py-0.5 text-bg-black border border-gray-600 font-medium">
+                  <td className="px-2 py-1 text-gray-300 border border-gray-800 font-medium bg-gray-900/30">
                     {outcome.label}
                   </td>
                   {bookmakers.map(bm => {
@@ -702,7 +702,7 @@ export function FixtureOdds({
                     const flashClass = getFlashClass(bm.bookie, marketName, outcome.label);
                     const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds);
                     return (
-                      <td key={bm.bookie} className={`px-1 py-0.5 text-center border border-gray-600 ${bgColorClass}`}>
+                      <td key={bm.bookie} className={`px-2 py-1 text-center border border-gray-800 ${bgColorClass}`}>
                         {value ? (
                           <button
                             onClick={(e) => handleOddsClick(e, bm.bookie, marketName, outcome.label, undefined, bm.decimals)}
@@ -721,9 +721,9 @@ export function FixtureOdds({
                       </td>
                     );
                   })}
-                  <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                  <td className={`px-2 py-1 text-center border border-gray-800 ${(() => {
                     const topOddsData = getTopOdds(index);
-                    return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-black';
+                    return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-gray-900/30';
                   })()}`}>
                     {(() => {
                       const topOddsData = getTopOdds(index);
@@ -774,8 +774,8 @@ export function FixtureOdds({
       bookmakers.some(bm => {
         const lineIndex = bm.odds.lines?.[linesKey]?.indexOf(line);
         return lineIndex !== undefined && lineIndex >= 0 &&
-               ((bm.odds[side1.oddsKey]?.[lineIndex] && bm.odds[side1.oddsKey][lineIndex] > 0) ||
-                (bm.odds[side2.oddsKey]?.[lineIndex] && bm.odds[side2.oddsKey][lineIndex] > 0));
+          ((bm.odds[side1.oddsKey]?.[lineIndex] && bm.odds[side1.oddsKey][lineIndex] > 0) ||
+            (bm.odds[side2.oddsKey]?.[lineIndex] && bm.odds[side2.oddsKey][lineIndex] > 0));
       })
     );
 
@@ -822,23 +822,23 @@ export function FixtureOdds({
         <div className="overflow-x-auto">
           <table className="w-full text-[11px] font-mono">
             <thead>
-              <tr className="bg-black">
-                <th className="px-1 py-0.5 text-left text-bg-black border border-gray-600">{side1.label}</th>
+              <tr className="bg-gray-900/80 backdrop-blur-sm">
+                <th className="px-2 py-1 text-left text-gray-400 border border-gray-800 font-bold uppercase tracking-wider">{side1.label}</th>
                 {bookmakers.map(bm => (
-                  <th key={`${side1.label}-${bm.bookie}`} className="px-1 py-0.5 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.bookie === 'Prediction' ? 'Prediction' : bm.bookie}
+                  <th key={`${side1.label}-${bm.bookie}`} className="px-2 py-1 text-center text-gray-400 border border-gray-800 min-w-[60px] font-bold uppercase tracking-wider">
+                    {bm.bookie === 'Prediction' ? 'Pred' : bm.bookie}
                   </th>
                 ))}
-                <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
+                <th className="px-2 py-1 text-center text-white border border-gray-800 min-w-[60px] font-bold uppercase tracking-wider bg-blue-900/20">
                   Top
                 </th>
-                <th className="px-1 py-0.5 text-left text-bg-black border border-gray-600">{side2.label}</th>
+                <th className="px-2 py-1 text-left text-gray-400 border border-gray-800 font-bold uppercase tracking-wider">{side2.label}</th>
                 {bookmakers.map(bm => (
-                  <th key={`${side2.label}-${bm.bookie}`} className="px-1 py-0.5 text-center text-bg-black border border-gray-600 min-w-[60px]">
-                    {bm.bookie === 'Prediction' ? 'Prediction' : bm.bookie}
+                  <th key={`${side2.label}-${bm.bookie}`} className="px-2 py-1 text-center text-gray-400 border border-gray-800 min-w-[60px] font-bold uppercase tracking-wider">
+                    {bm.bookie === 'Prediction' ? 'Pred' : bm.bookie}
                   </th>
                 ))}
-                <th className="px-1 py-0.5 text-center text-white border border-gray-600 min-w-[60px] font-bold">
+                <th className="px-2 py-1 text-center text-white border border-gray-800 min-w-[60px] font-bold uppercase tracking-wider bg-blue-900/20">
                   Top
                 </th>
               </tr>
@@ -848,7 +848,7 @@ export function FixtureOdds({
 
                 return (
                   <tr key={line}>
-                    <td className="px-1 py-0.5 text-bg-black border border-gray-600 font-medium">
+                    <td className="px-2 py-1 text-gray-300 border border-gray-800 font-medium bg-gray-900/30">
                       {side1.lineFormatter(line)}
                     </td>
                     {bookmakers.map(bm => {
@@ -856,7 +856,7 @@ export function FixtureOdds({
                       const flashClass = getFlashClass(bm.bookie, marketName, side1.label, line);
                       const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds);
                       return (
-                        <td key={`${side1.label}-${bm.bookie}`} className={`px-1 py-0.5 text-center border border-gray-600 ${bgColorClass}`}>
+                        <td key={`${side1.label}-${bm.bookie}`} className={`px-2 py-1 text-center border border-gray-800 ${bgColorClass}`}>
                           {odds ? (
                             <button
                               onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side1.label, line, bm.decimals)}
@@ -875,9 +875,9 @@ export function FixtureOdds({
                         </td>
                       );
                     })}
-                    <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                    <td className={`px-2 py-1 text-center border border-gray-800 ${(() => {
                       const topOddsData = getTopOdds(line, side1.oddsKey);
-                      return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-black';
+                      return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-gray-900/30';
                     })()}`}>
                       {(() => {
                         const topOddsData = getTopOdds(line, side1.oddsKey);
@@ -890,7 +890,7 @@ export function FixtureOdds({
                         );
                       })()}
                     </td>
-                    <td className="px-1 py-0.5 text-gray-300 border border-gray-600 font-medium">
+                    <td className="px-2 py-1 text-gray-300 border border-gray-800 font-medium bg-gray-900/30">
                       {side2.lineFormatter(line)}
                     </td>
                     {bookmakers.map(bm => {
@@ -898,7 +898,7 @@ export function FixtureOdds({
                       const flashClass = getFlashClass(bm.bookie, marketName, side2.label, line);
                       const bgColorClass = getBookieColorClass(bm.bookie, bm.isFairOdds);
                       return (
-                        <td key={`${side2.label}-${bm.bookie}`} className={`px-1 py-0.5 text-center border border-gray-600 ${bgColorClass}`}>
+                        <td key={`${side2.label}-${bm.bookie}`} className={`px-2 py-1 text-center border border-gray-800 ${bgColorClass}`}>
                           {odds ? (
                             <button
                               onClick={(e) => handleOddsClick(e, bm.bookie, marketName, side2.label, line, bm.decimals)}
@@ -917,9 +917,9 @@ export function FixtureOdds({
                         </td>
                       );
                     })}
-                    <td className={`px-1 py-0.5 text-center border border-gray-600 ${(() => {
+                    <td className={`px-2 py-1 text-center border border-gray-800 ${(() => {
                       const topOddsData = getTopOdds(line, side2.oddsKey);
-                      return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-black';
+                      return topOddsData ? getBookieColorClass(topOddsData.bookie) : 'bg-gray-900/30';
                     })()}`}>
                       {(() => {
                         const topOddsData = getTopOdds(line, side2.oddsKey);

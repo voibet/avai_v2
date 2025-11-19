@@ -61,18 +61,18 @@ export function FixtureExtension({ fixture }: FixtureExtensionProps) {
     <div className="space-y-0">
       {/* INFO Section */}
       <div className="mt-2">
-        <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+        <div className="grid grid-cols-5 gap-0 border-b border-gray-800">
           {/* Headers */}
           {extendedData.map((item) => (
-            <div key={`header-${item.id}`} className="border-r border-gray-700 px-1 py-0.5 text-gray-300 font-bold text-[12px] bg-gray-900 font-mono truncate">
+            <div key={`header-${item.id}`} className="border-r border-gray-800 px-2 py-1 text-gray-400 font-bold text-[10px] uppercase tracking-wider bg-gray-900/50 font-mono truncate">
               {item.label}
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-5 gap-0 border-b border-gray-700">
+        <div className="grid grid-cols-5 gap-0 border-b border-gray-800">
           {/* Values */}
           {extendedData.map((item) => (
-            <div key={`value-${item.id}`} className="border-r border-gray-700 px-1 py-1 text-gray-100 text-[11px] font-mono truncate">
+            <div key={`value-${item.id}`} className="border-r border-gray-800 px-2 py-1.5 text-gray-200 text-[11px] font-mono truncate">
               {item.home && item.away ? `${item.home} - ${item.away}` : (item.home || item.away || item.info || '-')}
             </div>
           ))}
