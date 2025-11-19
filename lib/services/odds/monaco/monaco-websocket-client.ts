@@ -10,11 +10,16 @@ export class MonacoWebSocketClient {
     private reconnectTimeout: NodeJS.Timeout | null = null;
     private subscriptionRequestTimestamps: number[] = [];
     private messageHandlers: MessageHandler[] = [];
-    private marketResubscribeInterval: NodeJS.Timeout | null = null;
+    private suppressSnapshots: boolean = false;
 
     constructor(streamUrl: string, apiClient: MonacoApiClient) {
         this.streamUrl = streamUrl;
         this.apiClient = apiClient;
+
+        this.apiClient.onTokenRefreshed((newToken) => {
+            this.log('Token refreshed, reconnecting WebSocket...');
+            this.connect(true);
+        });
     }
 
     public onMessage(handler: MessageHandler): void {
@@ -42,8 +47,9 @@ export class MonacoWebSocketClient {
         this.subscriptionRequestTimestamps.push(Date.now());
     }
 
-    public async connect(): Promise<void> {
+    public async connect(suppressSnapshots: boolean = false): Promise<void> {
         this.isRunning = true;
+        this.suppressSnapshots = suppressSnapshots;
         if (this.websocket) {
             this.websocket.removeAllListeners();
             this.websocket.terminate();
@@ -77,9 +83,11 @@ export class MonacoWebSocketClient {
                         if (message.type === 'AuthenticationUpdate') {
                             this.log('Authentication Confirmed');
                             await this.subscribeToUpdates();
-                            this.startResubscribeInterval();
                             resolve();
                         } else {
+                            if (this.suppressSnapshots && message.updateType === 'SNAPSHOT') {
+                                return;
+                            }
                             this.messageHandlers.forEach(handler => handler(message));
                         }
                     } catch (error) {
@@ -130,25 +138,7 @@ export class MonacoWebSocketClient {
         }
     }
 
-    private startResubscribeInterval(): void {
-        if (this.marketResubscribeInterval) clearInterval(this.marketResubscribeInterval);
 
-        this.marketResubscribeInterval = setInterval(async () => {
-            try {
-                if (this.websocket && this.websocket.readyState === 1) {
-                    await this.checkSubscriptionRateLimit();
-                    this.websocket.send(JSON.stringify({
-                        action: 'subscribe',
-                        subscriptionType: 'MarketStatusUpdate',
-                        subscriptionIds: ['*']
-                    }));
-                    this.log('Resubscribed to MarketStatusUpdate (*)');
-                }
-            } catch (error) {
-                console.error('Resubscription error:', error);
-            }
-        }, 5 * 60 * 1000);
-    }
 
     private reconnect(): void {
         if (this.reconnectTimeout) return;
@@ -176,9 +166,6 @@ export class MonacoWebSocketClient {
             clearTimeout(this.reconnectTimeout);
             this.reconnectTimeout = null;
         }
-        if (this.marketResubscribeInterval) {
-            clearInterval(this.marketResubscribeInterval);
-            this.marketResubscribeInterval = null;
-        }
+
     }
 }

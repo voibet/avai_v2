@@ -104,12 +104,25 @@ export class MonacoApiClient {
         }
     }
 
+    private tokenRefreshCallbacks: ((token: string) => void)[] = [];
+
+    public onTokenRefreshed(callback: (token: string) => void): void {
+        this.tokenRefreshCallbacks.push(callback);
+    }
+
+    private notifyTokenRefreshed(token: string): void {
+        this.tokenRefreshCallbacks.forEach(cb => cb(token));
+    }
+
     private updateSession(session: MonacoSession): void {
         this.accessToken = session.accessToken;
         this.refreshToken = session.refreshToken;
         this.accessExpiresAt = new Date(session.accessExpiresAt);
         this.refreshExpiresAt = new Date(session.refreshExpiresAt);
         this.scheduleTokenRefresh();
+        if (this.accessToken) {
+            this.notifyTokenRefreshed(this.accessToken);
+        }
     }
 
     private scheduleTokenRefresh(): void {
