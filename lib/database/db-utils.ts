@@ -125,7 +125,7 @@ export async function savePredictions(predictions: PredictionData[]): Promise<nu
     // Build bulk upsert query - MUCH faster than individual inserts
     const values: any[] = [];
     const valueStrings: string[] = [];
-    
+
     predictions.forEach((pred, idx) => {
       const offset = idx * 3;
       valueStrings.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, NOW(), NOW())`);

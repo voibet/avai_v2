@@ -388,7 +388,17 @@ export class MonacoDatabaseService {
         updatedLatestT.stakes_ts = timestamp;
 
         if (Object.keys(maxStakesEntry).length > 1) {
-            maxStakesData = [maxStakesEntry];
+            // Get the latest existing max stakes to preserve other market types
+            let currentMaxStakes = {};
+            if (maxStakesData.length > 0) {
+                // Sort by timestamp descending to get the latest
+                maxStakesData.sort((a: any, b: any) => b.t - a.t);
+                currentMaxStakes = maxStakesData[0];
+            }
+
+            // Merge new values into existing (overwriting with new timestamp and new market values)
+            const mergedMaxStakes = { ...currentMaxStakes, ...maxStakesEntry };
+            maxStakesData = [mergedMaxStakes];
         }
 
         const jsonData = JSON.stringify(oddsArray);
@@ -456,7 +466,16 @@ export class MonacoDatabaseService {
         }
 
         oddsArray = this.mergeOddsEntry(oddsArray, zeroEntry);
-        maxStakesData = [zeroMaxStakesEntry];
+
+        // Get the latest existing max stakes to preserve other market types
+        let currentMaxStakes = {};
+        if (maxStakesData.length > 0) {
+            maxStakesData.sort((a: any, b: any) => b.t - a.t);
+            currentMaxStakes = maxStakesData[0];
+        }
+
+        const mergedMaxStakes = { ...currentMaxStakes, ...zeroMaxStakesEntry };
+        maxStakesData = [mergedMaxStakes];
 
         const tsKey = marketType === 'x12' ? 'x12_ts' : marketType === 'ah' ? 'ah_ts' : 'ou_ts';
         latestT[tsKey] = timestamp;
