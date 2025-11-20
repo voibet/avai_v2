@@ -657,37 +657,68 @@ export function FixtureOdds({
     if (!bookmakerData) return null;
 
     const nowSeconds = Date.now() / 1000;
-    const TIME_WINDOW = 300; // 300 seconds
+    const TIME_WINDOW = 300; // 300 seconds (5 minutes)
 
     // Helper to check change in history
     const checkHistoryForChange = (history: Array<{ t: number; value: number | null }>) => {
-      if (history.length < 2) return null;
+      if (history.length === 0) return null;
 
       const latest = history[history.length - 1];
+      const latestVal = latest.value;
+      const isLatestValid = latestVal !== null && latestVal > 0;
 
       // Check if the latest update is within the time window
       if (nowSeconds - latest.t > TIME_WINDOW) return null;
 
-      // Find the last value that was different
+      // Find the most recent previous entry (not the current one)
+      let mostRecentPrev = history.length >= 2 ? history[history.length - 2] : null;
+
+      // Find the entry from ~5 minutes ago (or closest before that)
+      const fiveMinutesAgo = latest.t - TIME_WINDOW;
+      let fiveMinutesPrev = null;
+
       for (let i = history.length - 2; i >= 0; i--) {
-        const prev = history[i];
-        const latestVal = latest.value;
-        const prevVal = prev.value;
-
-        // Check if values are different
-        // We consider them different if one is null and other is not, or if both are numbers and differ by > 0.001
-        const isLatestValid = latestVal !== null && latestVal > 0;
-        const isPrevValid = prevVal !== null && prevVal > 0;
-
-        if (isLatestValid !== isPrevValid) {
-          if (isLatestValid) return 'added';
-          return 'removed';
-        }
-
-        if (isLatestValid && isPrevValid && latestVal && prevVal && Math.abs(latestVal - prevVal) > 0.001) {
-          return latestVal > prevVal ? 'up' : 'down';
+        if (history[i].t <= fiveMinutesAgo) {
+          fiveMinutesPrev = history[i];
+          break;
         }
       }
+
+      // Case 1: Current odds are null/invalid → show "removed" (-) only if most recent previous was valid
+      if (!isLatestValid) {
+        // Check the most recent previous entry
+        if (mostRecentPrev && mostRecentPrev.value !== null && mostRecentPrev.value > 0) {
+          return 'removed';
+        }
+        return null;
+      }
+
+      // If we have a most recent previous entry, prioritize comparing to that
+      if (mostRecentPrev) {
+        const mostRecentPrevVal = mostRecentPrev.value;
+        const isMostRecentPrevValid = mostRecentPrevVal !== null && mostRecentPrevVal > 0;
+
+        // Case 2: Most recent change was from null to valid → show "added" (+)
+        if (!isMostRecentPrevValid) {
+          return 'added';
+        }
+
+        // Case 3 & 4: Most recent change was a value change → show up/down
+        if (Math.abs(latestVal - mostRecentPrevVal) > 0.001) {
+          return latestVal > mostRecentPrevVal ? 'up' : 'down';
+        }
+      }
+
+      // Fallback: No recent previous entry, check 5-minute-old entry
+      if (!fiveMinutesPrev || fiveMinutesPrev.value === null || fiveMinutesPrev.value <= 0) {
+        return 'added';
+      }
+
+      const fiveMinutesVal = fiveMinutesPrev.value;
+      if (Math.abs(latestVal - fiveMinutesVal) > 0.001) {
+        return latestVal > fiveMinutesVal ? 'up' : 'down';
+      }
+
       return null;
     };
 

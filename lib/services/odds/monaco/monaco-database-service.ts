@@ -38,7 +38,7 @@ export class MonacoDatabaseService {
             merged.push(newEntry);
         }
 
-        return merged.sort((a, b) => a.t - b.t);
+        return merged.sort((a, b) => b.t - a.t);
     }
 
     public async ensureFixtureOddsRecord(fixtureId: number, markets: MonacoMarket[], mapMarketType: (id: string) => string | null, getHandicapValue: (m: MonacoMarket) => number, getTotalValue: (m: MonacoMarket) => number): Promise<Map<string, number> | undefined> {
@@ -388,7 +388,7 @@ export class MonacoDatabaseService {
         updatedLatestT.stakes_ts = timestamp;
 
         if (Object.keys(maxStakesEntry).length > 1) {
-            maxStakesData = this.mergeOddsEntry(maxStakesData, maxStakesEntry);
+            maxStakesData = [maxStakesEntry];
         }
 
         const jsonData = JSON.stringify(oddsArray);
@@ -456,7 +456,7 @@ export class MonacoDatabaseService {
         }
 
         oddsArray = this.mergeOddsEntry(oddsArray, zeroEntry);
-        maxStakesData = this.mergeOddsEntry(maxStakesData, zeroMaxStakesEntry);
+        maxStakesData = [zeroMaxStakesEntry];
 
         const tsKey = marketType === 'x12' ? 'x12_ts' : marketType === 'ah' ? 'ah_ts' : 'ou_ts';
         latestT[tsKey] = timestamp;

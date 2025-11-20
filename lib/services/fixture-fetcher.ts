@@ -642,8 +642,6 @@ export class FixtureFetcher {
    * If so, and if it hasn't run yet today, it triggers a fixture update for all current seasons.
    */
   public static startNightlyScheduler(): void {
-    log('Starting nightly fixture update scheduler (runs between 03:00 - 04:00)...');
-
     // Check every 30 minutes
     setInterval(async () => {
       const now = new Date();

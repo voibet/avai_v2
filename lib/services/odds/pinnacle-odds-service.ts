@@ -115,7 +115,8 @@ class PinnacleOddsService {
         event.event_id,
         period,
         event.home,
-        event.away
+        event.away,
+        existingData
       );
       return { updated: true };
     }

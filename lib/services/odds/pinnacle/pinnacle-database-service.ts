@@ -184,6 +184,23 @@ export class PinnacleDatabaseService {
     }
 
     /**
+     * Helper to merge new entry into history, keeping newest first
+     */
+    private mergeHistory(existing: any[], newEntry: any): any[] {
+        const merged = [...(Array.isArray(existing) ? existing : [])];
+        const existingIndex = merged.findIndex(entry => entry.t === newEntry.t);
+
+        if (existingIndex >= 0) {
+            merged[existingIndex] = newEntry;
+        } else {
+            merged.push(newEntry);
+        }
+
+        // Sort newest first (descending timestamp)
+        return merged.sort((a, b) => b.t - a.t);
+    }
+
+    /**
      * Creates new odds entry for a fixture
      */
     async createNewOddsEntry(
@@ -191,7 +208,8 @@ export class PinnacleDatabaseService {
         eventId: number,
         period: PinnaclePeriod,
         homeTeam: string,
-        awayTeam: string
+        awayTeam: string,
+        existingData?: any
     ): Promise<void> {
         const timestamp = Math.floor(Date.now() / 1000);
 
@@ -204,24 +222,26 @@ export class PinnacleDatabaseService {
         const createdFields: string[] = [];
 
         // Prepare X12 odds (money line)
-        let x12Odds: any[] = [];
+        let x12Odds: any[] = existingData?.oddsX12 || [];
         if (period.money_line) {
-            x12Odds.push({
+            const newEntry = {
                 t: timestamp,
                 x12: [
                     transformOdds(period.money_line.home),
                     transformOdds(period.money_line.draw),
                     transformOdds(period.money_line.away)
                 ]
-            });
+            };
+            x12Odds = this.mergeHistory(x12Odds, newEntry);
             createdFields.push('x12');
         }
 
         // Prepare AH odds (spreads)
-        let ahOdds: any[] = [];
-        let ouOdds: any[] = [];
-        let lines: any[] = [];
-        let ids: any[] = [];
+        // Prepare AH odds (spreads)
+        let ahOdds: any[] = existingData?.oddsAh || [];
+        let ouOdds: any[] = existingData?.oddsOu || [];
+        let lines: any[] = existingData?.lines || [];
+        let ids: any[] = existingData?.ids || [];
 
         // Collect combined line data
         let combinedLineEntry: any = { t: timestamp };
@@ -243,7 +263,7 @@ export class PinnacleDatabaseService {
                 ahAltLineIds.push(spread.alt_line_id || 0);
             });
 
-            ahOdds.push({
+            ahOdds = this.mergeHistory(ahOdds, {
                 t: timestamp,
                 ah_h: ahHome,
                 ah_a: ahAway
@@ -270,7 +290,7 @@ export class PinnacleDatabaseService {
                 ouAltLineIds.push(total.alt_line_id || 0);
             });
 
-            ouOdds.push({
+            ouOdds = this.mergeHistory(ouOdds, {
                 t: timestamp,
                 ou_o: ouOver,
                 ou_u: ouUnder
@@ -283,19 +303,19 @@ export class PinnacleDatabaseService {
 
         // Add combined entries
         if (combinedLineEntry.ah || combinedLineEntry.ou) {
-            lines.push(combinedLineEntry);
+            lines = this.mergeHistory(lines, combinedLineEntry);
             createdFields.push('lines');
         }
 
         if (Object.keys(combinedIdEntry.line_ids).length > 0) {
-            ids.push(combinedIdEntry);
+            ids = this.mergeHistory(ids, combinedIdEntry);
             createdFields.push('ids');
         }
 
         // Prepare max stakes
-        let maxStakes: any[] = [];
+        let maxStakes: any[] = existingData?.maxStakes || [];
         if (period.meta) {
-            maxStakes.push({
+            maxStakes = this.mergeHistory(maxStakes, {
                 t: timestamp,
                 max_stake_x12: period.meta.max_money_line ? [period.meta.max_money_line] : [],
                 max_stake_ah: period.meta.max_spread ? { h: [period.meta.max_spread], a: [period.meta.max_spread] } : {},

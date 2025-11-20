@@ -29,9 +29,7 @@ export function initializeSchedulers() {
     startAutoRefreshScheduler();
 
     // Start nightly fixture update scheduler
-    console.log('About to import and start FixtureFetcher nightly scheduler...');
     import('@/lib/services/fixture-fetcher').then(({ FixtureFetcher }) => {
-      console.log('FixtureFetcher imported successfully, starting scheduler...');
       FixtureFetcher.startNightlyScheduler();
     }).catch(err => {
       console.error('Failed to start nightly fixture scheduler:', err);
