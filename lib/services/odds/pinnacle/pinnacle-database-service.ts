@@ -153,34 +153,16 @@ export class PinnacleDatabaseService {
         }
     }
 
-    /**
-     * Helper to check if two arrays are deeply equal
-     */
-    private arraysEqual(a: any[], b: any[]): boolean {
-        if (a.length !== b.length) return false;
-        return a.every((val, index) => {
-            if (Array.isArray(val) && Array.isArray(b[index])) {
-                return this.arraysEqual(val, b[index]);
-            }
-            if (typeof val === 'object' && typeof b[index] === 'object') {
-                return JSON.stringify(val) === JSON.stringify(b[index]);
-            }
-            return val === b[index];
-        });
-    }
 
     /**
      * Helper to check if new odds data is different from the last entry
      */
-    private isNewDataDifferent(existingArray: any[], newData: any): boolean {
-        if (existingArray.length === 0) return true;
-        const lastEntry = existingArray[existingArray.length - 1];
-
-        // Remove timestamp from comparison
-        const { t: _, ...lastData } = lastEntry;
-        const { t: __, ...newDataWithoutTime } = newData;
-
-        return !this.arraysEqual([lastData], [newDataWithoutTime]);
+    private isDifferent(lastEntry: any, newEntry: any): boolean {
+        if (!lastEntry || !newEntry) return true;
+        // Compare content without timestamp 't'
+        const { t: t1, ...data1 } = lastEntry;
+        const { t: t2, ...data2 } = newEntry;
+        return JSON.stringify(data1) !== JSON.stringify(data2);
     }
 
     /**
@@ -191,7 +173,8 @@ export class PinnacleDatabaseService {
         eventId: number,
         period: PinnaclePeriod,
         homeTeam: string,
-        awayTeam: string
+        awayTeam: string,
+        existingData?: any
     ): Promise<void> {
         const timestamp = Math.floor(Date.now() / 1000);
 
@@ -304,8 +287,72 @@ export class PinnacleDatabaseService {
             createdFields.push('max_stakes');
         }
 
+        // Merge with history if available
+        let finalX12 = x12Odds;
+        let finalAh = ahOdds;
+        let finalOu = ouOdds;
+
+        if (existingData) {
+            // X12 History
+            if (existingData.oddsX12 && Array.isArray(existingData.oddsX12)) {
+                if (x12Odds.length > 0) {
+                    const last = existingData.oddsX12[existingData.oddsX12.length - 1];
+                    if (this.isDifferent(last, x12Odds[0])) {
+                        finalX12 = [...existingData.oddsX12, x12Odds[0]];
+                    } else {
+                        finalX12 = existingData.oddsX12;
+                    }
+                } else {
+                    finalX12 = existingData.oddsX12;
+                }
+            }
+
+            // AH History
+            if (existingData.oddsAh && Array.isArray(existingData.oddsAh)) {
+                if (ahOdds.length > 0) {
+                    const last = existingData.oddsAh[existingData.oddsAh.length - 1];
+                    if (this.isDifferent(last, ahOdds[0])) {
+                        finalAh = [...existingData.oddsAh, ahOdds[0]];
+                    } else {
+                        finalAh = existingData.oddsAh;
+                    }
+                } else {
+                    finalAh = existingData.oddsAh;
+                }
+            }
+
+            // OU History
+            if (existingData.oddsOu && Array.isArray(existingData.oddsOu)) {
+                if (ouOdds.length > 0) {
+                    const last = existingData.oddsOu[existingData.oddsOu.length - 1];
+                    if (this.isDifferent(last, ouOdds[0])) {
+                        finalOu = [...existingData.oddsOu, ouOdds[0]];
+                    } else {
+                        finalOu = existingData.oddsOu;
+                    }
+                } else {
+                    finalOu = existingData.oddsOu;
+                }
+            }
+        }
+
+        // Max Stakes History
+        let finalMaxStakes = maxStakes;
+        if (existingData && existingData.maxStakes && Array.isArray(existingData.maxStakes)) {
+            if (maxStakes.length > 0) {
+                const last = existingData.maxStakes[existingData.maxStakes.length - 1];
+                if (this.isDifferent(last, maxStakes[0])) {
+                    finalMaxStakes = [...existingData.maxStakes, maxStakes[0]];
+                } else {
+                    finalMaxStakes = existingData.maxStakes;
+                }
+            } else {
+                finalMaxStakes = existingData.maxStakes;
+            }
+        }
+
         // Prepare latest_t
-        const latestT: any = {};
+        const latestT: any = existingData?.latestT || {};
         if (x12Odds.length > 0) latestT.x12_ts = timestamp;
         if (ahOdds.length > 0) latestT.ah_ts = timestamp;
         if (ouOdds.length > 0) latestT.ou_ts = timestamp;
@@ -336,12 +383,12 @@ export class PinnacleDatabaseService {
             eventId,
             'Pinnacle',
             3, // decimals = 3
-            x12Odds.length > 0 ? JSON.stringify(x12Odds) : null,
-            ahOdds.length > 0 ? JSON.stringify(ahOdds) : null,
-            ouOdds.length > 0 ? JSON.stringify(ouOdds) : null,
+            finalX12.length > 0 ? JSON.stringify(finalX12) : null,
+            finalAh.length > 0 ? JSON.stringify(finalAh) : null,
+            finalOu.length > 0 ? JSON.stringify(finalOu) : null,
             lines.length > 0 ? JSON.stringify(lines) : null,
             ids.length > 0 ? JSON.stringify(ids) : null,
-            maxStakes.length > 0 ? JSON.stringify(maxStakes) : null,
+            finalMaxStakes.length > 0 ? JSON.stringify(finalMaxStakes) : null,
             JSON.stringify(latestT)
         ]);
 

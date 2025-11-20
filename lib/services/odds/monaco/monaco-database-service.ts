@@ -115,7 +115,12 @@ export class MonacoDatabaseService {
         const timestamp = Math.floor(Date.now() / 1000);
         const linesEntry: any = { t: timestamp };
         const idsEntry: any = { t: timestamp, line_id: '', line_ids: {} as Record<string, string[]> };
-        const maxStakesEntry: any = { t: timestamp };
+        const maxStakesEntry: any = {
+            t: timestamp,
+            max_stake_x12: [0, 0, 0],
+            max_stake_ah: { h: [], a: [] },
+            max_stake_ou: { o: [], u: [] }
+        };
         const lineIndexMap = new Map<string, number>();
 
         const x12Markets: MonacoMarket[] = [];
@@ -125,11 +130,6 @@ export class MonacoDatabaseService {
         markets.forEach(market => {
             const marketType = mapMarketType(market.marketTypeId);
             if (!marketType) return;
-
-            if (!idsEntry.line_ids[marketType]) {
-                idsEntry.line_ids[marketType] = [];
-            }
-            idsEntry.line_ids[marketType].push(market.id);
 
             if (marketType === 'x12') {
                 x12Markets.push(market);
@@ -155,23 +155,31 @@ export class MonacoDatabaseService {
                 h: new Array(sortedAh.length).fill(0),
                 a: new Array(sortedAh.length).fill(0)
             };
+            idsEntry.line_ids.ah = [];
 
             sortedAh.forEach((item, lineIndex) => {
                 const market = markets.find(m => m.id === item.market.id);
-                if (market?.prices) {
-                    market.prices.forEach(price => {
-                        if (price.side === 'Against') {
-                            const outcomeIndex = market.marketOutcomes.findIndex(o => o.id === price.outcomeId);
-                            if (outcomeIndex >= 0) {
-                                const isHome = outcomeIndex % 2 === 0;
-                                if (isHome) {
-                                    maxStakesEntry.max_stake_ah.h[lineIndex] += price.liquidity;
-                                } else {
-                                    maxStakesEntry.max_stake_ah.a[lineIndex] += price.liquidity;
+                if (market) {
+                    if (market.marketOutcomes) {
+                        const sortedOutcomes = [...market.marketOutcomes].sort((a, b) => a.ordering - b.ordering);
+                        sortedOutcomes.forEach(o => idsEntry.line_ids.ah.push(o.id));
+                    }
+
+                    if (market.prices) {
+                        market.prices.forEach(price => {
+                            if (price.side === 'Against') {
+                                const outcomeIndex = market.marketOutcomes.findIndex(o => o.id === price.outcomeId);
+                                if (outcomeIndex >= 0) {
+                                    const isHome = outcomeIndex % 2 === 0;
+                                    if (isHome) {
+                                        maxStakesEntry.max_stake_ah.h[lineIndex] += price.liquidity;
+                                    } else {
+                                        maxStakesEntry.max_stake_ah.a[lineIndex] += price.liquidity;
+                                    }
                                 }
                             }
-                        }
-                    });
+                        });
+                    }
                 }
                 lineIndexMap.set(item.market.id, lineIndex);
             });
@@ -183,37 +191,54 @@ export class MonacoDatabaseService {
                 o: new Array(sortedOu.length).fill(0),
                 u: new Array(sortedOu.length).fill(0)
             };
+            idsEntry.line_ids.ou = [];
 
             sortedOu.forEach((item, lineIndex) => {
                 const market = markets.find(m => m.id === item.market.id);
-                if (market?.prices) {
-                    market.prices.forEach(price => {
-                        if (price.side === 'Against') {
-                            const outcomeIndex = market.marketOutcomes.findIndex(o => o.id === price.outcomeId);
-                            if (outcomeIndex >= 0) {
-                                const isOver = outcomeIndex % 2 === 0;
-                                if (isOver) {
-                                    maxStakesEntry.max_stake_ou.o[lineIndex] += price.liquidity;
-                                } else {
-                                    maxStakesEntry.max_stake_ou.u[lineIndex] += price.liquidity;
+                if (market) {
+                    if (market.marketOutcomes) {
+                        const sortedOutcomes = [...market.marketOutcomes].sort((a, b) => a.ordering - b.ordering);
+                        sortedOutcomes.forEach(o => idsEntry.line_ids.ou.push(o.id));
+                    }
+
+                    if (market.prices) {
+                        market.prices.forEach(price => {
+                            if (price.side === 'Against') {
+                                const outcomeIndex = market.marketOutcomes.findIndex(o => o.id === price.outcomeId);
+                                if (outcomeIndex >= 0) {
+                                    const isOver = outcomeIndex % 2 === 0;
+                                    if (isOver) {
+                                        maxStakesEntry.max_stake_ou.o[lineIndex] += price.liquidity;
+                                    } else {
+                                        maxStakesEntry.max_stake_ou.u[lineIndex] += price.liquidity;
+                                    }
                                 }
                             }
-                        }
-                    });
+                        });
+                    }
                 }
                 lineIndexMap.set(item.market.id, lineIndex);
             });
         }
 
         if (x12Markets.length > 0) {
-            maxStakesEntry.max_stake_x12 = [0];
+            maxStakesEntry.max_stake_x12 = [0, 0, 0];
             idsEntry.line_id = x12Markets[0].id;
+            idsEntry.line_ids.x12 = [];
 
             x12Markets.forEach(market => {
+                if (market.marketOutcomes) {
+                    const sortedOutcomes = [...market.marketOutcomes].sort((a, b) => a.ordering - b.ordering);
+                    sortedOutcomes.forEach(o => idsEntry.line_ids.x12.push(o.id));
+                }
+
                 if (market.prices) {
                     market.prices.forEach(price => {
                         if (price.side === 'Against') {
-                            maxStakesEntry.max_stake_x12[0] += price.liquidity;
+                            const outcomeIndex = market.marketOutcomes.findIndex(o => o.id === price.outcomeId);
+                            if (outcomeIndex >= 0 && outcomeIndex < 3) {
+                                maxStakesEntry.max_stake_x12[outcomeIndex] += price.liquidity;
+                            }
                         }
                     });
                 }
@@ -269,12 +294,14 @@ export class MonacoDatabaseService {
         let maxStakesData = existingResult.rows.length > 0 ? this.parseJsonArray(existingResult.rows[0].max_stakes) : [];
         const currentLatestT = existingResult.rows.length > 0 && existingResult.rows[0].latest_t ? existingResult.rows[0].latest_t : {};
 
+        const latestLinesEntry = linesData.length > 0 ? linesData[linesData.length - 1] : null;
+
         const newOddsEntry: any = { t: timestamp };
         const maxStakesEntry: any = { t: timestamp };
 
         if (marketType === 'x12') {
             const x12Prices = [0, 0, 0];
-            maxStakesEntry.max_stake_x12 = [0];
+            maxStakesEntry.max_stake_x12 = [0, 0, 0];
 
             Object.keys(orderBook).forEach(outcomeId => {
                 // Find mapping for this outcome
@@ -290,14 +317,12 @@ export class MonacoDatabaseService {
                     const bestLevel = orderBook[outcomeId]?.[0];
                     if (bestLevel) {
                         x12Prices[outcomeIndex] = this.transformPrice(bestLevel.price);
-                        maxStakesEntry.max_stake_x12[0] = Math.max(maxStakesEntry.max_stake_x12[0], bestLevel.liquidity);
+                        maxStakesEntry.max_stake_x12[outcomeIndex] = bestLevel.liquidity;
                     }
                 }
             });
             newOddsEntry.x12 = x12Prices;
         } else {
-            const latestLinesEntry = linesData.length > 0 ? linesData[linesData.length - 1] : null;
-
             if (marketType === 'ah' && latestLinesEntry?.ah) {
                 newOddsEntry.ah_h = new Array(latestLinesEntry.ah.length).fill(0);
                 newOddsEntry.ah_a = new Array(latestLinesEntry.ah.length).fill(0);
@@ -398,6 +423,17 @@ export class MonacoDatabaseService {
 
             // Merge new values into existing (overwriting with new timestamp and new market values)
             const mergedMaxStakes = { ...currentMaxStakes, ...maxStakesEntry };
+
+            if (!mergedMaxStakes.max_stake_x12) mergedMaxStakes.max_stake_x12 = [0, 0, 0];
+            if (!mergedMaxStakes.max_stake_ah) {
+                const len = latestLinesEntry?.ah?.length || 0;
+                mergedMaxStakes.max_stake_ah = { h: new Array(len).fill(0), a: new Array(len).fill(0) };
+            }
+            if (!mergedMaxStakes.max_stake_ou) {
+                const len = latestLinesEntry?.ou?.length || 0;
+                mergedMaxStakes.max_stake_ou = { o: new Array(len).fill(0), u: new Array(len).fill(0) };
+            }
+
             maxStakesData = [mergedMaxStakes];
         }
 
