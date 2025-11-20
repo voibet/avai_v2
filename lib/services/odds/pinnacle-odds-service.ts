@@ -44,20 +44,33 @@ class PinnacleOddsService {
       this.dbService.isLeagueKnown(event.league_id)
     );
 
+    // Batch lookup existing odds (1 query instead of N)
+    const eventIds = filteredEvents.map(event => event.event_id);
+    const existingOddsMap = await this.dbService.getExistingOddsMap(eventIds);
+    const existingOddsData = await this.dbService.getBatchExistingOdds(
+      Array.from(existingOddsMap.keys())
+    );
+
+    // Process all events in parallel
+    const results = await Promise.allSettled(
+      filteredEvents.map(event =>
+        this.processEventOdds(event, existingOddsMap, existingOddsData)
+      )
+    );
+
     let eventsProcessed = 0;
     let fixturesUpdated = 0;
 
-    for (const event of filteredEvents) {
-      try {
-        const result = await this.processEventOdds(event);
+    results.forEach(result => {
+      if (result.status === 'fulfilled') {
         eventsProcessed++;
-        if (result.updated) {
+        if (result.value.updated) {
           fixturesUpdated++;
         }
-      } catch (error) {
-        console.error(`Error processing event ${event.event_id}:`, error);
+      } else {
+        console.error('Error processing event:', result.reason);
       }
-    }
+    });
 
     return { eventsProcessed, fixturesUpdated };
   }
@@ -65,7 +78,11 @@ class PinnacleOddsService {
   /**
    * Processes odds for a single event
    */
-  private async processEventOdds(event: PinnacleEvent): Promise<{ updated: boolean }> {
+  private async processEventOdds(
+    event: PinnacleEvent,
+    existingOddsMap: Map<number, number>,
+    existingOddsData: Map<number, any>
+  ): Promise<{ updated: boolean }> {
 
     const period = event.periods?.num_0;
     if (!period) {
@@ -87,12 +104,19 @@ class PinnacleOddsService {
       return { updated: false };
     }
 
-    // Check if we already have odds for this Pinnacle event
-    const hasExisting = await this.dbService.hasExistingOdds(event.event_id);
+    // Check pre-fetched data instead of querying
+    const hasExisting = existingOddsMap.has(event.event_id);
 
     if (hasExisting) {
-      // Update existing odds
-      await this.dbService.updateExistingOdds(event.event_id, period, event.home, event.away);
+      // Use createNewOddsEntry for updates too (it uses UPSERT)
+      const existingData = existingOddsData.get(event.event_id)!;
+      await this.dbService.createNewOddsEntry(
+        existingData.fixtureId,
+        event.event_id,
+        period,
+        event.home,
+        event.away
+      );
       return { updated: true };
     }
 

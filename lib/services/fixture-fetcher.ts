@@ -134,14 +134,14 @@ export class FixtureFetcher {
     return this.fetchAndUpdateFixtures(leagueSeasons, onProgress);
   }
 
-  private async convertSelectedSeasonsToLeagueSeasons(selectedSeasons: Record<string, string[]>): Promise<Array<{id: number, name: string, season: number}>> {
+  private async convertSelectedSeasonsToLeagueSeasons(selectedSeasons: Record<string, string[]>): Promise<Array<{ id: number, name: string, season: number }>> {
     const leagueIds = Object.keys(selectedSeasons).map(id => parseInt(id));
     const leagueResult = await executeQuery(`
       SELECT id, name FROM football_leagues WHERE id = ANY($1)
     `, [leagueIds]);
 
     const leagueMap = new Map(leagueResult.rows.map(row => [row.id, row.name]));
-    const leagueSeasons: Array<{id: number, name: string, season: number}> = [];
+    const leagueSeasons: Array<{ id: number, name: string, season: number }> = [];
 
     Object.entries(selectedSeasons).forEach(([leagueId, seasons]) => {
       const leagueIdNum = parseInt(leagueId);
@@ -160,7 +160,7 @@ export class FixtureFetcher {
   }
 
   async fetchAndUpdateFixtures(
-    leagueSeasons: Array<{id: number, name: string, season: number}>,
+    leagueSeasons: Array<{ id: number, name: string, season: number }>,
     onProgress?: (info: string) => void
   ): Promise<{ success: boolean; message: string; updatedCount?: number; statusChangedToPastCount?: number; updatedFixtureIds?: number[] }> {
     try {
@@ -235,12 +235,12 @@ export class FixtureFetcher {
     return null;
   }
 
-  private async getCurrentLeaguesAndSeasons(): Promise<Array<{id: number, name: string, season: number}>> {
+  private async getCurrentLeaguesAndSeasons(): Promise<Array<{ id: number, name: string, season: number }>> {
     // Get all leagues
     const result = await executeQuery<League>('SELECT id, name, seasons FROM football_leagues');
     const leagues: League[] = result.rows;
 
-    const currentLeagues: Array<{id: number, name: string, season: number}> = [];
+    const currentLeagues: Array<{ id: number, name: string, season: number }> = [];
 
     for (const league of leagues) {
       if (!league.seasons) continue;
@@ -413,7 +413,7 @@ export class FixtureFetcher {
     const { queries, statusChanges } = await this.buildFixtureUpsertQueries(validFixtures, teamCountryMap);
     const results = await executeTransaction(queries, 120000);
     const { updatedCount, statusChangedToPastCount, updatedFixtureIds } = this.processTransactionResults(results, validFixtures, statusChanges);
-    
+
     return { updatedCount, statusChangedToPastCount, updatedFixtureIds };
   }
 
@@ -458,8 +458,8 @@ export class FixtureFetcher {
       const query = this.buildFixtureUpsertQuery(fixture, teamCountryMap, existingFixture);
 
       const isNewlyInPast = existingFixture &&
-                           !IN_PAST.includes(existingFixture.status_short.toLowerCase()) &&
-                           IN_PAST.includes(fixture.fixture.status.short.toLowerCase());
+        !IN_PAST.includes(existingFixture.status_short.toLowerCase()) &&
+        IN_PAST.includes(fixture.fixture.status.short.toLowerCase());
       statusChanges.push(!!isNewlyInPast);
 
       queries.push(query);
@@ -632,5 +632,47 @@ export class FixtureFetcher {
       console.error(`Error removing orphaned fixtures for league ${leagueId}, season ${season}:`, error);
       return 0;
     }
+  }
+
+  // Static property to track the last run date of the nightly scheduler
+  private static lastNightlyRunDate: string | null = null;
+
+  /**
+   * Starts a scheduler that checks every 30 minutes if it's between 03:00 and 04:00.
+   * If so, and if it hasn't run yet today, it triggers a fixture update for all current seasons.
+   */
+  public static startNightlyScheduler(): void {
+    log('Starting nightly fixture update scheduler (runs between 03:00 - 04:00)...');
+
+    // Check every 30 minutes
+    setInterval(async () => {
+      const now = new Date();
+      const hours = now.getHours();
+      const dateString = now.toDateString();
+
+      // Check if time is between 03:00 and 04:00
+      if (hours === 3) {
+        // Check if we already ran today
+        if (FixtureFetcher.lastNightlyRunDate === dateString) {
+          return;
+        }
+
+        log('Starting nightly fixture update...');
+        FixtureFetcher.lastNightlyRunDate = dateString;
+
+        try {
+          const fetcher = new FixtureFetcher();
+          const result = await fetcher.fetchAndUpdateFixturesForCurrentSeasons();
+
+          if (result.success) {
+            log(`Nightly update completed successfully. Updated: ${result.updatedCount}, Past: ${result.statusChangedToPastCount}`);
+          } else {
+            log(`Nightly update failed: ${result.message}`);
+          }
+        } catch (error) {
+          console.error('Nightly fixture update encountered an error:', error);
+        }
+      }
+    }, 30 * 60 * 1000); // Check every 30 minutes
   }
 }

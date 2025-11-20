@@ -114,7 +114,7 @@ async function addLeagues(request: Request) {
           name = EXCLUDED.name,
           type = EXCLUDED.type,
           country = EXCLUDED.country,
-          seasons = EXCLUDED.seasons,
+          seasons = COALESCE(football_leagues.seasons, '{}'::jsonb) || EXCLUDED.seasons,
           updated_at = NOW()
       `;
 

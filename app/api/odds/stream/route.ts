@@ -159,6 +159,8 @@ export async function GET(request: Request) {
   let keepAliveInterval: NodeJS.Timeout | null = null;
   let bookieFilterStr = '';
   let bookieParamsArr: any[] = [];
+  let isStreamClosed = false;
+
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -167,11 +169,17 @@ export async function GET(request: Request) {
         try {
           client = await pool.connect();
         } catch (dbError) {
+          if (isStreamClosed) return;
           console.error('Database connection failed:', dbError);
           if (dbError instanceof Error && dbError.message.includes('timeout')) {
             throw new Error('Database connection timeout - pool may be exhausted');
           }
           throw new Error(`Database connection failed: ${dbError instanceof Error ? dbError.message : 'Unknown error'}`);
+        }
+
+        if (isStreamClosed) {
+          if (client) client.release();
+          return;
         }
 
         if (!client) {
@@ -187,9 +195,9 @@ export async function GET(request: Request) {
         let finalFixtureIds: number[];
         let listenToAllFixtures = false;
         try {
-        if (fixtureIds.length > 0) {
-          // Use specified fixture IDs
-          finalFixtureIds = fixtureIds;
+          if (fixtureIds.length > 0) {
+            // Use specified fixture IDs
+            finalFixtureIds = fixtureIds;
           } else {
             // Listen to ALL future fixtures - don't filter by specific IDs
             listenToAllFixtures = true;
@@ -210,9 +218,12 @@ export async function GET(request: Request) {
         try {
           await client.query(`LISTEN odds_updates`);
         } catch (listenError) {
+          if (isStreamClosed) return;
           console.error('Failed to LISTEN on odds_updates:', listenError);
           throw new Error(`Failed to listen on channel odds_updates: ${listenError instanceof Error ? listenError.message : 'Unknown error'}`);
         }
+
+        if (isStreamClosed) return;
 
         // Send initial "started" message
         const startedData = JSON.stringify({
@@ -224,6 +235,8 @@ export async function GET(request: Request) {
 
         // Set up notification handler for the odds_updates channel
         client.on('notification', async (msg) => {
+          if (isStreamClosed) return;
+
           // Check if it's the odds_updates channel
           if (msg.channel === 'odds_updates') {
             try {
@@ -238,7 +251,10 @@ export async function GET(request: Request) {
               if (fixtureId && !isNaN(fixtureId)) {
                 // Process if: listening to all fixtures OR this specific fixture is in our list
                 if (listenToAllFixtures || finalFixtureIds.includes(fixtureId)) {
-                  const updates = await getLatestOddsUpdates(client!, fixtureId, bookieFilterStr, bookieParamsArr, useFairOdds);
+                  if (isStreamClosed || !client) return;
+                  const updates = await getLatestOddsUpdates(client, fixtureId, bookieFilterStr, bookieParamsArr, useFairOdds);
+
+                  if (isStreamClosed) return;
 
                   if (updates.length > 0) {
                     // Group updates by fixture for cleaner streaming
@@ -415,11 +431,18 @@ export async function GET(request: Request) {
 
       } catch (error) {
         console.error('Error setting up SSE connection:', error);
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Failed to setup stream' })}\n\n`));
-        controller.close();
+        if (!isStreamClosed) {
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Failed to setup stream' })}\n\n`));
+            controller.close();
+          } catch (e) {
+            // Ignore errors during error handling if stream is closed
+          }
+        }
       }
     },
     cancel() {
+      isStreamClosed = true;
       // Clean up when client disconnects
       if (keepAliveInterval) {
         clearInterval(keepAliveInterval);

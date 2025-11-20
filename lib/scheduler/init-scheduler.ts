@@ -27,5 +27,14 @@ export function initializeSchedulers() {
   // Start scheduler after delay
   setTimeout(() => {
     startAutoRefreshScheduler();
+
+    // Start nightly fixture update scheduler
+    console.log('About to import and start FixtureFetcher nightly scheduler...');
+    import('@/lib/services/fixture-fetcher').then(({ FixtureFetcher }) => {
+      console.log('FixtureFetcher imported successfully, starting scheduler...');
+      FixtureFetcher.startNightlyScheduler();
+    }).catch(err => {
+      console.error('Failed to start nightly fixture scheduler:', err);
+    });
   }, 1 * 60 * 1000); // 1 minutes in milliseconds
 }
