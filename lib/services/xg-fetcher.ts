@@ -358,7 +358,21 @@ export class XGFetcher {
 
       log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name}`);
 
-      const result = await this.fetchNativeXG(fixture);
+      // Get the xg_source URL for this fixture's round
+      const xgSourceUrl = await this.getXGSourceUrlForFixture(fixture);
+      
+      let result: XGData | null = null;
+
+      if (!xgSourceUrl || xgSourceUrl === 'NATIVE') {
+        // Use native API (football-api-sports.io)
+        result = await this.fetchNativeXG(fixture);
+      } else if (xgSourceUrl.includes('-')) {
+        // Sofascore format: "55-71183" (tournamentId-seasonId)
+        result = await this.fetchSofascoreXG(fixture, xgSourceUrl);
+      } else {
+        // Flashlive format: "8poTvlIq" (tournamentStageId)
+        result = await this.fetchFlashliveXG(fixture, xgSourceUrl);
+      }
 
       // Record the attempt result
       recordXGFetchAttempt(fixture.id, !!result);
@@ -366,6 +380,45 @@ export class XGFetcher {
     } catch (error) {
       console.error(`Error fetching XG for fixture ${fixture.id}:`, error);
       recordXGFetchAttempt(fixture.id, false);
+      return null;
+    }
+  }
+
+  /**
+   * Gets the xg_source URL for a fixture based on its league, season, and round
+   * Returns null if no xg_source is configured, or the URL string if found
+   */
+  private async getXGSourceUrlForFixture(fixture: Fixture): Promise<string | null> {
+    try {
+      const leagueConfig = await this.getLeagueXGConfig(fixture.league_id);
+      if (!leagueConfig || !leagueConfig.xgSource) {
+        return null;
+      }
+
+      const seasonKey = fixture.season.toString();
+      const seasonConfig = leagueConfig.xgSource[seasonKey];
+      
+      if (!seasonConfig || !seasonConfig.rounds) {
+        return null;
+      }
+
+      // First, try to find a specific round match
+      if (fixture.round) {
+        const roundConfig = seasonConfig.rounds[fixture.round];
+        if (roundConfig && roundConfig.url) {
+          return roundConfig.url;
+        }
+      }
+
+      // If no specific round match, check for "ALL" round
+      const allRoundConfig = seasonConfig.rounds['ALL'];
+      if (allRoundConfig && allRoundConfig.url) {
+        return allRoundConfig.url;
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`Error getting xg_source URL for fixture ${fixture.id}:`, error);
       return null;
     }
   }

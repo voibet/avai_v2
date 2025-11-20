@@ -149,19 +149,25 @@ export class MonacoApiClient {
         }
     }
 
-    public async fetchMarkets(page = 0): Promise<any> {
+    public async fetchMarkets(page = 0, eventIds?: string[]): Promise<any> {
         await this.ensureAuthenticated();
         await this.checkApiRateLimit();
 
+        const params: any = {
+            marketTypeIds: 'FOOTBALL_OVER_UNDER_TOTAL_GOALS,FOOTBALL_FULL_TIME_RESULT_HANDICAP,FOOTBALL_FULL_TIME_RESULT',
+            inPlayStatuses: 'PrePlay,NotApplicable',
+            statuses: 'Initializing,Open,Locked,Closed',
+            size: 2000,
+            page
+        };
+
+        if (eventIds && eventIds.length > 0) {
+            params.eventIds = eventIds.join(',');
+        }
+
         const response = await axios.get(`${this.baseUrl}/markets`, {
             headers: { 'Authorization': `Bearer ${this.accessToken}` },
-            params: {
-                marketTypeIds: 'FOOTBALL_OVER_UNDER_TOTAL_GOALS,FOOTBALL_FULL_TIME_RESULT_HANDICAP,FOOTBALL_FULL_TIME_RESULT',
-                inPlayStatuses: 'PrePlay,NotApplicable',
-                statuses: 'Initializing,Open,Locked,Closed',
-                size: 2000,
-                page
-            }
+            params
         });
 
         return response.data;

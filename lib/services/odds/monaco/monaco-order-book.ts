@@ -19,22 +19,26 @@ export class MonacoOrderBook {
             }
 
             const orderBook = this.orderBooks.get(orderBookKey)!;
-            const pricesByOutcome: { [outcomeId: string]: PriceLevel[] } = {};
+            const pricesByOutcome: { [outcomeId: string]: Map<number, number> } = {};
 
             market.prices
                 .filter(p => p.side === 'Against')
                 .forEach(price => {
                     if (!pricesByOutcome[price.outcomeId]) {
-                        pricesByOutcome[price.outcomeId] = [];
+                        pricesByOutcome[price.outcomeId] = new Map();
                     }
-                    pricesByOutcome[price.outcomeId].push({
-                        price: price.price,
-                        liquidity: price.liquidity
-                    });
+                    const currentLiquidity = pricesByOutcome[price.outcomeId].get(price.price) || 0;
+                    pricesByOutcome[price.outcomeId].set(price.price, currentLiquidity + price.liquidity);
                 });
 
             Object.keys(pricesByOutcome).forEach(outcomeId => {
-                orderBook[outcomeId] = pricesByOutcome[outcomeId].sort((a, b) => b.liquidity - a.liquidity);
+                const levels: PriceLevel[] = [];
+                pricesByOutcome[outcomeId].forEach((liquidity, price) => {
+                    if (liquidity > 0) {
+                        levels.push({ price, liquidity });
+                    }
+                });
+                orderBook[outcomeId] = levels.sort((a, b) => b.price - a.price);
             });
         }
     }
@@ -60,6 +64,7 @@ export class MonacoOrderBook {
         }
 
         const orderBook = this.orderBooks.get(orderBookKey)!;
+        const affectedOutcomes = new Set<string>();
 
         message.prices
             .filter((priceUpdate: any) => priceUpdate.side === 'Against')
@@ -83,13 +88,24 @@ export class MonacoOrderBook {
                     priceLevels.push({ price, liquidity });
                 }
 
-                priceLevels.sort((a, b) => b.price - a.price);
+                affectedOutcomes.add(outcomeId);
             });
+
+        // Sort only affected outcomes
+        affectedOutcomes.forEach(outcomeId => {
+            if (orderBook[outcomeId]) {
+                orderBook[outcomeId].sort((a, b) => b.price - a.price);
+            }
+        });
 
         return orderBook;
     }
 
     public getOrderBook(fixtureId: number, marketType: string): OrderBook | undefined {
         return this.orderBooks.get(`${fixtureId}-${marketType}`);
+    }
+
+    public remove(fixtureId: number, marketType: string): void {
+        this.orderBooks.delete(`${fixtureId}-${marketType}`);
     }
 }

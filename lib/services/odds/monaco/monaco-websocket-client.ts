@@ -138,8 +138,6 @@ export class MonacoWebSocketClient {
         }
     }
 
-
-
     private reconnect(): void {
         if (this.reconnectTimeout) return;
         if (!this.isRunning) return;

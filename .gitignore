@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ml-cache
+.ml-cache
+
+# backup_calculations
+.backup_calculations

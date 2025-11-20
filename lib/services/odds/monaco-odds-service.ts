@@ -19,7 +19,7 @@ export class MonacoOddsService {
   private knownMonacoEventGroups: Set<string> = new Set();
 
   private isRunning: boolean = false;
-  private marketRefetchInterval: NodeJS.Timeout | null = null;
+
   private messageQueue: any[] = [];
   private isProcessingMessages: boolean = false;
   private messageProcessingTimeout: NodeJS.Timeout | null = null;
@@ -64,59 +64,10 @@ export class MonacoOddsService {
     await this.loadKnownMonacoEventGroups();
     await this.fetchAndProcessMarkets();
     this.log(`Loaded ${this.marketMapping.size} market mappings`);
-    
+
     await this.wsClient.connect();
 
-    this.marketRefetchInterval = setInterval(async () => {
-      try {
-        const oldMarketMapping = new Map(this.marketMapping);
-        const oldEventIdToMappings = new Map(this.eventIdToMappings);
 
-        this.clearState();
-
-        await this.fetchAndProcessMarkets(false);
-        this.log(`Refetched ${this.marketMapping.size} market mappings`);
-
-        const fixturesWithChanges = this.getFixturesWithMarketChanges(oldMarketMapping, oldEventIdToMappings);
-
-        if (fixturesWithChanges.size > 0) {
-          this.log(`Market changes detected for ${fixturesWithChanges.size} fixtures, updating database...`);
-          for (const fixtureId of Array.from(fixturesWithChanges)) {
-            const eventId = this.getEventIdForFixture(fixtureId);
-            if (eventId) {
-              const eventMappings = this.eventIdToMappings.get(eventId);
-              if (eventMappings) {
-                const markets = eventMappings.map(mapping => ({
-                  id: mapping.marketId,
-                  eventId: mapping.eventId,
-                  marketTypeId: mapping.marketTypeId,
-                  name: mapping.name,
-                  marketOutcomes: mapping.outcomeMappings ? Object.keys(mapping.outcomeMappings).map((outcomeId, index) => ({
-                    id: outcomeId,
-                    title: `Outcome ${index}`,
-                    ordering: mapping.outcomeMappings![outcomeId]
-                  })) : [],
-                  prices: []
-                }));
-
-                this.log(`Triggering database update for fixture ${fixtureId} due to market changes`);
-                await this.dbService.ensureFixtureOddsRecord(
-                  fixtureId,
-                  markets,
-                  this.mapMarketType.bind(this),
-                  this.getHandicapValue.bind(this),
-                  this.getTotalValue.bind(this)
-                );
-              }
-            }
-          }
-        } else {
-          this.log('No market changes detected, skipping database updates');
-        }
-      } catch (error) {
-        console.error('Error refetching Monaco markets:', error);
-      }
-    }, 60 * 60 * 1000);
 
     this.log('Service started');
   }
@@ -126,10 +77,7 @@ export class MonacoOddsService {
     this.wsClient.stop();
     this.apiClient.stop();
 
-    if (this.marketRefetchInterval) {
-      clearInterval(this.marketRefetchInterval);
-      this.marketRefetchInterval = null;
-    }
+
 
     if (this.messageProcessingTimeout) {
       clearTimeout(this.messageProcessingTimeout);
@@ -180,7 +128,7 @@ export class MonacoOddsService {
         marketTypeId: (market as any).marketType?._ids?.[0] || (market as any).marketTypeId,
         name: market.name,
         marketOutcomes: Array.isArray((market as any).marketOutcomes) ? (market as any).marketOutcomes :
-                       (market as any).marketOutcomes?._ids?.map((id: string, index: number) => ({ id, title: `Outcome ${index}`, ordering: index })) || [],
+          (market as any).marketOutcomes?._ids?.map((id: string, index: number) => ({ id, title: `Outcome ${index}`, ordering: index })) || [],
         prices: market.prices
       }));
 
@@ -202,7 +150,7 @@ export class MonacoOddsService {
       if (!marketType) continue;
 
       const lineValue = marketType === 'ah' ? this.getHandicapValue(market) :
-                      marketType === 'ou' ? this.getTotalValue(market) : undefined;
+        marketType === 'ou' ? this.getTotalValue(market) : undefined;
 
       const outcomeMappings: { [outcomeId: string]: number } = {};
       if (market.marketOutcomes) {
@@ -386,7 +334,7 @@ export class MonacoOddsService {
     try {
       const batchSize = 50;
       const messagesToProcess = this.messageQueue.splice(0, batchSize);
-      
+
       const priceMessages: any[] = [];
       const statusMessages: any[] = [];
       const eventMessages: any[] = [];
@@ -460,6 +408,7 @@ export class MonacoOddsService {
         try {
           this.log(`Triggering database update for fixture ${fixtureId} (${marketMapping.marketType}) - zeroing odds due to status change`);
           await this.dbService.zeroOutMarketOdds(fixtureId, marketMapping.marketType);
+          this.orderBook.remove(fixtureId, marketMapping.marketType);
         } catch (error) {
           console.error(`Error zeroing odds for fixture ${fixtureId}:`, error);
         }
@@ -476,50 +425,46 @@ export class MonacoOddsService {
 
     try {
       const mappings = this.eventIdToMappings.get(message.eventId);
-      if (!mappings || mappings.length === 0) return;
 
-      const fixtureId = mappings[0].fixtureId;
-      if (!fixtureId) return;
+      if (mappings && mappings.length > 0) {
+        // Case 1: Known Event - Update existing data if needed
+        const fixtureId = mappings[0].fixtureId;
+        if (fixtureId && message.expectedStartTime) {
+          const newStartTime = new Date(message.expectedStartTime);
+          await executeQuery(
+            'UPDATE football_fixtures SET start_time = $1 WHERE id = $2',
+            [newStartTime, fixtureId]
+          );
+          this.log(`Updated start time for fixture ${fixtureId} to ${newStartTime.toISOString()}`);
+        }
+      } else {
+        // Case 2: Unknown Event - Fetch and process as new
+        this.log(`New event detected (ID: ${message.eventId}), fetching markets...`);
+        try {
+          const data = await this.apiClient.fetchMarkets(0, [message.eventId]);
+          if (data.markets && data.markets.length > 0) {
+            const processedMarkets: MonacoMarket[] = data.markets.map((market: any) => ({
+              id: market.id,
+              eventId: (market as any).event?._ids?.[0] || (market as any).eventId,
+              marketTypeId: (market as any).marketType?._ids?.[0] || (market as any).marketTypeId,
+              name: market.name,
+              marketOutcomes: Array.isArray((market as any).marketOutcomes) ? (market as any).marketOutcomes :
+                (market as any).marketOutcomes?._ids?.map((id: string, index: number) => ({ id, title: `Outcome ${index}`, ordering: index })) || [],
+              prices: market.prices
+            }));
 
-      this.log(`Event update for fixture ${fixtureId}: ${JSON.stringify(message)}`);
+            const events = data.events || [];
+            await this.processMarkets(processedMarkets, events, true);
+            this.log(`Successfully processed new event ${message.eventId} with ${processedMarkets.length} markets`);
+          }
+        } catch (fetchError) {
+          console.error(`Error fetching markets for new event ${message.eventId}:`, fetchError);
+        }
+      }
     } catch (error) {
       console.error('Error handling event update:', error);
     }
   }
 
-  private getFixturesWithMarketChanges(oldMapping: Map<string, MarketMapping>, oldEventIdToMappings: Map<string, MarketMapping[]>): Set<number> {
-    const fixturesWithChanges = new Set<number>();
 
-    // Check for new markets or changes in existing markets
-    this.marketMapping.forEach((newMapping, key) => {
-      const old = oldMapping.get(key);
-      if (!old) {
-        // New market found
-        if (newMapping.fixtureId) fixturesWithChanges.add(newMapping.fixtureId);
-      } else {
-        // Check if critical fields changed
-        if (old.lineValue !== newMapping.lineValue || old.lineIndex !== newMapping.lineIndex) {
-          if (newMapping.fixtureId) fixturesWithChanges.add(newMapping.fixtureId);
-        }
-      }
-    });
-
-    // Check for removed markets
-    oldMapping.forEach((old, key) => {
-      if (!this.marketMapping.has(key)) {
-        if (old.fixtureId) fixturesWithChanges.add(old.fixtureId);
-      }
-    });
-
-    return fixturesWithChanges;
-  }
-
-  private getEventIdForFixture(fixtureId: number): string | undefined {
-    for (const [eventId, mappings] of Array.from(this.eventIdToMappings.entries())) {
-      if (mappings.some(m => m.fixtureId === fixtureId)) {
-        return eventId;
-      }
-    }
-    return undefined;
-  }
 }
