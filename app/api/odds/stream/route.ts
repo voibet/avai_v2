@@ -38,11 +38,11 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
         ff.round,
         COALESCE(fo.bookie, ffo.bookie) as bookie,
         COALESCE(fo.decimals, ffo.decimals) as decimals,
-        -- Regular odds from football_odds table (arrays are sorted descending - newest first)
-        fo.odds_x12->0 as odds_x12,
-        fo.odds_ah->0 as odds_ah,
-        fo.odds_ou->0 as odds_ou,
-        fo.lines->0 as lines,
+        -- Regular odds from football_odds table
+        fo.odds_x12->-1 as odds_x12,
+        fo.odds_ah->-1 as odds_ah,
+        fo.odds_ou->-1 as odds_ou,
+        fo.lines->-1 as lines,
         -- Fair odds from football_fair_odds table
         ffo.fair_odds_x12,
         ffo.fair_odds_ah,
@@ -76,14 +76,14 @@ async function getLatestOddsUpdates(client: PoolClient, updatedFixtureId?: numbe
         ff.round,
         fo.bookie,
         fo.decimals,
-        -- Extract latest X12 odds (first element of array using -> 0, arrays sorted descending)
-        fo.odds_x12->0 as odds_x12,
-        -- Extract latest AH odds (first element of array using -> 0, arrays sorted descending)
-        fo.odds_ah->0 as odds_ah,
-        -- Extract latest OU odds (first element of array using -> 0, arrays sorted descending)
-        fo.odds_ou->0 as odds_ou,
-        -- Extract latest lines (first element of array using -> 0, arrays sorted descending)
-        fo.lines->0 as lines
+        -- Extract latest X12 odds (last element of array using -> -1)
+        fo.odds_x12->-1 as odds_x12,
+        -- Extract latest AH odds (last element of array using -> -1)
+        fo.odds_ah->-1 as odds_ah,
+        -- Extract latest OU odds (last element of array using -> -1)
+        fo.odds_ou->-1 as odds_ou,
+        -- Extract latest lines (last element of array using -> -1)
+        fo.lines->-1 as lines
       FROM football_odds fo
       JOIN football_fixtures ff ON fo.fixture_id = ff.id
       WHERE LOWER(ff.status_short) = ANY($1)

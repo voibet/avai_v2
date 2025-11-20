@@ -172,7 +172,7 @@ export function FixtureOdds({
                         if (seen.has(item.t)) return false;
                         seen.add(item.t);
                         return true;
-                      }).sort((a, b) => b.t - a.t); // Sort descending (newest first)
+                      }).sort((a, b) => a.t - b.t);
                     };
 
                     // Merge historical arrays
@@ -236,10 +236,10 @@ export function FixtureOdds({
 
       // Compare 1X2 odds
       const oldX12 = Array.isArray(oldBookie.odds_x12)
-        ? oldBookie.odds_x12?.[0]
+        ? oldBookie.odds_x12?.[oldBookie.odds_x12.length - 1]
         : oldBookie.odds_x12;
       const newX12 = Array.isArray(newBookie.odds_x12)
-        ? newBookie.odds_x12?.[0]
+        ? newBookie.odds_x12?.[newBookie.odds_x12.length - 1]
         : newBookie.odds_x12;
       if (oldX12 && newX12 && oldX12.x12 && newX12.x12) {
         ['Home', 'Draw', 'Away'].forEach((outcome, idx) => {
@@ -253,16 +253,16 @@ export function FixtureOdds({
 
       // Compare Asian Handicap odds
       const oldAH = Array.isArray(oldBookie.odds_ah)
-        ? oldBookie.odds_ah?.[0]
+        ? oldBookie.odds_ah?.[oldBookie.odds_ah.length - 1]
         : oldBookie.odds_ah;
       const newAH = Array.isArray(newBookie.odds_ah)
-        ? newBookie.odds_ah?.[0]
+        ? newBookie.odds_ah?.[newBookie.odds_ah.length - 1]
         : newBookie.odds_ah;
       const oldLines = Array.isArray(oldBookie.lines)
-        ? oldBookie.lines?.[0]
+        ? oldBookie.lines?.[oldBookie.lines.length - 1]
         : oldBookie.lines;
       const newLines = Array.isArray(newBookie.lines)
-        ? newBookie.lines?.[0]
+        ? newBookie.lines?.[newBookie.lines.length - 1]
         : newBookie.lines;
 
       if (oldAH && newAH && oldLines && newLines && oldLines.ah && newLines.ah &&
@@ -288,10 +288,10 @@ export function FixtureOdds({
 
       // Compare Over/Under odds
       const oldOU = Array.isArray(oldBookie.odds_ou)
-        ? oldBookie.odds_ou?.[0]
+        ? oldBookie.odds_ou?.[oldBookie.odds_ou.length - 1]
         : oldBookie.odds_ou;
       const newOU = Array.isArray(newBookie.odds_ou)
-        ? newBookie.odds_ou?.[0]
+        ? newBookie.odds_ou?.[newBookie.odds_ou.length - 1]
         : newBookie.odds_ou;
 
       if (oldOU && newOU && oldLines && newLines && oldLines.ou && newLines.ou &&
@@ -534,13 +534,13 @@ export function FixtureOdds({
     // Handle both old format (array of objects) and new format (single object)
     // For future fixtures, find the odds entry that matches the latest timestamp
     const latestX12 = Array.isArray(bookmaker.odds_x12)
-      ? bookmaker.odds_x12?.find(entry => entry.t === bookmaker.latest_t?.x12_ts) || bookmaker.odds_x12?.[0]
+      ? bookmaker.odds_x12?.find(entry => entry.t === bookmaker.latest_t?.x12_ts) || bookmaker.odds_x12?.[bookmaker.odds_x12.length - 1]
       : bookmaker.odds_x12;
     const latestAH = Array.isArray(bookmaker.odds_ah)
-      ? bookmaker.odds_ah?.find(entry => entry.t === bookmaker.latest_t?.ah_ts) || bookmaker.odds_ah?.[0]
+      ? bookmaker.odds_ah?.find(entry => entry.t === bookmaker.latest_t?.ah_ts) || bookmaker.odds_ah?.[bookmaker.odds_ah.length - 1]
       : bookmaker.odds_ah;
     const latestOU = Array.isArray(bookmaker.odds_ou)
-      ? bookmaker.odds_ou?.find(entry => entry.t === bookmaker.latest_t?.ou_ts) || bookmaker.odds_ou?.[0]
+      ? bookmaker.odds_ou?.find(entry => entry.t === bookmaker.latest_t?.ou_ts) || bookmaker.odds_ou?.[bookmaker.odds_ou.length - 1]
       : bookmaker.odds_ou;
 
     // Find lines entry that matches the latest odds timestamps
@@ -573,9 +573,9 @@ export function FixtureOdds({
           latestLines = ahLinesEntry;
         }
       }
-      // Fallback to latest_t.lines_ts or first entry (newest)
+      // Fallback to latest_t.lines_ts or last entry
       if (!latestLines) {
-        latestLines = bookmaker.lines?.find(entry => entry.t === bookmaker.latest_t?.lines_ts) || bookmaker.lines?.[0];
+        latestLines = bookmaker.lines?.find(entry => entry.t === bookmaker.latest_t?.lines_ts) || bookmaker.lines?.[bookmaker.lines.length - 1];
       }
     } else {
       latestLines = bookmaker.lines;
@@ -659,11 +659,11 @@ export function FixtureOdds({
     const nowSeconds = Date.now() / 1000;
     const TIME_WINDOW = 300; // 300 seconds (5 minutes)
 
-    // Helper to check change in history (history is sorted descending - newest first)
+    // Helper to check change in history
     const checkHistoryForChange = (history: Array<{ t: number; value: number | null }>) => {
       if (history.length === 0) return null;
 
-      const latest = history[0]; // Newest entry (index 0 since sorted descending)
+      const latest = history[history.length - 1];
       const latestVal = latest.value;
       const isLatestValid = latestVal !== null && latestVal > 0;
 
@@ -671,14 +671,13 @@ export function FixtureOdds({
       if (nowSeconds - latest.t > TIME_WINDOW) return null;
 
       // Find the most recent previous entry (not the current one)
-      let mostRecentPrev = history.length >= 2 ? history[1] : null;
+      let mostRecentPrev = history.length >= 2 ? history[history.length - 2] : null;
 
       // Find the entry from ~5 minutes ago (or closest before that)
       const fiveMinutesAgo = latest.t - TIME_WINDOW;
       let fiveMinutesPrev = null;
 
-      // Since history is sorted descending, start from index 1 and go forward
-      for (let i = 1; i < history.length; i++) {
+      for (let i = history.length - 2; i >= 0; i--) {
         if (history[i].t <= fiveMinutesAgo) {
           fiveMinutesPrev = history[i];
           break;
@@ -917,7 +916,7 @@ export function FixtureOdds({
     oddsData.odds.forEach(bm => {
       let linesData = null;
       if (Array.isArray(bm.lines)) {
-        linesData = bm.lines[0]; // Latest lines data
+        linesData = bm.lines[bm.lines.length - 1];
       } else {
         linesData = bm.lines;
       }
@@ -951,7 +950,7 @@ export function FixtureOdds({
     const getOdds = (bm: any, line: number, oddsKey: string) => {
       let linesData = null;
       if (Array.isArray(bm.odds.lines)) {
-        linesData = bm.odds.lines[0]; // Latest lines data (newest first)
+        linesData = bm.odds.lines[bm.odds.lines.length - 1];
       } else {
         linesData = bm.odds.lines;
       }

@@ -38,7 +38,7 @@ export class MonacoDatabaseService {
             merged.push(newEntry);
         }
 
-        return merged.sort((a, b) => b.t - a.t);
+        return merged.sort((a, b) => a.t - b.t);
     }
 
     public async ensureFixtureOddsRecord(fixtureId: number, markets: MonacoMarket[], mapMarketType: (id: string) => string | null, getHandicapValue: (m: MonacoMarket) => number, getTotalValue: (m: MonacoMarket) => number): Promise<Map<string, number> | undefined> {
@@ -66,7 +66,7 @@ export class MonacoDatabaseService {
         });
 
         const existing = await executeQuery(
-            'SELECT fixture_id FROM football_odds WHERE fixture_id = $1 AND bookie = $2',
+            'SELECT fixture_id, lines FROM football_odds WHERE fixture_id = $1 AND bookie = $2',
             [fixtureId, 'Monaco']
         );
 
@@ -92,6 +92,24 @@ export class MonacoDatabaseService {
             ]);
             this.log(`Database INSERT completed for ${fixtureInfo} - created initial odds structure`);
         } else {
+            const existingLines = this.parseJsonArray(existing.rows[0].lines);
+            const newLines = structure.linesEntry;
+            let linesToSave = existingLines;
+            let shouldUpdateLines = false;
+
+            const latestExisting = existingLines.length > 0 ? existingLines[existingLines.length - 1] : null;
+
+            const ahMatch = JSON.stringify(latestExisting?.ah) === JSON.stringify(newLines.ah);
+            const ouMatch = JSON.stringify(latestExisting?.ou) === JSON.stringify(newLines.ou);
+
+            if (!latestExisting || !ahMatch || !ouMatch) {
+                linesToSave.push(newLines);
+                linesToSave.sort((a: any, b: any) => a.t - b.t);
+                shouldUpdateLines = true;
+            }
+
+            const updatedLinesJson = JSON.stringify(linesToSave);
+
             await executeQuery(`
         UPDATE football_odds
         SET
@@ -100,12 +118,12 @@ export class MonacoDatabaseService {
           latest_t = $3
         WHERE fixture_id = $4 AND bookie = 'Monaco'
       `, [
-                linesJson,
+                updatedLinesJson,
                 idsJson,
                 latestT,
                 fixtureId
             ]);
-            this.log(`Database UPDATE for ${fixtureInfo} - updated lines/ids structure`);
+            this.log(`Database UPDATE for ${fixtureInfo} - updated lines/ids structure${shouldUpdateLines ? ' (appended new lines)' : ''}`);
         }
 
         return structure.lineIndexMap;
