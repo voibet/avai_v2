@@ -68,7 +68,7 @@ async function getFixtureOdds(request: Request) {
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
           AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
           ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
+          AND (fo.odds_x12->0 IS NOT NULL OR fo.odds_ah->0 IS NOT NULL OR fo.odds_ou->0 IS NOT NULL)` : ''}
       `;
     } else {
       // Original count query for full historical data
@@ -96,7 +96,7 @@ async function getFixtureOdds(request: Request) {
           ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
           ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
+          AND (fo.odds_x12->0 IS NOT NULL OR fo.odds_ah->0 IS NOT NULL OR fo.odds_ou->0 IS NOT NULL)` : ''}
       `;
     } else {
       // Original count query for full historical data
@@ -137,10 +137,10 @@ async function getFixtureOdds(request: Request) {
           COALESCE(fo.bookie, ffo.bookie) as bookie,
           COALESCE(fo.decimals, ffo.decimals) as decimals,
           -- Regular odds from football_odds table (latest only, uses index)
-          CASE WHEN fo.odds_x12->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_x12->-1) ELSE NULL END as odds_x12,
-          CASE WHEN fo.odds_ah->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ah->-1) ELSE NULL END as odds_ah,
-          CASE WHEN fo.odds_ou->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ou->-1) ELSE NULL END as odds_ou,
-          CASE WHEN fo.lines->-1 IS NOT NULL THEN jsonb_build_array(fo.lines->-1) ELSE NULL END as lines,
+          CASE WHEN fo.odds_x12->0 IS NOT NULL THEN jsonb_build_array(fo.odds_x12->0) ELSE NULL END as odds_x12,
+          CASE WHEN fo.odds_ah->0 IS NOT NULL THEN jsonb_build_array(fo.odds_ah->0) ELSE NULL END as odds_ah,
+          CASE WHEN fo.odds_ou->0 IS NOT NULL THEN jsonb_build_array(fo.odds_ou->0) ELSE NULL END as odds_ou,
+          CASE WHEN fo.lines->0 IS NOT NULL THEN jsonb_build_array(fo.lines->0) ELSE NULL END as lines,
           fo.latest_t,
           -- Fair odds from football_fair_odds table
           ffo.fair_odds_x12,
@@ -157,7 +157,7 @@ async function getFixtureOdds(request: Request) {
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND (fo.bookie IN (${bookiePlaceholders}) OR ffo.bookie IN (${bookiePlaceholders}))` : ''}
           AND (ffo.bookie IS NULL OR ffo.bookie != 'Prediction')
           ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
+          AND (fo.odds_x12->0 IS NOT NULL OR fo.odds_ah->0 IS NOT NULL OR fo.odds_ou->0 IS NOT NULL)` : ''}
         ORDER BY ff.date, ff.id, COALESCE(fo.bookie, ffo.bookie)
       `;
     } else {
@@ -219,14 +219,11 @@ async function getFixtureOdds(request: Request) {
           ff.round,
           fo.bookie,
           fo.decimals,
-          -- Return only latest X12 odds (uses index)
-          CASE WHEN fo.odds_x12->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_x12->-1) ELSE NULL END as odds_x12,
-          -- Return only latest AH odds (uses index)
-          CASE WHEN fo.odds_ah->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ah->-1) ELSE NULL END as odds_ah,
-          -- Return only latest OU odds (uses index)
-          CASE WHEN fo.odds_ou->-1 IS NOT NULL THEN jsonb_build_array(fo.odds_ou->-1) ELSE NULL END as odds_ou,
-          -- Return latest lines (uses index)
-          CASE WHEN fo.lines->-1 IS NOT NULL THEN jsonb_build_array(fo.lines->-1) ELSE NULL END as lines,
+          -- Return full arrays to allow filtering for last non-zero entry in code
+          fo.odds_x12,
+          fo.odds_ah,
+          fo.odds_ou,
+          fo.lines,
           fo.latest_t
         FROM football_fixtures ff
         LEFT JOIN football_odds fo ON ff.id = fo.fixture_id
@@ -235,7 +232,7 @@ async function getFixtureOdds(request: Request) {
           ${fixtureIds.length === 0 ? `AND LOWER(ff.status_short) = ANY($1) AND ff.date >= CURRENT_DATE` : ''}
           ${selectedBookies && selectedBookies.length > 0 && bookieFilter ? `AND fo.bookie IN (${bookiePlaceholders})` : ''}
           ${fixtureIds.length === 0 ? `-- Filter to only records with latest odds (uses idx_football_odds_latest_combined)
-          AND (fo.odds_x12->-1 IS NOT NULL OR fo.odds_ah->-1 IS NOT NULL OR fo.odds_ou->-1 IS NOT NULL)` : ''}
+          AND (fo.odds_x12->0 IS NOT NULL OR fo.odds_ah->0 IS NOT NULL OR fo.odds_ou->0 IS NOT NULL)` : ''}
         ORDER BY ff.date, ff.id, fo.bookie
       `;
     } else {
@@ -351,6 +348,14 @@ async function getFixtureOdds(request: Request) {
         }
       }
 
+      // If latest=true, return only the most recent entry (first in array due to descending timestamp sorting)
+      if (useLatest) {
+        if (oddsX12 && oddsX12.length > 0) oddsX12 = [oddsX12[0]];
+        if (oddsAh && oddsAh.length > 0) oddsAh = [oddsAh[0]];
+        if (oddsOu && oddsOu.length > 0) oddsOu = [oddsOu[0]];
+        if (lines && lines.length > 0) lines = [lines[0]];
+      }
+
       const oddsObj: any = {
         bookie: row.bookie,
         decimals: row.decimals,
@@ -364,22 +369,22 @@ async function getFixtureOdds(request: Request) {
       if (useFairOdds) {
         if (row.bookie === 'Prediction') {
           // For Prediction, use latest regular odds as fair odds with embedded timestamps
-          const latestTimestamp = (oddsX12 && oddsX12.length > 0) ? oddsX12[oddsX12.length - 1].t :
-                                 (oddsAh && oddsAh.length > 0) ? oddsAh[oddsAh.length - 1].t :
-                                 (oddsOu && oddsOu.length > 0) ? oddsOu[oddsOu.length - 1].t :
-                                 (lines && lines.length > 0) ? lines[lines.length - 1].t : null;
+          const latestTimestamp = (oddsX12 && oddsX12.length > 0) ? oddsX12[0].t :
+            (oddsAh && oddsAh.length > 0) ? oddsAh[0].t :
+              (oddsOu && oddsOu.length > 0) ? oddsOu[0].t :
+                (lines && lines.length > 0) ? lines[0].t : null;
 
           if (oddsX12 && oddsX12.length > 0 && latestTimestamp) {
             oddsObj.fair_odds_x12 = {
               t: latestTimestamp,
-              x12: oddsX12[oddsX12.length - 1].x12
+              x12: oddsX12[0].x12
             };
           } else {
             oddsObj.fair_odds_x12 = null;
           }
 
           // Transform AH odds from regular format to fair odds format
-          const latestAh = oddsAh && oddsAh.length > 0 ? oddsAh[oddsAh.length - 1] : null;
+          const latestAh = oddsAh && oddsAh.length > 0 ? oddsAh[0] : null;
           if (latestAh && latestTimestamp) {
             oddsObj.fair_odds_ah = {
               t: latestTimestamp,
@@ -391,7 +396,7 @@ async function getFixtureOdds(request: Request) {
           }
 
           // Transform OU odds from regular format to fair odds format
-          const latestOu = oddsOu && oddsOu.length > 0 ? oddsOu[oddsOu.length - 1] : null;
+          const latestOu = oddsOu && oddsOu.length > 0 ? oddsOu[0] : null;
           if (latestOu && latestTimestamp) {
             oddsObj.fair_odds_ou = {
               t: latestTimestamp,
@@ -405,8 +410,8 @@ async function getFixtureOdds(request: Request) {
           if (lines && lines.length > 0 && latestTimestamp) {
             oddsObj.fair_odds_lines = [{
               t: latestTimestamp,
-              ah: lines[lines.length - 1].ah || null,
-              ou: lines[lines.length - 1].ou || null
+              ah: lines[0].ah || null,
+              ou: lines[0].ou || null
             }];
           } else {
             oddsObj.fair_odds_lines = null;

@@ -336,6 +336,21 @@ export class PinnacleDatabaseService {
             }
         }
 
+        // Lines History
+        let finalLines = lines;
+        if (existingData && existingData.lines && Array.isArray(existingData.lines)) {
+            if (lines.length > 0) {
+                const last = existingData.lines[existingData.lines.length - 1];
+                if (this.isDifferent(last, lines[0])) {
+                    finalLines = [...existingData.lines, lines[0]];
+                } else {
+                    finalLines = existingData.lines;
+                }
+            } else {
+                finalLines = existingData.lines;
+            }
+        }
+
         // Max Stakes History
         let finalMaxStakes = maxStakes;
         if (existingData && existingData.maxStakes && Array.isArray(existingData.maxStakes)) {
@@ -386,7 +401,7 @@ export class PinnacleDatabaseService {
             finalX12.length > 0 ? JSON.stringify(finalX12) : null,
             finalAh.length > 0 ? JSON.stringify(finalAh) : null,
             finalOu.length > 0 ? JSON.stringify(finalOu) : null,
-            lines.length > 0 ? JSON.stringify(lines) : null,
+            finalLines.length > 0 ? JSON.stringify(finalLines) : null,
             ids.length > 0 ? JSON.stringify(ids) : null,
             finalMaxStakes.length > 0 ? JSON.stringify(finalMaxStakes) : null,
             JSON.stringify(latestT)
