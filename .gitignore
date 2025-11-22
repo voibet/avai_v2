@@ -45,3 +45,7 @@ next-env.d.ts
 
 # backup_calculations
 .backup_calculations
+
+# Rust
+odds-engine/target/
+odds-engine/target_temp/
