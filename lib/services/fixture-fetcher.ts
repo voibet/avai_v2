@@ -315,6 +315,7 @@ export class FixtureFetcher {
 
     for (const teamId of teamIds) {
       try {
+        log(`Fetching team ${teamId} from API-Football`);
         const response = await axios.get(`${this.apiBaseUrl}/teams`, {
           headers: {
             'x-rapidapi-key': this.apiKey,
@@ -380,6 +381,7 @@ export class FixtureFetcher {
     if (season) params.season = season;
 
     try {
+      log(`Fetching fixtures from API-Football: league=${leagueId}, season=${season}`);
       const response = await axios.get(`${this.apiBaseUrl}/fixtures`, {
         headers: {
           'x-rapidapi-key': this.apiKey,
@@ -390,6 +392,7 @@ export class FixtureFetcher {
       });
 
       const fixtures = response.data.response || [];
+      log(`Fetched ${fixtures.length} fixtures from API-Football`);
 
       // Rate limit
       await new Promise(resolve => setTimeout(resolve, 250));
@@ -453,8 +456,12 @@ export class FixtureFetcher {
     const queries: any[] = [];
     const statusChanges: boolean[] = [];
 
+    // Batch fetch existing fixtures
+    const fixtureIds = fixtures.map(f => f.fixture.id);
+    const existingFixturesMap = await this.getExistingFixturesMap(fixtureIds);
+
     for (const fixture of fixtures) {
-      const existingFixture = await this.getExistingFixture(fixture.fixture.id);
+      const existingFixture = existingFixturesMap.get(fixture.fixture.id);
       const query = this.buildFixtureUpsertQuery(fixture, teamCountryMap, existingFixture);
 
       const isNewlyInPast = existingFixture &&
@@ -466,6 +473,26 @@ export class FixtureFetcher {
     }
 
     return { queries, statusChanges };
+  }
+
+  private async getExistingFixturesMap(fixtureIds: number[]): Promise<Map<number, { xg_home: number; xg_away: number; status_short: string }>> {
+    if (fixtureIds.length === 0) return new Map();
+
+    try {
+      const result = await executeQuery<{ id: number; xg_home: number; xg_away: number; status_short: string }>(
+        'SELECT id, xg_home, xg_away, status_short FROM football_fixtures WHERE id = ANY($1)',
+        [fixtureIds]
+      );
+
+      const map = new Map();
+      result.rows.forEach(row => {
+        map.set(row.id, row);
+      });
+      return map;
+    } catch (error) {
+      console.error('Error batch fetching existing fixtures:', error);
+      return new Map();
+    }
   }
 
   private async getExistingFixture(fixtureId: number): Promise<{ xg_home: number; xg_away: number; status_short: string } | null> {

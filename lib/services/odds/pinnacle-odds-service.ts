@@ -76,6 +76,71 @@ class PinnacleOddsService {
   }
 
   /**
+   * Creates a zero-odds version of a period to indicate market closure
+   */
+  private createZeroOddsPeriod(period: any): any {
+    const zeroPeriod = { ...period };
+
+    // Zero out money line odds
+    if (zeroPeriod.money_line) {
+      zeroPeriod.money_line = {
+        home: 0,
+        draw: 0,
+        away: 0
+      };
+    }
+
+    // Zero out spread odds
+    if (zeroPeriod.spreads) {
+      const zeroSpreads: any = {};
+      for (const key in zeroPeriod.spreads) {
+        if (zeroPeriod.spreads[key]) {
+          zeroSpreads[key] = {
+            ...zeroPeriod.spreads[key],
+            home: 0,
+            away: 0,
+            max: 0
+          };
+        }
+      }
+      zeroPeriod.spreads = zeroSpreads;
+    }
+
+    // Zero out total odds
+    if (zeroPeriod.totals) {
+      const zeroTotals: any = {};
+      for (const key in zeroPeriod.totals) {
+        if (zeroPeriod.totals[key]) {
+          zeroTotals[key] = {
+            ...zeroPeriod.totals[key],
+            over: 0,
+            under: 0,
+            max: 0
+          };
+        }
+      }
+      zeroPeriod.totals = zeroTotals;
+    }
+
+    // Zero out meta max values
+    if (zeroPeriod.meta) {
+      zeroPeriod.meta = {
+        ...zeroPeriod.meta,
+        max_money_line: 0,
+        max_spread: 0,
+        max_total: 0,
+        max_team_total: 0,
+        open_money_line: false,
+        open_spreads: false,
+        open_totals: false,
+        open_team_total: false
+      };
+    }
+
+    return zeroPeriod;
+  }
+
+  /**
    * Processes odds for a single event
    */
   private async processEventOdds(
@@ -99,8 +164,25 @@ class PinnacleOddsService {
       cutoffInFuture &&
       metaOpenFlags;
 
-    // Only process if market is open
+    // Handle closed markets - set odds to 0 if we already have them stored
     if (!isMarketOpen) {
+      const hasExisting = existingOddsMap.has(event.event_id);
+      if (hasExisting) {
+        // Market closed but we have existing odds - set all odds to 0
+        const existingData = existingOddsData.get(event.event_id)!;
+        const zeroPeriod = this.createZeroOddsPeriod(period);
+
+        await this.dbService.createNewOddsEntry(
+          existingData.fixtureId,
+          event.event_id,
+          zeroPeriod,
+          event.home,
+          event.away,
+          existingData
+        );
+        return { updated: true };
+      }
+      // No existing odds to update - skip
       return { updated: false };
     }
 

@@ -159,7 +159,7 @@ function analyzeX12Odds(fixture: any): Bet[] {
 
     if (!pinnacleX12 || !predictionX12) return bets;
 
-    const pinnacleMultiplier = Math.pow(10, fixture.pinnacle_decimals || 2); // Default to 2 if null
+    const pinnacleMultiplier = Math.pow(10, fixture.pinnacle_decimals || 3); // Default to 3 if null
     const predictionMultiplier = Math.pow(10, fixture.prediction_decimals || 3); // Default to 3 if null
 
     // Analyze each X12 outcome (Home, Draw, Away)
@@ -203,7 +203,7 @@ function analyzeOUOdds(fixture: any): Bet[] {
 
     if (!pinnacleOU || !predictionOU) return bets;
 
-    const pinnacleMultiplier = Math.pow(10, fixture.pinnacle_decimals || 2); // Default to 2 if null
+    const pinnacleMultiplier = Math.pow(10, fixture.pinnacle_decimals || 3); // Default to 3 if null
     const predictionMultiplier = Math.pow(10, fixture.prediction_decimals || 3); // Default to 3 if null
 
     // Focus on Over 2.5 and Under 2.5

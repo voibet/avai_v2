@@ -131,7 +131,7 @@ export class XGFetcher {
   private readonly rapidApiKey = process.env.RAPID_API_KEY;
   private readonly apiKey = process.env.API_KEY;
   private readonly apiBaseUrl = process.env.API_BASE_URL;
-  
+
   // Cache for tournament data to avoid refetching for same league/season
   private sofascoreCache = new Map<string, any[]>();
   private flashliveCache = new Map<string, any[]>();
@@ -141,13 +141,13 @@ export class XGFetcher {
     onProgress?: (message: string, current: number, total: number) => void
   ): Promise<{ success: boolean; message: string; updatedCount?: number; updatedFixtureIds?: number[] }> {
     try {
-   
+
       // Clear caches to ensure fresh data for new league
       this.clearCaches();
 
       // Get finished fixtures without XG data for this league
       const allFixtures = await this.getFixturesNeedingXG(leagueId);
-      
+
       // Deduplicate fixtures by ID
       const seenIds = new Set<number>();
       const fixtures = allFixtures.filter(f => {
@@ -155,7 +155,7 @@ export class XGFetcher {
         seenIds.add(f.id);
         return true;
       });
-      
+
       if (fixtures.length === 0) {
         return {
           success: true,
@@ -218,7 +218,7 @@ export class XGFetcher {
 
       // Get all leagues with XG source configuration
       const leagues = await this.getLeaguesWithXGConfig();
-      
+
       if (leagues.length === 0) {
         return {
           success: true,
@@ -302,8 +302,8 @@ export class XGFetcher {
     const league = result.rows[0];
     if (!league.xg_source) return null;
 
-    const xgSource = typeof league.xg_source === 'string' 
-      ? JSON.parse(league.xg_source) 
+    const xgSource = typeof league.xg_source === 'string'
+      ? JSON.parse(league.xg_source)
       : league.xg_source;
 
     const seasons = typeof league.seasons === 'string'
@@ -351,19 +351,27 @@ export class XGFetcher {
 
   private async fetchXGForFixture(fixture: Fixture): Promise<XGData | null> {
     try {
-      // Check cache to prevent repeated attempts within 5 minutes
-      if (shouldSkipXGFetch(fixture.id, 5 * 60 * 1000)) {
+      // Get the xg_source URL for this fixture's round
+      const xgSourceUrl = await this.getXGSourceUrlForFixture(fixture);
+
+      // Determine cache expiry based on source
+      // If no source found (null), use default 60 min expiry to avoid repeated config lookups for unconfigured leagues
+      // If NATIVE, use default
+      // If Sofascore/Flashlive, use specific expiry
+      const cacheExpiry = xgSourceUrl ? getXGCacheExpiry(xgSourceUrl) : 60 * 60 * 1000;
+
+      // Check cache to prevent repeated attempts
+      if (shouldSkipXGFetch(fixture.id, cacheExpiry)) {
         return null;
       }
 
-      log(`Processing fixture ${fixture.id}: ${fixture.home_team_name} vs ${fixture.away_team_name}`);
-
-      // Get the xg_source URL for this fixture's round
-      const xgSourceUrl = await this.getXGSourceUrlForFixture(fixture);
-      
       let result: XGData | null = null;
 
-      if (!xgSourceUrl || xgSourceUrl === 'NATIVE') {
+      if (!xgSourceUrl) {
+        return null;
+      }
+
+      if (xgSourceUrl === 'NATIVE') {
         // Use native API (football-api-sports.io)
         result = await this.fetchNativeXG(fixture);
       } else if (xgSourceUrl.includes('-')) {
@@ -392,21 +400,34 @@ export class XGFetcher {
     try {
       const leagueConfig = await this.getLeagueXGConfig(fixture.league_id);
       if (!leagueConfig || !leagueConfig.xgSource) {
+        log(`No XG config found for league ${fixture.league_id}`);
         return null;
       }
 
       const seasonKey = fixture.season.toString();
       const seasonConfig = leagueConfig.xgSource[seasonKey];
-      
+
       if (!seasonConfig || !seasonConfig.rounds) {
         return null;
       }
 
       // First, try to find a specific round match
       if (fixture.round) {
+        // 1. Exact match
         const roundConfig = seasonConfig.rounds[fixture.round];
         if (roundConfig && roundConfig.url) {
           return roundConfig.url;
+        }
+
+        // 2. Partial match (e.g. "Placement Group" matches "Placement Group - 6")
+        const roundKeys = Object.keys(seasonConfig.rounds);
+        for (const key of roundKeys) {
+          if (key !== 'ALL' && fixture.round.includes(key)) {
+            const partialMatchConfig = seasonConfig.rounds[key];
+            if (partialMatchConfig && partialMatchConfig.url) {
+              return partialMatchConfig.url;
+            }
+          }
         }
       }
 
@@ -425,6 +446,7 @@ export class XGFetcher {
 
   private async fetchNativeXG(fixture: Fixture): Promise<XGData | null> {
     try {
+      log(`Fetching native XG from API-Football for fixture ${fixture.id}`);
       const response = await axios.get(`${this.apiBaseUrl}/fixtures/statistics`, {
         headers: {
           'x-rapidapi-key': this.apiKey,
@@ -465,10 +487,10 @@ export class XGFetcher {
           }
         }
       }
-      
+
       // Rate limiting: 5 requests per second (200ms between requests)
       await new Promise(resolve => setTimeout(resolve, 250));
-      
+
       if (homeXG > 0 || awayXG > 0) {
         return { home: homeXG, away: awayXG };
       } else {
@@ -485,20 +507,21 @@ export class XGFetcher {
       const tournamentId = parseInt(tournamentIdStr);
       const seasonId = parseInt(seasonIdStr);
       const cacheKey = `${tournamentId}-${seasonId}`;
-      
+
       // Check cache first
       let allMatches = this.sofascoreCache.get(cacheKey);
-      
+
       if (!allMatches) {
         allMatches = [];
-        
+
         // Fetch multiple pages (up to 5) to get comprehensive match data
         let lastPageSize = 0;
         const seenMatchIds = new Set<number>();
         const targetFixtureCount = allFixturesForSource?.length || 400;
         const maxPages = 5; // Reduced from 10 to prevent long hangs
-        
+
         for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+          log(`Fetching Sofascore matches: tournament=${tournamentId}, season=${seasonId}, page=${pageIndex}`);
           const matchesResponse = await axios.get('https://sofascore.p.rapidapi.com/tournaments/get-last-matches', {
             headers: {
               'x-rapidapi-key': this.rapidApiKey,
@@ -514,45 +537,45 @@ export class XGFetcher {
 
           const matchData: SofascoreMatch = matchesResponse.data;
           const matches = matchData.events || [];
-          
+
           // Rate limiting: 5 requests per second (200ms between requests)
           await new Promise(resolve => setTimeout(resolve, 250));
-          
+
           // Stop if no matches found
           if (matches.length === 0) {
             break;
           }
-          
+
           // Filter out duplicate matches
           const newMatches = matches.filter(match => !seenMatchIds.has(match.id));
           if (newMatches.length === 0) {
             break;
           }
-          
+
           // Add new match IDs to seen set
           newMatches.forEach(match => seenMatchIds.add(match.id));
           allMatches.push(...newMatches);
-          
+
           // Stop early if we have significantly more matches than fixtures we need
           if (allMatches.length >= targetFixtureCount * 3) {
             break;
           }
-          
+
           // Stop if we got fewer matches than the previous page (indicates end of data)
           if (pageIndex > 0 && matches.length < lastPageSize) {
             break;
           }
-          
+
           lastPageSize = matches.length;
         }
-        
+
         // Cache the results
         this.sofascoreCache.set(cacheKey, allMatches);
       }
 
       // Get team mappings for more accurate matching
       const teamMappings = await this.getTeamMappings(fixture.home_team_id, fixture.away_team_id);
-      
+
       // Find matching fixture using mappings + fuzzy matching
       const matchingEvent = await this.findMatchingSofascoreFixture(fixture, allMatches, teamMappings);
       if (!matchingEvent) {
@@ -561,6 +584,7 @@ export class XGFetcher {
       }
 
       // Get statistics for the matched event
+      log(`Fetching Sofascore statistics for match ${matchingEvent.id}`);
       const statsResponse = await axios.get('https://sofascore.p.rapidapi.com/matches/get-statistics', {
         headers: {
           'x-rapidapi-key': this.rapidApiKey,
@@ -573,16 +597,16 @@ export class XGFetcher {
       });
 
       const statsData: SofascoreStatistics = statsResponse.data;
-      
+
       // Rate limiting: 5 requests per second (200ms between requests)
       await new Promise(resolve => setTimeout(resolve, 250));
-      
+
       // Check if statistics exists and is iterable
       if (!statsData.statistics || !Array.isArray(statsData.statistics)) {
         log(`No xG statistics available for match ${matchingEvent.id}`);
         return null;
       }
-      
+
       // Extract XG data from statistics
       for (const period of statsData.statistics) {
         if (period.period === 'ALL') {
@@ -624,6 +648,7 @@ export class XGFetcher {
 
         for (let page = 1; page <= maxPages; page++) {
           try {
+            log(`Fetching Flashlive results: tournament_stage=${tournamentStageId}, page=${page}`);
             const matchesResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/tournaments/results', {
               headers: {
                 'x-rapidapi-key': this.rapidApiKey,
@@ -638,44 +663,44 @@ export class XGFetcher {
             });
 
             const matchData: FlashliveMatch = matchesResponse.data;
-          const tournaments = matchData.DATA || [];
-          
-          // Rate limiting: 5 requests per second (200ms between requests)
-          await new Promise(resolve => setTimeout(resolve, 250));
-          
-          let pageEvents: any[] = [];
-          for (const tournament of tournaments) {
-            if (tournament.EVENTS) {
-              pageEvents.push(...tournament.EVENTS);
+            const tournaments = matchData.DATA || [];
+
+            // Rate limiting: 5 requests per second (200ms between requests)
+            await new Promise(resolve => setTimeout(resolve, 250));
+
+            let pageEvents: any[] = [];
+            for (const tournament of tournaments) {
+              if (tournament.EVENTS) {
+                pageEvents.push(...tournament.EVENTS);
+              }
             }
-          }
-          
-          // Stop if no events found
-          if (pageEvents.length === 0) {
-            break;
-          }
-          
-          // Filter out duplicate events
-          const newEvents = pageEvents.filter(event => !seenEventIds.has(event.EVENT_ID));
-          if (newEvents.length === 0) {
-            break;
-          }
-          
-          // Add new event IDs to seen set
-          newEvents.forEach(event => seenEventIds.add(event.EVENT_ID));
-          allEvents.push(...newEvents);
-          
-          // Stop early if we have significantly more events than fixtures we need
-          if (allEvents.length >= targetFixtureCount * 3) {
-            break;
-          }
-          
-          // Stop if we got fewer events than the previous page (indicates end of data)
-          if (page > 1 && pageEvents.length < lastPageSize) {
-            break;
-          }
-          
-          lastPageSize = pageEvents.length;
+
+            // Stop if no events found
+            if (pageEvents.length === 0) {
+              break;
+            }
+
+            // Filter out duplicate events
+            const newEvents = pageEvents.filter(event => !seenEventIds.has(event.EVENT_ID));
+            if (newEvents.length === 0) {
+              break;
+            }
+
+            // Add new event IDs to seen set
+            newEvents.forEach(event => seenEventIds.add(event.EVENT_ID));
+            allEvents.push(...newEvents);
+
+            // Stop early if we have significantly more events than fixtures we need
+            if (allEvents.length >= targetFixtureCount * 3) {
+              break;
+            }
+
+            // Stop if we got fewer events than the previous page (indicates end of data)
+            if (page > 1 && pageEvents.length < lastPageSize) {
+              break;
+            }
+
+            lastPageSize = pageEvents.length;
           } catch (error) {
 
             // Check if it's a 404 error - if so, the tournament stage ID is invalid, no point trying more pages
@@ -688,14 +713,14 @@ export class XGFetcher {
             continue;
           }
         }
-        
+
         // Cache the results
         this.flashliveCache.set(cacheKey, allEvents);
       }
 
       // Get team mappings for more accurate matching
       const teamMappings = await this.getTeamMappings(fixture.home_team_id, fixture.away_team_id);
-      
+
       // Find matching fixture using mappings + fuzzy matching
       const matchingEvent = await this.findMatchingFlashliveFixture(fixture, allEvents, teamMappings);
       if (!matchingEvent) {
@@ -705,6 +730,7 @@ export class XGFetcher {
       console.log(`Found matching Flashlive event: ${matchingEvent.EVENT_ID}`);
 
       // Get statistics for the matched event
+      log(`Fetching Flashlive statistics for event ${matchingEvent.EVENT_ID}`);
       const statsResponse = await axios.get('https://flashlive-sports.p.rapidapi.com/v1/events/statistics', {
         headers: {
           'x-rapidapi-key': this.rapidApiKey,
@@ -718,26 +744,26 @@ export class XGFetcher {
       });
 
       const statsData: FlashliveStatistics = statsResponse.data;
-      
+
       // Rate limiting: 5 requests per second (200ms between requests)
       await new Promise(resolve => setTimeout(resolve, 250));
-      
+
       // Check if DATA exists and is iterable
       if (!statsData.DATA || !Array.isArray(statsData.DATA)) {
         return null;
       }
-      
+
       // Extract XG data from statistics
       for (const stage of statsData.DATA) {
         if (!stage.GROUPS || !Array.isArray(stage.GROUPS)) {
           continue;
         }
-        
+
         for (const group of stage.GROUPS) {
           if (!group.ITEMS || !Array.isArray(group.ITEMS)) {
             continue;
           }
-          
+
           for (const item of group.ITEMS) {
             if (item.INCIDENT_NAME === 'Expected Goals (xG)') {
               return {
@@ -766,7 +792,7 @@ export class XGFetcher {
     const fixtureTime = fixture.timestamp;
     const homeScore = fixture.goals_home;
     const awayScore = fixture.goals_away;
-    
+
     for (const match of matches) {
       // Check if finished
       if (match.status.type !== 'finished') continue;
@@ -781,7 +807,7 @@ export class XGFetcher {
       // Check team names using mappings first, then fuzzy matching
       const homeTeamId = parseInt(fixture.home_team_id.toString());
       const awayTeamId = parseInt(fixture.away_team_id.toString());
-      
+
       const homeMatch = this.matchTeamName(
         teamMappings.get(homeTeamId) || [fixture.home_team_name],
         [match.homeTeam.name, match.homeTeam.shortName].filter(name => name != null)
@@ -803,7 +829,7 @@ export class XGFetcher {
     const fixtureTime = fixture.timestamp;
     const homeScore = fixture.goals_home;
     const awayScore = fixture.goals_away;
-    
+
     for (const event of events) {
       // Check if finished
       if (event.STAGE_TYPE !== 'FINISHED') continue;
@@ -820,7 +846,7 @@ export class XGFetcher {
       // Check team names using mappings first, then fuzzy matching
       const homeTeamId = parseInt(fixture.home_team_id.toString());
       const awayTeamId = parseInt(fixture.away_team_id.toString());
-      
+
       const homeMatch = this.matchTeamName(
         teamMappings.get(homeTeamId) || [fixture.home_team_name],
         [event.HOME_NAME, event.SHORTNAME_HOME].filter(name => name != null)
@@ -856,14 +882,14 @@ export class XGFetcher {
         }
       }
     }
-    
+
     // If no exact match found, fall back to fuzzy matching
     for (const knownName of validKnownNames) {
       if (this.fuzzyMatchTeamName(knownName, validCandidateNames)) {
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -885,22 +911,22 @@ export class XGFetcher {
 
     for (const candidate of validCandidateNames) {
       const candidateNormalized = normalize(candidate);
-      
+
       // Exact match
       if (originalNormalized === candidateNormalized) return true;
-      
+
       // Check if one contains the other (for cases like "Manchester City" vs "Man City")
       if (originalNormalized.includes(candidateNormalized) || candidateNormalized.includes(originalNormalized)) {
         return true;
       }
-      
+
       // Check common abbreviations and variations
       const originalWords = originalNormalized.split(' ');
       const candidateWords = candidateNormalized.split(' ');
-      
+
       // If both have multiple words, check if they share significant words
       if (originalWords.length > 1 && candidateWords.length > 1) {
-        const commonWords = originalWords.filter(word => 
+        const commonWords = originalWords.filter(word =>
           candidateWords.some(cWord => word.includes(cWord) || cWord.includes(word))
         );
         if (commonWords.length >= Math.min(originalWords.length, candidateWords.length) - 1) {
@@ -908,7 +934,7 @@ export class XGFetcher {
         }
       }
     }
-    
+
     return false;
   }
 
