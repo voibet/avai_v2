@@ -125,8 +125,12 @@ async function removeXGSourceRounds(request: Request) {
     }
 
     // Remove the specified rounds
+    let removedCount = 0;
     rounds.forEach((round: string) => {
-      delete currentXGSource[season].rounds[round];
+      if (currentXGSource[season].rounds[round]) {
+        delete currentXGSource[season].rounds[round];
+        removedCount++;
+      }
     });
 
     // If no rounds left in the season, remove the season entry
@@ -142,7 +146,7 @@ async function removeXGSourceRounds(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: `Successfully removed ${rounds.length} round(s) from season ${season}`
+      message: `Successfully removed ${removedCount} round(s) from season ${season}`
     });
 
   } catch (error) {

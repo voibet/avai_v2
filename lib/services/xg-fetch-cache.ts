@@ -12,10 +12,10 @@ declare global {
   var xgFetchCache: Map<number, XGFetchAttempt> | undefined;
 }
 
-// Default cache expiry time: 60 minutes
-const DEFAULT_CACHE_EXPIRY_MS = 60 * 60 * 1000;
-// Sofascore cache expiry: 4 hours
-const SOFASCORE_CACHE_EXPIRY_MS = 4 * 60 * 60 * 1000;
+// Default cache expiry time: 90 minutes
+const DEFAULT_CACHE_EXPIRY_MS = 90 * 60 * 1000;
+// Sofascore cache expiry: 600 minutes (10 hours)
+const SOFASCORE_CACHE_EXPIRY_MS = 600 * 60 * 1000;
 
 /**
  * Get the appropriate cache expiry time for an XG source

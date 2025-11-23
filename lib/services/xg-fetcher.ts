@@ -419,8 +419,18 @@ export class XGFetcher {
           return roundConfig.url;
         }
 
-        // 2. Partial match (e.g. "Placement Group" matches "Placement Group - 6")
+        // 2. Base round match (e.g. "Regular Season" matches "Regular Season - 1")
         const roundKeys = Object.keys(seasonConfig.rounds);
+        for (const key of roundKeys) {
+          if (key !== 'ALL' && fixture.round.startsWith(key + ' - ')) {
+            const baseMatchConfig = seasonConfig.rounds[key];
+            if (baseMatchConfig && baseMatchConfig.url) {
+              return baseMatchConfig.url;
+            }
+          }
+        }
+
+        // 3. Partial match (e.g. "Placement Group" matches "Placement Group - 6") - fallback
         for (const key of roundKeys) {
           if (key !== 'ALL' && fixture.round.includes(key)) {
             const partialMatchConfig = seasonConfig.rounds[key];

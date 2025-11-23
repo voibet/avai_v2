@@ -63,7 +63,7 @@ export default function XGSourceModal({
           </div>
 
           {/* Existing XG Source Configurations */}
-          {league.xg_source && league.xg_source[selectedSeason] && league.xg_source[selectedSeason].rounds && 
+          {league.xg_source && league.xg_source[selectedSeason] && league.xg_source[selectedSeason].rounds &&
            Object.keys(league.xg_source[selectedSeason].rounds).length > 0 && (
             <div className="mb-4 p-3 bg-gray-800 border border-blue-600 rounded">
               <div className="text-sm text-gray-300 mb-2">
@@ -72,7 +72,7 @@ export default function XGSourceModal({
               {(() => {
                 const roundsByUrl: Record<string, string[]> = {};
                 const rounds = league.xg_source[selectedSeason].rounds;
-                
+
                 // Group rounds by their URL
                 Object.entries(rounds).forEach(([round, config]) => {
                   const url = config.url || 'Unknown';
@@ -81,7 +81,7 @@ export default function XGSourceModal({
                   }
                   roundsByUrl[url].push(round);
                 });
-                
+
                 return Object.entries(roundsByUrl).map(([url, rounds]) => (
                   <div key={url} className="text-xs text-gray-400 mb-1">
                     <span className="text-yellow-400 font-mono">{url}</span>: {rounds.sort().join(', ')}
@@ -141,11 +141,11 @@ export default function XGSourceModal({
                   const originalRounds = roundMapping[round];
                   const count = originalRounds ? originalRounds.length : 1;
                   const countText = count > 1 ? ` (${count} rounds)` : '';
-                  
-                  // Check if this round already has an xG source
-                  const existingSource = league.xg_source && 
-                    league.xg_source[selectedSeason] && 
-                    league.xg_source[selectedSeason].rounds && 
+
+                  // Check if this base round has an xG source configured
+                  const existingSource = league.xg_source &&
+                    league.xg_source[selectedSeason] &&
+                    league.xg_source[selectedSeason].rounds &&
                     league.xg_source[selectedSeason].rounds[round];
 
                   return (

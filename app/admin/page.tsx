@@ -37,6 +37,7 @@ export default function AdminPage() {
     selectedRounds: Set<string>;
     customRoundName: string;
     xgSourceUrl: string;
+    roundMapping?: Record<string, string[]>;
   }>({
     isOpen: false,
     league: null,
@@ -44,7 +45,8 @@ export default function AdminPage() {
     availableRounds: [],
     selectedRounds: new Set(),
     customRoundName: '',
-    xgSourceUrl: 'NATIVE'
+    xgSourceUrl: 'NATIVE',
+    roundMapping: {}
   });
 
   const [deleteModal, setDeleteModal] = useState<{
@@ -317,20 +319,42 @@ export default function AdminPage() {
       const response = await fetch(`/api/admin/leagues/${league.id}/seasons/${currentSeason}/rounds`);
       const data = await response.json();
 
-      // Extract round names from the response
-      const roundNames = data.map((item: any) => item.round_name || item);
+      // Extract round names from the response and build mapping
+      const roundNames: string[] = [];
+      const roundMapping: Record<string, string[]> = {};
+
+      data.forEach((item: any) => {
+        const baseRound = item.round_name || item;
+        roundNames.push(baseRound);
+        if (item.original_rounds && item.original_rounds.length > 0) {
+          roundMapping[baseRound] = item.original_rounds;
+        }
+      });
 
       // Get existing XG source data
       const existingXGSource = league.xg_source && league.xg_source[currentSeason];
-      
+
       // Add any configured rounds that aren't in the fixtures list (like custom rounds: "ALL", etc.)
+      // But exclude individual rounds that are covered by base rounds
       if (existingXGSource && existingXGSource.rounds) {
         const configuredRounds = Object.keys(existingXGSource.rounds);
-        configuredRounds.forEach(round => {
-          if (!roundNames.includes(round)) {
-            roundNames.push(round);
+
+        // Filter out individual rounds that are covered by base rounds
+        const filteredConfiguredRounds = configuredRounds.filter(round => {
+          // Keep the round if it's not covered by any base round
+          for (const baseRound of roundNames) {
+            const originalRounds = roundMapping[baseRound];
+            if (originalRounds && originalRounds.includes(round)) {
+              // This individual round is covered by a base round, don't add it separately
+              return false;
+            }
           }
+          // This is either a base round or a custom round not covered by base rounds
+          return !roundNames.includes(round);
         });
+
+        roundNames.push(...filteredConfiguredRounds);
+
         // Sort the rounds for better UX
         roundNames.sort((a: string, b: string) => {
           // Custom rounds (like "ALL") go to the top
@@ -347,21 +371,22 @@ export default function AdminPage() {
         availableRounds: roundNames,
         selectedRounds: new Set<string>(),
         customRoundName: '',
-        xgSourceUrl: ''
+        xgSourceUrl: '',
+        roundMapping
       });
     } catch (error) {
       console.error('Failed to fetch rounds:', error);
-      
+
       // Even if fetching rounds fails, show any existing configured rounds
       const existingXGSource = league.xg_source && league.xg_source[currentSeason];
-      const configuredRounds = existingXGSource && existingXGSource.rounds 
+      const configuredRounds = existingXGSource && existingXGSource.rounds
         ? Object.keys(existingXGSource.rounds).sort((a: string, b: string) => {
             if (a === 'ALL') return -1;
             if (b === 'ALL') return 1;
             return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
           })
         : [];
-      
+
       setXGSourceModal({
         isOpen: true,
         league,
@@ -369,7 +394,8 @@ export default function AdminPage() {
         availableRounds: configuredRounds,
         selectedRounds: new Set(),
         customRoundName: '',
-        xgSourceUrl: ''
+        xgSourceUrl: '',
+        roundMapping: {}
       });
     }
   };
@@ -713,8 +739,11 @@ export default function AdminPage() {
 
     const roundsToUpdate: string[] = [];
 
-    // Add selected existing rounds
-    roundsToUpdate.push(...Array.from(xgSourceModal.selectedRounds));
+    // Add selected existing rounds - use base round names directly
+    // The XG lookup logic will handle matching fixtures with specific rounds to base round configurations
+    Array.from(xgSourceModal.selectedRounds).forEach(round => {
+      roundsToUpdate.push(round);
+    });
 
     // Add custom round if provided
     if (xgSourceModal.customRoundName.trim()) {
@@ -771,8 +800,10 @@ export default function AdminPage() {
 
     const roundsToRemove: string[] = [];
 
-    // Add selected existing rounds
-    roundsToRemove.push(...Array.from(xgSourceModal.selectedRounds));
+    // Add selected existing rounds - use base round names directly
+    Array.from(xgSourceModal.selectedRounds).forEach(round => {
+      roundsToRemove.push(round);
+    });
 
     // Add custom round if provided
     if (xgSourceModal.customRoundName.trim()) {
@@ -1783,6 +1814,7 @@ export default function AdminPage() {
           onSubmit={handleXGSourceSubmit}
           onRemoveRounds={handleRemoveRounds}
           onClearConfiguration={clearXGSourceConfiguration}
+          roundMapping={xgSourceModal.roundMapping}
         />
 
         {/* Delete Confirmation Modal */}

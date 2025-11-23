@@ -92,3 +92,4 @@ pub async fn find_fixture_by_event(
 
     Ok(fixture_result)
 }
+
