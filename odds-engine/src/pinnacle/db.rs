@@ -2,7 +2,7 @@ use crate::pinnacle::types::PinnaclePeriod;
 use serde_json::Value;
 use sqlx::{PgPool, Row};
 use std::collections::{HashMap, HashSet};
-use tracing::info;
+use tracing::{debug, info};
 use chrono::{DateTime, Utc};
 
 // Constants
@@ -124,32 +124,29 @@ impl PinnacleDbService {
 
         // Get league_id from in-memory mapping (no DB query!)
         let league_id = match self.league_mapping.get(&pinnacle_league_id) {
-            Some(&id) => id,
+            Some(id) => *id,
             None => return Ok(None),
         };
 
-        // Find fixture
-        let fixture_id: Option<i64> = sqlx::query_scalar(
-            r#"
-            SELECT id FROM football_fixtures
-            WHERE league_id = $1
-              AND (
-                  (LOWER(home_team_name) LIKE LOWER($2) AND LOWER(away_team_name) LIKE LOWER($3))
-                  OR (similarity(home_team_name, $4) > 0.6 AND similarity(away_team_name, $5) > 0.6)
-              )
-              AND date BETWEEN $6 - INTERVAL '24 hours' AND $6 + INTERVAL '24 hours'
-            ORDER BY date
-            LIMIT 1
-            "#
-        )
-        .bind(league_id)
-        .bind(format!("%{}%", home_team))
-        .bind(format!("%{}%", away_team))
-        .bind(home_team)
-        .bind(away_team)
-        .bind(start_time.naive_utc())
-        .fetch_optional(&self.pool)
-        .await?;
+        // Use global fixture matching
+        use crate::shared::fixture_matching::{find_matching_fixture, FixtureMatchCriteria};
+
+        let criteria = FixtureMatchCriteria {
+            start_time: start_time.naive_utc(),
+            home_team: home_team.to_string(),
+            away_team: away_team.to_string(),
+            league_id,
+        };
+
+        // We need to map the generic error from find_matching_fixture to sqlx::Error
+        // or just unwrap/map_err since the signature returns sqlx::Error
+        let fixture_id = match find_matching_fixture(&self.pool, criteria).await {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::error!("Error in global fixture matching: {}", e);
+                return Err(sqlx::Error::Protocol(e.to_string().into()));
+            }
+        };
 
         // Cache the result if found
         if let Some(fid) = fixture_id {
@@ -359,45 +356,45 @@ impl PinnacleDbService {
             if !final_max_stakes.is_empty() { obj.insert("stakes_ts".to_string(), serde_json::json!(timestamp)); }
         }
 
-        let upsert_query = r#"
-        INSERT INTO football_odds (
-            fixture_id, bookie_id, bookie, decimals,
-            odds_x12, odds_ah, odds_ou, lines, ids, max_stakes, latest_t
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        ON CONFLICT (fixture_id, bookie) DO UPDATE SET
-            bookie_id = EXCLUDED.bookie_id,
-            odds_x12 = EXCLUDED.odds_x12,
-            odds_ah = EXCLUDED.odds_ah,
-            odds_ou = EXCLUDED.odds_ou,
-            lines = EXCLUDED.lines,
-            ids = EXCLUDED.ids,
-            max_stakes = EXCLUDED.max_stakes,
-            latest_t = EXCLUDED.latest_t,
-            updated_at = NOW()
-        "#;
-
-        sqlx::query(upsert_query)
-            .bind(fixture_id)
-            .bind(event_id)
-            // In TS `getExistingOddsMap`: `WHERE bookie_id = ANY($1)` and $1 is `eventIds` (numbers).
-            // So `bookie_id` column is likely text or bigint.
-            // Let's bind as string to be safe if it's text, or it will auto-cast if bigint.
-            .bind("Pinnacle")
-            .bind(PINNACLE_DECIMALS)
-            .bind(if !final_x12.is_empty() { Some(serde_json::json!(final_x12)) } else { None })
-            .bind(if !final_ah.is_empty() { Some(serde_json::json!(final_ah)) } else { None })
-            .bind(if !final_ou.is_empty() { Some(serde_json::json!(final_ou)) } else { None })
-            .bind(if !final_lines.is_empty() { Some(serde_json::json!(final_lines)) } else { None })
-            .bind(if !ids.is_empty() { Some(serde_json::json!(ids)) } else { None })
-            .bind(if !final_max_stakes.is_empty() { Some(serde_json::json!(final_max_stakes)) } else { None })
-            .bind(latest_t)
-            .execute(&self.pool)
-            .await?;
-
         if !updates.is_empty() {
+            let upsert_query = r#"
+            INSERT INTO football_odds (
+                fixture_id, bookie_id, bookie, decimals,
+                odds_x12, odds_ah, odds_ou, lines, ids, max_stakes, latest_t
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (fixture_id, bookie) DO UPDATE SET
+                bookie_id = EXCLUDED.bookie_id,
+                odds_x12 = EXCLUDED.odds_x12,
+                odds_ah = EXCLUDED.odds_ah,
+                odds_ou = EXCLUDED.odds_ou,
+                lines = EXCLUDED.lines,
+                ids = EXCLUDED.ids,
+                max_stakes = EXCLUDED.max_stakes,
+                latest_t = EXCLUDED.latest_t,
+                updated_at = NOW()
+            "#;
+
+            sqlx::query(upsert_query)
+                .bind(fixture_id)
+                .bind(event_id)
+                // In TS `getExistingOddsMap`: `WHERE bookie_id = ANY($1)` and $1 is `eventIds` (numbers).
+                // So `bookie_id` column is likely text or bigint.
+                // Let's bind as string to be safe if it's text, or it will auto-cast if bigint.
+                .bind("Pinnacle")
+                .bind(PINNACLE_DECIMALS)
+                .bind(if !final_x12.is_empty() { Some(serde_json::json!(final_x12)) } else { None })
+                .bind(if !final_ah.is_empty() { Some(serde_json::json!(final_ah)) } else { None })
+                .bind(if !final_ou.is_empty() { Some(serde_json::json!(final_ou)) } else { None })
+                .bind(if !final_lines.is_empty() { Some(serde_json::json!(final_lines)) } else { None })
+                .bind(if !ids.is_empty() { Some(serde_json::json!(ids)) } else { None })
+                .bind(if !final_max_stakes.is_empty() { Some(serde_json::json!(final_max_stakes)) } else { None })
+                .bind(latest_t)
+                .execute(&self.pool)
+                .await?;
+
             info!("✅ Updated odds for {} v {} (fixture: {}). Changes: {:?}. Database updated.", home_team, away_team, fixture_id, updates);
         } else {
-            // info!("No changes for {} v {} (fixture: {})", home_team, away_team, fixture_id);
+            debug!("No changes for {} v {} (fixture: {})", home_team, away_team, fixture_id);
         }
 
         Ok(())

@@ -37,21 +37,42 @@ impl MonacoWebSocketClient {
 
     pub async fn start(&self) {
         let mut token_refresh_rx = self.subscribe_token_refresh().await;
+        let mut retry_count: u32 = 0;
+        let max_backoff_secs = 60; // Cap at 1 minute
 
         loop {
+            // Calculate backoff with exponential strategy (2^n seconds, capped at max)
+            let backoff_secs = if retry_count == 0 {
+                0
+            } else {
+                std::cmp::min(2u64.pow(retry_count.saturating_sub(1)), max_backoff_secs)
+            };
+
+            if backoff_secs > 0 {
+                info!("⏳ Waiting {}s before reconnecting (attempt {})...", backoff_secs, retry_count + 1);
+                sleep(Duration::from_secs(backoff_secs)).await;
+            }
+
             // Start WebSocket connection
             let connect_task = self.connect_and_listen();
 
             tokio::select! {
                 result = connect_task => {
-                    if let Err(e) = result {
-                        error!("❌ WebSocket connection error: {}. Reconnecting in 5s...", e);
-                        sleep(Duration::from_secs(5)).await;
+                    match result {
+                        Ok(_) => {
+                            info!("✅ WebSocket connection closed gracefully");
+                            retry_count = 0; // Reset on successful connection
+                        }
+                        Err(e) => {
+                            retry_count = retry_count.saturating_add(1);
+                            error!("❌ WebSocket error (attempt {}): {}", retry_count, e);
+                        }
                     }
                 }
                 // Listen for token refresh notifications
                 Ok(_) = token_refresh_rx.recv() => {
                     info!("🔄 Token refreshed, reconnecting WebSocket...");
+                    retry_count = 0; // Reset retry counter on token refresh
                     // Resubscribe to token refresh notifications after reconnection
                     token_refresh_rx = self.subscribe_token_refresh().await;
                 }
@@ -92,10 +113,10 @@ impl MonacoWebSocketClient {
                 if data["type"] == "AuthenticationUpdate" {
                     info!("✅ Monaco Authentication Confirmed. Subscribing to updates...");
                     
+                    // Only subscribe to price and status updates (EventUpdate handled by periodic refresh)
                     let subscriptions = vec![
                         ("MarketPriceUpdate", vec!["*"]),
                         ("MarketStatusUpdate", vec!["*"]),
-                        ("EventUpdate", vec!["*"]),
                     ];
 
                     for (sub_type, ids) in subscriptions {

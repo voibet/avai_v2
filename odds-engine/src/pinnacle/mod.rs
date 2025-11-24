@@ -7,7 +7,7 @@ use crate::pinnacle::db::PinnacleDbService;
 use crate::pinnacle::types::PinnaclePeriod;
 use sqlx::PgPool;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 pub struct PinnacleService {
     client: PinnacleApiClient,
@@ -52,14 +52,14 @@ impl PinnacleService {
             return Ok(());
         }
 
-        info!("Fetched {} events from Pinnacle", market_data.events.len());
+        debug!("Fetched {} events from Pinnacle", market_data.events.len());
 
         // Filter events
         let filtered_events: Vec<_> = market_data.events.into_iter()
             .filter(|e| self.db.is_league_known(e.league_id))
             .collect();
 
-        info!("{} events remain after filtering by known leagues", filtered_events.len());
+        debug!("{} events remain after filtering by known leagues", filtered_events.len());
 
         if filtered_events.is_empty() {
             return Ok(());
@@ -78,12 +78,12 @@ impl PinnacleService {
                 Some(p) => match &p.num_0 {
                     Some(num0) => num0,
                     None => {
-                        info!("Skipping event {}: No period 0", event.event_id);
+                        debug!("Skipping event {}: No period 0", event.event_id);
                         continue;
                     },
                 },
                 None => {
-                    info!("Skipping event {}: No periods", event.event_id);
+                    debug!("Skipping event {}: No periods", event.event_id);
                     continue;
                 },
             };
@@ -125,7 +125,7 @@ impl PinnacleService {
                     fixtures_updated += 1;
                     events_processed += 1;
                 } else {
-                    info!("Skipping event {}: Market closed (status={}, has_odds={}, future={}, meta={})",
+                    debug!("Skipping event {}: Market closed (status={}, has_odds={}, future={}, meta={})",
                         event.event_id, period.period_status, has_odds, cutoff_in_future, meta_open);
                 }
                 continue;
@@ -176,7 +176,7 @@ impl PinnacleService {
         }
 
         if events_processed > 0 {
-            info!("Processed {} events, updated {} fixtures", events_processed, fixtures_updated);
+            debug!("Processed {} events, updated {} fixtures", events_processed, fixtures_updated);
         }
 
         Ok(())

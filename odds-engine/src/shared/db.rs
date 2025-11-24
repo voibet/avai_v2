@@ -1,14 +1,14 @@
-pub mod monaco_persistence;
-
-use crate::order_book::OrderBook;
+use crate::shared::types::OrderBook;
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use tracing::info;
+use sqlx::Row;
 
-fn transform_price(price: f64) -> i32 {
-    (((price - 1.0) * 0.99 + 1.0) * 1000.0).floor() as i32
+pub fn transform_price(price: f64, decimals: i32) -> i32 {
+    let multiplier = 10_f64.powi(decimals);
+    (((price - 1.0) * 0.99 + 1.0) * multiplier).floor() as i32
 }
 
 pub async fn update_database_with_best_prices(
@@ -24,7 +24,7 @@ pub async fn update_database_with_best_prices(
     // Fetch existing data
     let existing = sqlx::query(&format!(
         r#"
-        SELECT {}, lines, ids, max_stakes, latest_t
+        SELECT {}, lines, ids, max_stakes, latest_t, decimals
         FROM football_odds
         WHERE fixture_id = $1 AND bookie = $2
         "#,
@@ -41,7 +41,7 @@ pub async fn update_database_with_best_prices(
 
     let row = existing.unwrap();
     
-    use sqlx::Row;
+    let decimals: i32 = row.get("decimals");
     let mut odds_array: Vec<Value> = serde_json::from_value(row.get(field_name.as_str())).unwrap_or_default();
     let lines_data: Vec<Value> = serde_json::from_value(row.get("lines")).unwrap_or_default();
     let mut max_stakes_data: Vec<Value> = serde_json::from_value(row.get("max_stakes")).unwrap_or_default();
@@ -75,7 +75,7 @@ pub async fn update_database_with_best_prices(
                 if let Some(idx) = outcome_index {
                     if idx < 3 && !price_levels.is_empty() {
                         let best_level = &price_levels[0];
-                        x12_prices[idx] = transform_price(best_level.price);
+                        x12_prices[idx] = transform_price(best_level.price, decimals);
                         x12_stakes[idx] = best_level.liquidity;
                     }
                 }
@@ -130,7 +130,7 @@ pub async fn update_database_with_best_prices(
                             if let Some(line_index) = line_values.iter().position(|&v| v == line_val) {
                                 if !price_levels.is_empty() {
                                     let best_level = &price_levels[0];
-                                    let transformed_price = transform_price(best_level.price);
+                                    let transformed_price = transform_price(best_level.price, decimals);
                                     let is_home = out_idx % 2 == 0;
 
                                     if is_home {
@@ -175,7 +175,7 @@ pub async fn update_database_with_best_prices(
     sqlx::query(&format!(
         r#"
         UPDATE football_odds
-        SET {} = $1, max_stakes = $2, latest_t = $3
+        SET {} = $1, max_stakes = $2, latest_t = $3, updated_at = NOW()
         WHERE fixture_id = $4 AND bookie = $5
         "#,
         field_name

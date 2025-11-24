@@ -330,7 +330,7 @@ export class XGFetcher {
 
     for (const fixture of fixtures) {
       try {
-        const xgData = await this.fetchXGForFixture(fixture);
+        const xgData = await this.fetchXGForFixture(fixture, fixtures);
         if (xgData) {
           console.log(`Found XG data for fixture ${fixture.id}: Home ${xgData.home}, Away ${xgData.away}`);
           await this.updateFixtureXG(fixture.id, xgData);
@@ -349,7 +349,7 @@ export class XGFetcher {
     return { count: updatedCount, updatedIds };
   }
 
-  private async fetchXGForFixture(fixture: Fixture): Promise<XGData | null> {
+  private async fetchXGForFixture(fixture: Fixture, allFixtures?: Fixture[]): Promise<XGData | null> {
     try {
       // Get the xg_source URL for this fixture's round
       const xgSourceUrl = await this.getXGSourceUrlForFixture(fixture);
@@ -376,10 +376,10 @@ export class XGFetcher {
         result = await this.fetchNativeXG(fixture);
       } else if (xgSourceUrl.includes('-')) {
         // Sofascore format: "55-71183" (tournamentId-seasonId)
-        result = await this.fetchSofascoreXG(fixture, xgSourceUrl);
+        result = await this.fetchSofascoreXG(fixture, xgSourceUrl, allFixtures);
       } else {
         // Flashlive format: "8poTvlIq" (tournamentStageId)
-        result = await this.fetchFlashliveXG(fixture, xgSourceUrl);
+        result = await this.fetchFlashliveXG(fixture, xgSourceUrl, allFixtures);
       }
 
       // Record the attempt result
@@ -524,11 +524,15 @@ export class XGFetcher {
       if (!allMatches) {
         allMatches = [];
 
-        // Fetch multiple pages (up to 5) to get comprehensive match data
+        // If we have fixtures to match, track which ones we've found
+        const fixturesToFind = allFixturesForSource ? new Set(allFixturesForSource.map(f => f.id)) : null;
+        const foundFixtures = new Set<number>();
+        let teamMappings: Map<number, string[]> | null = null;
+
+        // Fetch multiple pages until we find matches for all target fixtures or hit limits
         let lastPageSize = 0;
         const seenMatchIds = new Set<number>();
-        const targetFixtureCount = allFixturesForSource?.length || 400;
-        const maxPages = 5; // Reduced from 10 to prevent long hangs
+        const maxPages = 5;
 
         for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
           log(`Fetching Sofascore matches: tournament=${tournamentId}, season=${seasonId}, page=${pageIndex}`);
@@ -566,9 +570,27 @@ export class XGFetcher {
           newMatches.forEach(match => seenMatchIds.add(match.id));
           allMatches.push(...newMatches);
 
-          // Stop early if we have significantly more matches than fixtures we need
-          if (allMatches.length >= targetFixtureCount * 3) {
-            break;
+          // If we have target fixtures, check if we've found matches for all of them
+          if (fixturesToFind && allFixturesForSource) {
+            // Load team mappings once for all fixtures
+            if (!teamMappings) {
+              teamMappings = await this.getTeamMappingsForFixtures(allFixturesForSource);
+            }
+
+            for (const targetFixture of allFixturesForSource) {
+              if (!foundFixtures.has(targetFixture.id)) {
+                const matchingEvent = this.findMatchingSofascoreFixture(targetFixture, newMatches, teamMappings);
+                if (matchingEvent) {
+                  foundFixtures.add(targetFixture.id);
+                }
+              }
+            }
+
+            // Stop if we've found matches for all target fixtures
+            if (foundFixtures.size === fixturesToFind.size) {
+              log(`Found matches for all ${fixturesToFind.size} target fixtures, stopping pagination`);
+              break;
+            }
           }
 
           // Stop if we got fewer matches than the previous page (indicates end of data)
@@ -650,10 +672,14 @@ export class XGFetcher {
       if (!allEvents) {
         allEvents = [];
 
-        // Fetch multiple pages (up to 5) to get comprehensive match data
+        // If we have fixtures to match, track which ones we've found
+        const fixturesToFind = allFixturesForSource ? new Set(allFixturesForSource.map(f => f.id)) : null;
+        const foundFixtures = new Set<number>();
+        let teamMappings: Map<number, string[]> | null = null;
+
+        // Fetch multiple pages until we find matches for all target fixtures or hit limits
         let lastPageSize = 0;
         const seenEventIds = new Set<string>();
-        const targetFixtureCount = allFixturesForSource?.length || 400;
         const maxPages = 5; // Reduced from 10 to prevent long hangs
 
         for (let page = 1; page <= maxPages; page++) {
@@ -700,9 +726,27 @@ export class XGFetcher {
             newEvents.forEach(event => seenEventIds.add(event.EVENT_ID));
             allEvents.push(...newEvents);
 
-            // Stop early if we have significantly more events than fixtures we need
-            if (allEvents.length >= targetFixtureCount * 3) {
-              break;
+            // If we have target fixtures, check if we've found matches for all of them
+            if (fixturesToFind && allFixturesForSource) {
+              // Load team mappings once for all fixtures
+              if (!teamMappings) {
+                teamMappings = await this.getTeamMappingsForFixtures(allFixturesForSource);
+              }
+
+              for (const targetFixture of allFixturesForSource) {
+                if (!foundFixtures.has(targetFixture.id)) {
+                  const matchingEvent = this.findMatchingFlashliveFixture(targetFixture, newEvents, teamMappings);
+                  if (matchingEvent) {
+                    foundFixtures.add(targetFixture.id);
+                  }
+                }
+              }
+
+              // Stop if we've found matches for all target fixtures
+              if (foundFixtures.size === fixturesToFind.size) {
+                log(`Found matches for all ${fixturesToFind.size} target fixtures, stopping pagination`);
+                break;
+              }
             }
 
             // Stop if we got fewer events than the previous page (indicates end of data)
@@ -963,6 +1007,35 @@ export class XGFetcher {
       SELECT id, name, mappings FROM football_teams
       WHERE id = ANY($1)
     `, [teamIds]);
+
+    const mappings = new Map<number, string[]>();
+
+    for (const team of result.rows) {
+      const teamMappings = [team.name].filter((name: any) => name != null && typeof name === 'string');
+
+      if (team.mappings && Array.isArray(team.mappings)) {
+        const validMappings = team.mappings.filter((name: any) => name != null && typeof name === 'string');
+        teamMappings.push(...validMappings);
+      }
+
+      mappings.set(team.id, teamMappings);
+    }
+
+    return mappings;
+  }
+
+  private async getTeamMappingsForFixtures(fixtures: Fixture[]): Promise<Map<number, string[]>> {
+    const teamIds = fixtures.flatMap(f => [
+      parseInt(f.home_team_id.toString()),
+      parseInt(f.away_team_id.toString())
+    ]);
+
+    const uniqueTeamIds = [...new Set(teamIds)];
+
+    const result = await executeQuery(`
+      SELECT id, name, mappings FROM football_teams
+      WHERE id = ANY($1)
+    `, [uniqueTeamIds]);
 
     const mappings = new Map<number, string[]>();
 

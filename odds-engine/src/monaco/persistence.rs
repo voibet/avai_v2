@@ -118,7 +118,7 @@ pub async fn ensure_fixture_odds_record(
         sqlx::query(
             r#"
             UPDATE football_odds
-            SET lines = $1, ids = $2, max_stakes = $3, latest_t = $4, bookie_id = $5
+            SET lines = $1, ids = $2, max_stakes = $3, latest_t = $4, bookie_id = $5, updated_at = NOW()
             WHERE fixture_id = $6 AND bookie = $7
             "#
         )

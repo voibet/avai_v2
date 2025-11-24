@@ -1,7 +1,7 @@
 mod config;
-mod database;
+mod shared;
 mod monaco;
-mod order_book;
+
 mod pinnacle;
 
 use axum::{
@@ -39,7 +39,9 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     dotenvy::dotenv().ok();
 
     info!("🚀 Starting Rust Odds Engine...");
@@ -50,8 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Postgres with proper pool configuration
     info!("🔌 Connecting to Postgres...");
     let pool = PgPoolOptions::new()
-        .max_connections(50)
-        .min_connections(5)
+        .max_connections(20)
+        .min_connections(2)
         .acquire_timeout(Duration::from_secs(5))
         .idle_timeout(Duration::from_secs(600))  // 10 minutes
         .max_lifetime(Duration::from_secs(1800))  // 30 minutes
@@ -85,18 +87,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             monaco_api.clone()
         );
 
-        // Initialize markets and mappings
+        // Initialize markets and mappings with retry
         info!("🔄 Fetching and processing markets...");
-        if let Err(e) = crate::monaco::market_init::fetch_and_process_markets(
-            &monaco_api,
-            &state.db,
-            &state.market_mapping,
-            &state.event_to_fixture,
-            &state.order_book,
-        )
-        .await
-        {
-            tracing::error!("Error initializing markets: {}. Continuing anyway...", e);
+        let mut retry_count = 0;
+        let max_retries = 3;
+        
+        loop {
+            match crate::monaco::market_init::fetch_and_process_markets(
+                &monaco_api,
+                &state.db,
+                &state.market_mapping,
+                &state.event_to_fixture,
+                &state.order_book,
+            )
+            .await
+            {
+                Ok(_) => {
+                    info!("✅ Markets initialized successfully");
+                    break;
+                }
+                Err(e) => {
+                    retry_count += 1;
+                    if retry_count >= max_retries {
+                        tracing::error!("❌ Failed to initialize markets after {} attempts: {}", max_retries, e);
+                        tracing::error!("❌ Monaco service will continue but may not have initial market data");
+                        break;
+                    }
+                    let wait_secs = 2u64.pow(retry_count);
+                    tracing::warn!("⚠️ Market initialization failed (attempt {}/{}): {}. Retrying in {}s...", 
+                        retry_count, max_retries, e, wait_secs);
+                    tokio::time::sleep(Duration::from_secs(wait_secs)).await;
+                }
+            }
         }
 
         // Spawn Ingestion Task
@@ -104,6 +126,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ingestion_state = state.clone();
         tokio::spawn(async move {
             start_ingestion_engine(ingestion_state, monaco_ws).await;
+        });
+
+        // Spawn Periodic Market Refresh Task (every 60 minutes)
+        info!("🔄 Starting periodic market refresh (every 60 minutes)...");
+        let refresh_state = state.clone();
+        let refresh_api = monaco_api.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(3600)); // 60 minutes
+            loop {
+                interval.tick().await;
+                info!("🔄 Refreshing markets for new events...");
+                if let Err(e) = crate::monaco::market_init::fetch_and_process_markets(
+                    &refresh_api,
+                    &refresh_state.db,
+                    &refresh_state.market_mapping,
+                    &refresh_state.event_to_fixture,
+                    &refresh_state.order_book,
+                )
+                .await
+                {
+                    tracing::error!("Error during periodic market refresh: {}", e);
+                }
+            }
         });
     } else {
         info!("📡 Monaco services disabled (MONACO_ODDS != true)");
@@ -201,23 +246,20 @@ async fn start_ingestion_engine(state: Arc<AppState>, monaco_ws: MonacoWebSocket
                         }
                     });
                 }
-                "EventUpdate" => {
-                    if message_count % 10 == 0 {
-                        info!("📅 EventUpdate received");
-                    }
-                    // TODO: Fetch markets for new events
-                }
                 "MarketStatusUpdate" => {
-                    if message_count % 50 == 0 {
-                        info!("🔄 MarketStatusUpdate received");
-                    }
+                    let state_clone = state.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_market_status_update(state_clone, msg).await {
+                            tracing::error!("Error handling market status update: {}", e);
+                        }
+                    });
                 }
                 _ => {}
             }
         }
         
         if message_count % 200 == 0 {
-            info!("📊 Processed {} messages", message_count);
+            info!("📊 Processed {} messages total", message_count);
         }
     }
 }
@@ -279,7 +321,7 @@ async fn handle_price_update(
     }
 
     // Update database with best prices
-    database::update_database_with_best_prices(
+    shared::db::update_database_with_best_prices(
         &state.db,
         fixture_id,
         &market_mapping.market_type,
@@ -291,3 +333,84 @@ async fn handle_price_update(
     Ok(())
 }
 
+async fn handle_market_status_update(
+    state: Arc<AppState>,
+    message: Value,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Extract message fields
+    let market_id = match message["marketId"].as_str() {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let event_id = match message["eventId"].as_str() {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let status = message["status"].as_str().unwrap_or("Unknown");
+    let in_play_status = message["inPlayStatus"].as_str().unwrap_or("NotApplicable");
+
+    // Check if market should be zeroed out
+    // Zero out if: status != "Open" OR inPlayStatus == "InPlay"
+    let should_zero = status != "Open" || in_play_status == "InPlay";
+
+    if !should_zero {
+        return Ok(()); // Market is open and pre-play, nothing to do
+    }
+
+    info!("🔒 Market {} closed/in-play (status: {}, inPlay: {}), zeroing odds", market_id, status, in_play_status);
+
+    // Lookup market mapping
+    let mapping_key = format!("{}-{}", event_id, market_id);
+    let market_mapping = match state.market_mapping.get(&mapping_key) {
+        Some(mapping) => mapping.clone(),
+        None => {
+            // Market not mapped yet, skip
+            return Ok(());
+        }
+    };
+
+    // Get fixture ID
+    let fixture_id = match market_mapping.fixture_id {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    // Zero out the order book for this market
+    {
+        let mut ob = state.order_book.lock().await;
+        ob.remove(fixture_id, &market_mapping.market_type);
+    }
+
+    // Create empty order book (all outcomes with empty price levels)
+    let empty_order_book = {
+        let mut book = HashMap::new();
+        if let Some(outcome_mappings) = &market_mapping.outcome_mappings {
+            for outcome_id in outcome_mappings.keys() {
+                book.insert(outcome_id.clone(), vec![]);
+            }
+        }
+        book
+    };
+
+    // Get all market mappings for this fixture (needed for database update)
+    let mut mappings = HashMap::new();
+    for entry in state.market_mapping.iter() {
+        if entry.value().fixture_id == Some(fixture_id) {
+            mappings.insert(entry.key().clone(), entry.value().clone());
+        }
+    }
+
+    // Update database with zeroed prices
+    shared::db::update_database_with_best_prices(
+        &state.db,
+        fixture_id,
+        &market_mapping.market_type,
+        &empty_order_book,
+        &mappings,
+    )
+    .await?;
+
+    Ok(())
+}

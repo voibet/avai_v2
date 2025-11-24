@@ -10,7 +10,11 @@ High-performance, low-latency odds ingestion and fair odds calculation engine.
 ## Setup
 
 1. Ensure your `.env` file in the root directory has the necessary variables:
+   - `PORT`
    - `DATABASE_URL`
+   - `RAPID_API_KEY`
+   - `PINNACLE_ODDS`
+   - `MONACO_ODDS`
    - `MONACO_BASE_URL`
    - `MONACO_STREAM_URL`
    - `MONACO_APP_ID`
@@ -26,16 +30,17 @@ High-performance, low-latency odds ingestion and fair odds calculation engine.
    cargo run --release
    ```
 
+4. Build after changes:
+   ```bash
+   cargo build
+   ```
+
 ## Architecture
 
 - **Ingestion**: Connects to Bookmaker APIs/WebSockets (Monaco, Pinnacle).
 - **Calculation**: Calculates fair odds in real-time using "Margin Proportional to Odds" method.
-- **Streaming**: Exposes a WebSocket endpoint at `ws://localhost:8080/ws` for the frontend to consume.
+- **Streaming**: Exposes a WebSocket endpoint at `ws://localhost:{port}/ws` for the frontend to consume.
 - **Persistence**: Asynchronously writes updates to PostgreSQL for history.
-
-## API
-
-### WebSocket `ws://localhost:8080/ws`
 
 Subscribe to receive real-time JSON updates:
 

@@ -1,5 +1,4 @@
-use crate::database::monaco_persistence;
-use crate::monaco::fixture_mapping;
+use crate::monaco::persistence;
 use crate::monaco::types::{MarketMapping, MonacoMarket};
 use dashmap::DashMap;
 use sqlx::PgPool;
@@ -7,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
+use serde_json::Value;
 
 use crate::monaco::order_book::MonacoOrderBook;
 
@@ -19,6 +19,15 @@ pub async fn fetch_and_process_markets(
     order_book: &Arc<Mutex<MonacoOrderBook>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     info!("🔄 Fetching markets from Monaco API...");
+
+    // Load league map for efficient lookup
+    let league_map = match load_league_map(pool).await {
+        Ok(map) => map,
+        Err(e) => {
+            tracing::error!("Failed to load league map: {}", e);
+            HashMap::new()
+        }
+    };
 
     // Fetch all markets (with paging)
     let markets_data = {
@@ -150,7 +159,7 @@ pub async fn fetch_and_process_markets(
         };
 
         // Try to find matching fixture
-        match fixture_mapping::find_fixture_by_event(pool, &event, &event_id).await {
+        match find_fixture_for_monaco_event(pool, &event, &event_id, &league_map).await {
             Ok(Some(fixture_id)) => {
                 // Update market mappings with fixture_id
                 for market in &event_markets {
@@ -163,7 +172,7 @@ pub async fn fetch_and_process_markets(
                 event_to_fixture.insert(event_id.clone(), fixture_id);
 
                 // Initialize database record
-                if let Err(e) = monaco_persistence::ensure_fixture_odds_record(pool, fixture_id, event_markets.clone()).await {
+                if let Err(e) = persistence::ensure_fixture_odds_record(pool, fixture_id, event_markets.clone()).await {
                     tracing::error!("Error creating fixture odds record for fixture_id={}: {}", fixture_id, e);
                 } else {
                     // Initialize OrderBook
@@ -213,4 +222,95 @@ fn get_total_value(market: &MonacoMarket) -> Option<f64> {
         let re = regex::Regex::new(r"Total Goals Over/Under ([\d.]+)").ok()?;
         re.captures(&market.name)?.get(1)?.as_str().parse().ok()
     }
+}
+
+async fn load_league_map(pool: &PgPool) -> Result<HashMap<String, i32>, Box<dyn std::error::Error + Send + Sync>> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT id, "monaco_eventGroup" as monaco_event_group
+        FROM football_leagues
+        WHERE "monaco_eventGroup" IS NOT NULL
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut map = HashMap::new();
+    for row in rows {
+        if let Some(groups) = row.monaco_event_group {
+            // Handle comma-separated groups (e.g. "UEL,UEFACUP")
+            for group in groups.split(',') {
+                let trimmed = group.trim();
+                if !trimmed.is_empty() {
+                    map.insert(trimmed.to_string(), row.id);
+                }
+            }
+        }
+    }
+    
+    info!("Loaded {} Monaco event group mappings", map.len());
+    Ok(map)
+}
+
+async fn find_fixture_for_monaco_event(
+    pool: &PgPool,
+    event: &Value,
+    event_id: &str,
+    league_map: &HashMap<String, i32>,
+) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+    // Parse team names from event name (e.g., "Manchester United v Liverpool")
+    let event_name = match event["name"].as_str() {
+        Some(name) => name,
+        None => return Ok(None),
+    };
+
+    let teams: Vec<&str> = event_name.split(" v ").collect();
+    if teams.len() != 2 {
+        return Ok(None);
+    }
+
+    let home_team = teams[0].trim().to_string();
+    let away_team = teams[1].trim().to_string();
+
+    // Parse expected start time
+    let expected_start_time = match event["expectedStartTime"].as_str() {
+        Some(time_str) => match chrono::DateTime::parse_from_rfc3339(time_str) {
+            Ok(dt) => dt.naive_utc(),
+            Err(_) => return Ok(None),
+        },
+        None => return Ok(None),
+    };
+
+    // Get event group ID
+    let event_group_id = match event["eventGroup"]["_ids"][0].as_str() {
+        Some(id) => id,
+        None => return Ok(None),
+    };
+
+    // Find league from in-memory map
+    let league_id = match league_map.get(event_group_id) {
+        Some(id) => *id,
+        None => {
+            // info!("No league found for event_group={}", event_group_id);
+            return Ok(None);
+        }
+    };
+
+    // Use global fixture matching
+    use crate::shared::fixture_matching::{find_matching_fixture, FixtureMatchCriteria};
+
+    let criteria = FixtureMatchCriteria {
+        start_time: expected_start_time,
+        home_team: home_team.clone(),
+        away_team: away_team.clone(),
+        league_id,
+    };
+
+    let fixture_result = find_matching_fixture(pool, criteria).await?;
+
+    if let Some(fixture_id) = fixture_result {
+        info!("✅ Mapped event_id={} to fixture_id={} ({} v {})", event_id, fixture_id, home_team, away_team);
+    }
+
+    Ok(fixture_result)
 }

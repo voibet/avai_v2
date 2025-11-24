@@ -7,7 +7,6 @@ pub struct Config {
     pub monaco_stream_url: String,
     pub monaco_app_id: String,
     pub monaco_api_key: String,
-
     pub server_port: u16,
     pub monaco_odds_enabled: bool,
     pub pinnacle_odds_enabled: bool,

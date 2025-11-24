@@ -79,8 +79,6 @@ impl PinnacleApiClient {
             return Ok(None);
         }
 
-        // info!("Pinnacle API response: {}", text); // Uncomment for verbose debugging
-
         let market_data: PinnacleMarket = match serde_json::from_str(&text) {
             Ok(data) => data,
             Err(e) => {
