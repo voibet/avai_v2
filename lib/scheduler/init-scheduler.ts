@@ -34,5 +34,5 @@ export function initializeSchedulers() {
     }).catch(err => {
       console.error('Failed to start nightly fixture scheduler:', err);
     });
-  }, 0 * 60 * 1000); // 5 minutes in milliseconds
+  }, 5 * 60 * 1000); // 5 minutes in milliseconds
 }

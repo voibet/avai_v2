@@ -579,7 +579,7 @@ export class XGFetcher {
 
             for (const targetFixture of allFixturesForSource) {
               if (!foundFixtures.has(targetFixture.id)) {
-                const matchingEvent = this.findMatchingSofascoreFixture(targetFixture, newMatches, teamMappings);
+                const matchingEvent = await this.findMatchingSofascoreFixture(targetFixture, newMatches, teamMappings);
                 if (matchingEvent) {
                   foundFixtures.add(targetFixture.id);
                 }
@@ -735,7 +735,7 @@ export class XGFetcher {
 
               for (const targetFixture of allFixturesForSource) {
                 if (!foundFixtures.has(targetFixture.id)) {
-                  const matchingEvent = this.findMatchingFlashliveFixture(targetFixture, newEvents, teamMappings);
+                  const matchingEvent = await this.findMatchingFlashliveFixture(targetFixture, newEvents, teamMappings);
                   if (matchingEvent) {
                     foundFixtures.add(targetFixture.id);
                   }
@@ -1030,7 +1030,7 @@ export class XGFetcher {
       parseInt(f.away_team_id.toString())
     ]);
 
-    const uniqueTeamIds = [...new Set(teamIds)];
+    const uniqueTeamIds = Array.from(new Set(teamIds));
 
     const result = await executeQuery(`
       SELECT id, name, mappings FROM football_teams
