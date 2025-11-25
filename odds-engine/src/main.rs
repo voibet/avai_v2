@@ -231,10 +231,7 @@ async fn start_ingestion_engine(state: Arc<AppState>, monaco_ws: MonacoWebSocket
     
     while let Ok(msg) = rx.recv().await {
         message_count += 1;
-        
-        // Forward to frontend clients immediately
-        let _ = state.tx.send(msg.clone());
-        
+
         // Process messages
         if let Some(msg_type) = msg["type"].as_str() {
             match msg_type {
@@ -321,7 +318,7 @@ async fn handle_price_update(
     }
 
     // Update database with best prices
-    shared::db::update_database_with_best_prices(
+    monaco::db::update_database_with_best_prices(
         &state.db,
         fixture_id,
         &market_mapping.market_type,
@@ -403,7 +400,7 @@ async fn handle_market_status_update(
     }
 
     // Update database with zeroed prices
-    shared::db::update_database_with_best_prices(
+    monaco::db::update_database_with_best_prices(
         &state.db,
         fixture_id,
         &market_mapping.market_type,

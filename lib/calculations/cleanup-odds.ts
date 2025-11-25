@@ -12,18 +12,20 @@ interface OddsData {
   odds_ou: OddsEntry[];
   odds_ah: OddsEntry[];
   lines: OddsEntry[];
+  max_stakes: OddsEntry[];
 }
 
 /**
  * Cleanup odds for past fixtures
  * Keeps first and last odds, plus one per 60-minute window, removes duplicates
+ * @param fixtureIds - Optional array of fixture IDs to process. If null, processes all past fixtures.
  */
-export async function cleanupPastFixturesOdds(): Promise<{ processedFixtures: number; cleanedRecords: number }> {
+export async function cleanupPastFixturesOdds(fixtureIds: number[] | null = null): Promise<{ processedFixtures: number; cleanedRecords: number }> {
   console.log('Running odds cleanup for past fixtures...');
 
   try {
-    // Get all past fixtures with odds
-    const fixturesQuery = `
+    // Get past fixtures with odds (filtered by fixtureIds if provided)
+    let fixturesQuery = `
       SELECT DISTINCT f.id, f.date
       FROM football_fixtures f
       WHERE LOWER(f.status_short) IN ('ft', 'aet', 'pen')
@@ -32,8 +34,14 @@ export async function cleanupPastFixturesOdds(): Promise<{ processedFixtures: nu
           WHERE fo.fixture_id = f.id
         )
     `;
+    let queryParams: any[] = [];
 
-    const fixturesResult = await pool.query(fixturesQuery);
+    if (fixtureIds && fixtureIds.length > 0) {
+      fixturesQuery += ` AND f.id = ANY($1)`;
+      queryParams.push(fixtureIds);
+    }
+
+    const fixturesResult = await pool.query(fixturesQuery, queryParams);
     const fixtures = fixturesResult.rows;
     const totalFixtures = fixtures.length;
 
@@ -45,7 +53,7 @@ export async function cleanupPastFixturesOdds(): Promise<{ processedFixtures: nu
 
       // Get all odds data for this fixture
       const oddsQuery = `
-        SELECT fixture_id, bookie, odds_x12, odds_ou, odds_ah, lines
+        SELECT fixture_id, bookie, odds_x12, odds_ou, odds_ah, lines, max_stakes
         FROM football_odds
         WHERE fixture_id = $1
       `;
@@ -61,6 +69,7 @@ export async function cleanupPastFixturesOdds(): Promise<{ processedFixtures: nu
         const originalOuCount = oddsRecord.odds_ou?.length || 0;
         const originalAhCount = oddsRecord.odds_ah?.length || 0;
         const originalLinesCount = oddsRecord.lines?.length || 0;
+        const originalMaxStakesCount = oddsRecord.max_stakes?.length || 0;
 
         // Filter odds keeping first, last, and one per 60-minute window
         const filteredData = filterOddsData(oddsRecord);
@@ -69,23 +78,26 @@ export async function cleanupPastFixturesOdds(): Promise<{ processedFixtures: nu
         const newOuCount = filteredData.odds_ou?.length || 0;
         const newAhCount = filteredData.odds_ah?.length || 0;
         const newLinesCount = filteredData.lines?.length || 0;
+        const newMaxStakesCount = filteredData.max_stakes?.length || 0;
 
         const recordsCleaned = (originalX12Count - newX12Count) +
-                              (originalOuCount - newOuCount) +
-                              (originalAhCount - newAhCount) +
-                              (originalLinesCount - newLinesCount);
+          (originalOuCount - newOuCount) +
+          (originalAhCount - newAhCount) +
+          (originalLinesCount - newLinesCount) +
+          (originalMaxStakesCount - newMaxStakesCount);
 
         if (recordsCleaned > 0) {
           // Update the database with filtered odds
           await pool.query(`
             UPDATE football_odds
-            SET odds_x12 = $1, odds_ou = $2, odds_ah = $3, lines = $4
-            WHERE fixture_id = $5 AND bookie = $6
+            SET odds_x12 = $1, odds_ou = $2, odds_ah = $3, lines = $4, max_stakes = $5
+            WHERE fixture_id = $6 AND bookie = $7
           `, [
             JSON.stringify(filteredData.odds_x12),
             JSON.stringify(filteredData.odds_ou),
             JSON.stringify(filteredData.odds_ah),
             JSON.stringify(filteredData.lines),
+            JSON.stringify(filteredData.max_stakes),
             fixtureId,
             oddsRecord.bookie
           ]);
@@ -124,6 +136,7 @@ function filterOddsData(oddsData: OddsData): OddsData {
   if (oddsData.odds_ou) oddsData.odds_ou.forEach(odd => allTimestamps.add(odd.t));
   if (oddsData.odds_ah) oddsData.odds_ah.forEach(odd => allTimestamps.add(odd.t));
   if (oddsData.lines) oddsData.lines.forEach(line => allTimestamps.add(line.t));
+  if (oddsData.max_stakes) oddsData.max_stakes.forEach(stake => allTimestamps.add(stake.t));
 
   if (allTimestamps.size === 0) {
     return { ...oddsData };
@@ -142,7 +155,8 @@ function filterOddsData(oddsData: OddsData): OddsData {
     odds_x12: [],
     odds_ou: [],
     odds_ah: [],
-    lines: []
+    lines: [],
+    max_stakes: []
   };
 
   if (oddsData.odds_x12) {
@@ -160,6 +174,10 @@ function filterOddsData(oddsData: OddsData): OddsData {
   if (oddsData.lines) {
     const filtered = oddsData.lines.filter(line => timestampsToKeep.has(line.t));
     filteredData.lines = removeConsecutiveDuplicates(filtered);
+  }
+  if (oddsData.max_stakes) {
+    const filtered = oddsData.max_stakes.filter(stake => timestampsToKeep.has(stake.t));
+    filteredData.max_stakes = removeConsecutiveDuplicates(filtered);
   }
 
   return filteredData;

@@ -68,7 +68,7 @@ export async function calculateFairOdds(fixtureIds: number[] | null = null): Pro
                                             SELECT SUM(1.0 / (elem::numeric / POWER(10, fo.decimals)))
                                             FROM jsonb_array_elements_text(valid_odds.x12_array) elem
                                             WHERE elem::numeric > 0
-                                        ) >= 0.92 THEN
+                                        ) >= 0.88 THEN
                                             (
                                                 SELECT jsonb_agg(
                                                     ROUND(
@@ -126,7 +126,7 @@ export async function calculateFairOdds(fixtureIds: number[] | null = null): Pro
                                             SELECT jsonb_agg(
                                                 CASE
                                                     WHEN h_odds::numeric > 100 AND a_odds::numeric > 100 AND
-                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
+                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.88 THEN
                                                         ROUND(
                                                             (
                                                                 2.0 * (h_odds::numeric / POWER(10, fo.decimals)) /
@@ -151,7 +151,7 @@ export async function calculateFairOdds(fixtureIds: number[] | null = null): Pro
                                             SELECT jsonb_agg(
                                                 CASE
                                                     WHEN h_odds::numeric > 100 AND a_odds::numeric > 100 AND
-                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
+                                                         1.0 / ((1.0 / (h_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (a_odds::numeric / POWER(10, fo.decimals)))) >= 0.88 THEN
                                                         ROUND(
                                                             (
                                                                 2.0 * (a_odds::numeric / POWER(10, fo.decimals)) /
@@ -225,7 +225,7 @@ export async function calculateFairOdds(fixtureIds: number[] | null = null): Pro
                                             SELECT jsonb_agg(
                                                 CASE
                                                     WHEN o_odds::numeric > 100 AND u_odds::numeric > 100 AND
-                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
+                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.88 THEN
                                                         ROUND(
                                                             (
                                                                 2.0 * (o_odds::numeric / POWER(10, fo.decimals)) /
@@ -250,7 +250,7 @@ export async function calculateFairOdds(fixtureIds: number[] | null = null): Pro
                                             SELECT jsonb_agg(
                                                 CASE
                                                     WHEN o_odds::numeric > 100 AND u_odds::numeric > 100 AND
-                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.92 THEN
+                                                         1.0 / ((1.0 / (o_odds::numeric / POWER(10, fo.decimals))) + (1.0 / (u_odds::numeric / POWER(10, fo.decimals)))) >= 0.88 THEN
                                                         ROUND(
                                                             (
                                                                 2.0 * (u_odds::numeric / POWER(10, fo.decimals)) /

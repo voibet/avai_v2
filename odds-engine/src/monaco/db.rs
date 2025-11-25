@@ -175,14 +175,15 @@ pub async fn update_database_with_best_prices(
     sqlx::query(&format!(
         r#"
         UPDATE football_odds
-        SET {} = $1, max_stakes = $2, latest_t = $3, updated_at = NOW()
-        WHERE fixture_id = $4 AND bookie = $5
+        SET {} = $1, max_stakes = $2, latest_t = $3, updated_at = $4
+        WHERE fixture_id = $5 AND bookie = $6
         "#,
         field_name
     ))
     .bind(serde_json::to_value(&odds_array)?)
     .bind(serde_json::to_value(&max_stakes_data)?)
     .bind(Value::Object(updated_latest_t))
+    .bind(Utc::now())
     .bind(fixture_id)
     .bind("Monaco")
     .execute(pool)
@@ -194,13 +195,19 @@ pub async fn update_database_with_best_prices(
 
 fn merge_odds_entry(mut existing: Vec<Value>, new_entry: Value) -> Vec<Value> {
     let new_t = new_entry["t"].as_i64().unwrap_or(0);
-    
+
     if let Some(index) = existing.iter().position(|entry| entry["t"].as_i64().unwrap_or(0) == new_t) {
         existing[index] = new_entry;
     } else {
         existing.push(new_entry);
     }
-    
+
     existing.sort_by_key(|entry| entry["t"].as_i64().unwrap_or(0));
+
+    // Keep only the most recent 100 entries
+    if existing.len() > 100 {
+        existing = existing.into_iter().rev().take(100).rev().collect();
+    }
+
     existing
 }

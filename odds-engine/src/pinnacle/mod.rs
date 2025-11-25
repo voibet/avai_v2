@@ -91,9 +91,9 @@ impl PinnacleService {
             // Check market open
             let has_odds = period.money_line.is_some() || period.spreads.is_some() || period.totals.is_some();
             
-            // Check if cutoff is in future - Pinnacle uses naive datetime format YYYY-MM-DDTHH:MM:SS (assume UTC)
+            // Check if cutoff is in future - Pinnacle uses naive datetime format YYYY-MM-DDTHH:MM:SS (UTC)
             let cutoff_in_future = if let Ok(cutoff_naive) = chrono::NaiveDateTime::parse_from_str(&period.cutoff, "%Y-%m-%dT%H:%M:%S") {
-                // Pinnacle format: assume UTC timezone
+                // Pinnacle UTC timezone
                 let cutoff_utc = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(cutoff_naive, chrono::Utc);
                 cutoff_utc > chrono::Utc::now()
             } else {

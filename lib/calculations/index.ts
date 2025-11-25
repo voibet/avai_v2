@@ -84,7 +84,7 @@ export async function runCalculations(
           count = await calculateFairOdds(fixtureIds);
           break;
         case 'cleanup-odds':
-          const cleanupResult = await cleanupPastFixturesOdds();
+          const cleanupResult = await cleanupPastFixturesOdds(fixtureIds);
           count = cleanupResult.cleanedRecords;
           break;
         default:

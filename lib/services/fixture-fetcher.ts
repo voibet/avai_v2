@@ -2,6 +2,7 @@ import axios from 'axios';
 import { executeQuery, executeTransaction } from '../database/db-utils';
 import { League } from '@/types';
 import { CANCELLED, IN_PAST } from '../constants';
+import { shouldSkipFixtureFetch, recordFixtureFetchAttempt } from './fixture-fetch-cache';
 
 /**
  * Helper for consistent logging with timestamp and service prefix
@@ -178,6 +179,15 @@ export class FixtureFetcher {
 
       for (const leagueInfo of leagueSeasons) {
         const apiFixtures = await this.fetchFixturesFromAPI(leagueInfo.id, leagueInfo.season);
+
+        // If no fixtures returned (due to cache), skip processing for this league
+        if (apiFixtures.length === 0) {
+          if (onProgress) {
+            onProgress(`Cached data used for ${leagueInfo.name} (no API call needed)`);
+          }
+          continue;
+        }
+
         const result = await this.updateDatabaseWithFixtures(apiFixtures);
 
         // Remove fixtures from database that are not in the API response (duplicates/outdated)
@@ -380,6 +390,12 @@ export class FixtureFetcher {
     if (leagueId) params.league = leagueId;
     if (season) params.season = season;
 
+    // Check cache if we have both leagueId and season
+    if (leagueId && season && shouldSkipFixtureFetch(leagueId, season)) {
+      log(`Using cached fixture data for league ${leagueId}, season ${season}`);
+      return [];
+    }
+
     try {
       log(`Fetching fixtures from API-Football: league=${leagueId}, season=${season}`);
       const response = await axios.get(`${this.apiBaseUrl}/fixtures`, {
@@ -394,11 +410,20 @@ export class FixtureFetcher {
       const fixtures = response.data.response || [];
       log(`Fetched ${fixtures.length} fixtures from API-Football`);
 
+      // Record the fetch attempt (only if we have both leagueId and season)
+      if (leagueId && season) {
+        recordFixtureFetchAttempt(leagueId, season, fixtures.length > 0);
+      }
+
       // Rate limit
       await new Promise(resolve => setTimeout(resolve, 250));
 
       return fixtures;
     } catch (error: any) {
+      // Record failed attempt if we have both leagueId and season
+      if (leagueId && season) {
+        recordFixtureFetchAttempt(leagueId, season, false);
+      }
       console.error('API call failed');
       throw error;
     }
@@ -669,6 +694,14 @@ export class FixtureFetcher {
    * If so, and if it hasn't run yet today, it triggers a fixture update for all current seasons.
    */
   public static startNightlyScheduler(): void {
+    // Check if CHAIN environment variable is set to true
+    if (process.env.CHAIN !== 'true') {
+      log('CHAIN environment variable not set to true, skipping nightly fixture scheduler');
+      return;
+    }
+
+    log('Starting nightly fixture scheduler');
+
     // Check every 30 minutes
     setInterval(async () => {
       const now = new Date();

@@ -367,8 +367,9 @@ export async function calculateOddsFromPredictions(fixtureIds: number[] | null =
               odds_ah,
               lines,
               latest_t,
-              decimals
-            ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9)
+              decimals,
+              updated_at
+            ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9, NOW() AT TIME ZONE 'UTC')
             ON CONFLICT (fixture_id, bookie)
             DO UPDATE SET
               odds_x12 = $4::jsonb,
@@ -377,7 +378,7 @@ export async function calculateOddsFromPredictions(fixtureIds: number[] | null =
               lines = $7::jsonb,
               latest_t = $8::jsonb,
               decimals = $9,
-              updated_at = NOW()`,
+              updated_at = NOW() AT TIME ZONE 'UTC'`,
             [
               prediction.fixture_id,
               1, // Prediction model 1

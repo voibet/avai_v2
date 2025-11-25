@@ -94,8 +94,8 @@ pub async fn ensure_fixture_odds_record(
             r#"
             INSERT INTO football_odds (
                 fixture_id, bookie_id, bookie, decimals,
-                odds_x12, odds_ah, odds_ou, lines, ids, max_stakes, latest_t
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                odds_x12, odds_ah, odds_ou, lines, ids, max_stakes, latest_t, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             "#
         )
         .bind(fixture_id)
@@ -109,6 +109,7 @@ pub async fn ensure_fixture_odds_record(
         .bind(&ids_json)
         .bind(&max_stakes_json)
         .bind(&latest_t)
+        .bind(Utc::now())
         .execute(pool)
         .await?;
 
@@ -118,8 +119,8 @@ pub async fn ensure_fixture_odds_record(
         sqlx::query(
             r#"
             UPDATE football_odds
-            SET lines = $1, ids = $2, max_stakes = $3, latest_t = $4, bookie_id = $5, updated_at = NOW()
-            WHERE fixture_id = $6 AND bookie = $7
+            SET lines = $1, ids = $2, max_stakes = $3, latest_t = $4, bookie_id = $5, updated_at = $6
+            WHERE fixture_id = $7 AND bookie = $8
             "#
         )
         .bind(&lines_json)
@@ -127,6 +128,7 @@ pub async fn ensure_fixture_odds_record(
         .bind(&max_stakes_json)
         .bind(&latest_t)
         .bind(1i64) // Monaco bookie_id
+        .bind(Utc::now())
         .bind(fixture_id)
         .bind("Monaco")
         .execute(pool)

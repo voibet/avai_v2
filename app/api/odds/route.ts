@@ -5,8 +5,7 @@ import {
   parseFixtureIds,
   parsePagination,
   parseBookieFilter,
-  parseBooleanParam,
-  createApiError
+  parseBooleanParam
 } from '../../../lib/utils/api-utils';
 
 export const dynamic = 'force-dynamic';

@@ -2,7 +2,7 @@ use crate::pinnacle::types::PinnaclePeriod;
 use serde_json::Value;
 use sqlx::{PgPool, Row};
 use std::collections::{HashMap, HashSet};
-use tracing::{debug, info};
+use tracing::info;
 use chrono::{DateTime, Utc};
 
 // Constants
@@ -353,15 +353,14 @@ impl PinnacleDbService {
             if !final_ou.is_empty() { obj.insert("ou_ts".to_string(), serde_json::json!(timestamp)); }
             if !final_lines.is_empty() { obj.insert("lines_ts".to_string(), serde_json::json!(timestamp)); }
             if !ids.is_empty() { obj.insert("ids_ts".to_string(), serde_json::json!(timestamp)); }
-            if !final_max_stakes.is_empty() { obj.insert("stakes_ts".to_string(), serde_json::json!(timestamp)); }
         }
 
         if !updates.is_empty() {
             let upsert_query = r#"
             INSERT INTO football_odds (
                 fixture_id, bookie_id, bookie, decimals,
-                odds_x12, odds_ah, odds_ou, lines, ids, max_stakes, latest_t
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                odds_x12, odds_ah, odds_ou, lines, ids, max_stakes, latest_t, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (fixture_id, bookie) DO UPDATE SET
                 bookie_id = EXCLUDED.bookie_id,
                 odds_x12 = EXCLUDED.odds_x12,
@@ -371,15 +370,12 @@ impl PinnacleDbService {
                 ids = EXCLUDED.ids,
                 max_stakes = EXCLUDED.max_stakes,
                 latest_t = EXCLUDED.latest_t,
-                updated_at = NOW()
+                updated_at = EXCLUDED.updated_at
             "#;
 
             sqlx::query(upsert_query)
                 .bind(fixture_id)
                 .bind(event_id)
-                // In TS `getExistingOddsMap`: `WHERE bookie_id = ANY($1)` and $1 is `eventIds` (numbers).
-                // So `bookie_id` column is likely text or bigint.
-                // Let's bind as string to be safe if it's text, or it will auto-cast if bigint.
                 .bind("Pinnacle")
                 .bind(PINNACLE_DECIMALS)
                 .bind(if !final_x12.is_empty() { Some(serde_json::json!(final_x12)) } else { None })
@@ -389,12 +385,11 @@ impl PinnacleDbService {
                 .bind(if !ids.is_empty() { Some(serde_json::json!(ids)) } else { None })
                 .bind(if !final_max_stakes.is_empty() { Some(serde_json::json!(final_max_stakes)) } else { None })
                 .bind(latest_t)
+                .bind(Utc::now())
                 .execute(&self.pool)
                 .await?;
 
             info!("✅ Updated odds for {} v {} (fixture: {}). Changes: {:?}. Database updated.", home_team, away_team, fixture_id, updates);
-        } else {
-            debug!("No changes for {} v {} (fixture: {})", home_team, away_team, fixture_id);
         }
 
         Ok(())

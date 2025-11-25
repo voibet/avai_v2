@@ -15,35 +15,6 @@ export async function register() {
     // Initialize the scheduler on server startup
     log('Initializing schedulers on server startup...');
     initializeSchedulers();
-
-    // Start Pinnacle odds fetching if enabled
-    if (process.env.PINNACLE === 'true') {
-      log('Starting Pinnacle odds continuous fetching...');
-      try {
-        const { pinnacleOddsService } = await import('@/lib/services/odds/pinnacle-odds-service');
-        await pinnacleOddsService.startContinuousFetching();
-        log('Pinnacle odds continuous fetching started successfully');
-      } catch (error) {
-        console.error('Failed to start Pinnacle odds fetching:', error);
-      }
-    } else {
-      log('Pinnacle odds fetching disabled');
-    }
-
-    // Start Monaco odds fetching if enabled
-    if (process.env.MONACO === 'true') {
-      log('Starting Monaco odds continuous fetching...');
-      try {
-        const { MonacoOddsService } = await import('@/lib/services/odds/monaco-odds-service');
-        const monacoOddsService = new MonacoOddsService();
-        await monacoOddsService.startContinuousFetching();
-        log('Monaco odds continuous fetching started successfully');
-      } catch (error) {
-        console.error('Failed to start Monaco odds fetching:', error);
-      }
-    } else {
-      log('Monaco odds fetching disabled');
-    }
   }
 }
 

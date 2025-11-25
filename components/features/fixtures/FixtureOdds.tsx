@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { OddsChart } from '../../shared/OddsChart';
 import { LoadingState } from '../../shared/LoadingState';
 import { ErrorState } from '../../shared/ErrorState';
-import { getOddsDivisor } from '@/lib/utils/value-calculations';
+import { getOddsDivisor } from '@/lib/utils/odds-calculations';
 
 /**
  * Checks if all values in an array are valid (not null and greater than 1)

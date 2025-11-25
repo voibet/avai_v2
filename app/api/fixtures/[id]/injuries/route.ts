@@ -115,7 +115,7 @@ async function getFixtureInjuries(request: Request, { params }: { params: { id: 
 
     // Calculate matchesMissed and original injury date for each player
     const playerStatsMap = new Map<number, { originalInjuryDate: string; matchesMissed: number }>();
-    
+
     // Group by player to calculate stats
     const playerInjuryList = new Map<number, any[]>();
     injuries.forEach((injury: any) => {
@@ -131,10 +131,10 @@ async function getFixtureInjuries(request: Request, { params }: { params: { id: 
       // Sort by timestamp to find earliest
       playerInjuries.sort((a, b) => a.fixture.timestamp - b.fixture.timestamp);
       const originalInjuryDate = playerInjuries[0].injuryDate;
-      
+
       // Count matches missed (exclude current fixture)
       const matchesMissed = playerInjuries.filter(inj => inj.fixture.id !== fixtureId).length;
-      
+
       playerStatsMap.set(playerId, { originalInjuryDate, matchesMissed });
     });
 
@@ -146,8 +146,8 @@ async function getFixtureInjuries(request: Request, { params }: { params: { id: 
       const existingInjury = playerInjuriesMap.get(playerId);
 
       if (!existingInjury ||
-          injury.fixture.timestamp > existingInjury.fixture.timestamp ||
-          (injury.isThisMatch && !existingInjury.isThisMatch)) {
+        injury.fixture.timestamp > existingInjury.fixture.timestamp ||
+        (injury.isThisMatch && !existingInjury.isThisMatch)) {
         // Add calculated stats
         const stats = playerStatsMap.get(playerId);
         if (stats) {

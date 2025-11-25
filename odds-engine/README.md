@@ -38,8 +38,6 @@ High-performance, low-latency odds ingestion and fair odds calculation engine.
 ## Architecture
 
 - **Ingestion**: Connects to Bookmaker APIs/WebSockets (Monaco, Pinnacle).
-- **Calculation**: Calculates fair odds in real-time using "Margin Proportional to Odds" method.
-- **Streaming**: Exposes a WebSocket endpoint at `ws://localhost:{port}/ws` for the frontend to consume.
 - **Persistence**: Asynchronously writes updates to PostgreSQL for history.
 
 Subscribe to receive real-time JSON updates:
