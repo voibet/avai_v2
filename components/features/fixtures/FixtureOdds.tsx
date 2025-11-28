@@ -2,17 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { OddsChart } from '../../shared/OddsChart';
 import { LoadingState } from '../../shared/LoadingState';
 import { ErrorState } from '../../shared/ErrorState';
-import { getOddsDivisor } from '@/lib/utils/odds-calculations';
-
 /**
- * Checks if all values in an array are valid (not null and greater than 1)
- * @param values Array of numbers to validate
- * @returns true if all values are valid, false otherwise
+ * Calculates the divisor for odds based on the number of decimals.
+ * @param decimals Number of decimals (e.g., 2 for 100, 3 for 1000)
+ * @returns The divisor (10^decimals)
  */
-function areAllOddsValid(values: number[]): boolean {
-  return values.every(value => value != null && value > 1)
+function getOddsDivisor(decimals: number): number {
+  return Math.pow(10, decimals);
 }
-
 
 interface FixtureOddsProps {
   fixture?: any; // Made flexible to support different fixture formats

@@ -1,0 +1,14 @@
+C:\Users\eemel\apps\avai_v2\odds-processor\target\release\deps\thiserror-806c090198a41ee8.d: C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs C:\Users\eemel\apps\avai_v2\odds-processor\target\release\build\thiserror-e52f649f56ffb9a3\out/private.rs
+
+C:\Users\eemel\apps\avai_v2\odds-processor\target\release\deps\libthiserror-806c090198a41ee8.rlib: C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs C:\Users\eemel\apps\avai_v2\odds-processor\target\release\build\thiserror-e52f649f56ffb9a3\out/private.rs
+
+C:\Users\eemel\apps\avai_v2\odds-processor\target\release\deps\libthiserror-806c090198a41ee8.rmeta: C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs C:\Users\eemel\apps\avai_v2\odds-processor\target\release\build\thiserror-e52f649f56ffb9a3\out/private.rs
+
+C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs:
+C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs:
+C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs:
+C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs:
+C:\Users\eemel\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs:
+C:\Users\eemel\apps\avai_v2\odds-processor\target\release\build\thiserror-e52f649f56ffb9a3\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\eemel\\apps\\avai_v2\\odds-processor\\target\\release\\build\\thiserror-e52f649f56ffb9a3\\out

@@ -147,6 +147,7 @@ async function getFixtures(request: Request) {
         LOWER(f.home_team_name) LIKE $1 OR
         LOWER(f.away_team_name) LIKE $2 OR
         LOWER(f.league_name) LIKE $3 OR
+        f.id::text LIKE $4 OR
         EXISTS (
           SELECT 1 FROM jsonb_array_elements_text(COALESCE(ht.mappings, '[]'::jsonb)) AS mapping
           WHERE LOWER(mapping) LIKE $1
@@ -157,7 +158,7 @@ async function getFixtures(request: Request) {
         )
       )
       ORDER BY f.date DESC
-      LIMIT $${4} OFFSET $${5}
+      LIMIT $${5} OFFSET $${6}
     `;
 
     const countQuery = `
@@ -169,6 +170,7 @@ async function getFixtures(request: Request) {
         LOWER(f.home_team_name) LIKE $1 OR
         LOWER(f.away_team_name) LIKE $2 OR
         LOWER(f.league_name) LIKE $3 OR
+        f.id::text LIKE $4 OR
         EXISTS (
           SELECT 1 FROM jsonb_array_elements_text(COALESCE(ht.mappings, '[]'::jsonb)) AS mapping
           WHERE LOWER(mapping) LIKE $1
@@ -181,11 +183,11 @@ async function getFixtures(request: Request) {
     `;
 
     const offset = (params.page - 1) * params.limit;
-    const queryParams = [searchValue, searchValue, searchValue, params.limit, offset];
+    const queryParams = [searchValue, searchValue, searchValue, `%${searchTerm.trim()}%`, params.limit, offset];
 
     try {
       const [countResult, dataResult] = await Promise.all([
-        executeQuery<{ total: string }>(countQuery, queryParams.slice(0, 3)),
+        executeQuery<{ total: string }>(countQuery, queryParams.slice(0, 4)),
         executeQuery<Fixture>(searchQuery, queryParams)
       ]);
 

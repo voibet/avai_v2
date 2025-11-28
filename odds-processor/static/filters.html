@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Odds Filter Debugger</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: 450px 1fr;
+            gap: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .panel {
+            background: #2d2d2d;
+            padding: 20px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #4CAF50;
+            font-size: 18px;
+        }
+
+        h3 {
+            margin: 10px 0 5px 0;
+            color: #888;
+            font-size: 14px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 280px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            resize: vertical;
+        }
+
+        button {
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: opacity 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.8;
+        }
+
+        .btn-subscribe {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-update {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-remove {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-preset {
+            background: #555;
+            color: white;
+            font-size: 0.85em;
+            padding: 6px 12px;
+        }
+
+        .btn-build {
+            background: #FF9800;
+            color: white;
+        }
+
+        #log {
+            flex: 1;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            padding: 10px;
+            border-bottom: 1px solid #333;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .log-entry:hover {
+            background: #333;
+        }
+
+        .log-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 13px;
+        }
+
+        .timestamp {
+            color: #888;
+        }
+
+        .fixture-id {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+
+        .bookies {
+            color: #2196F3;
+        }
+
+        .ratio {
+            color: #FFC107;
+            font-weight: bold;
+        }
+
+        .match-highlight {
+            background: linear-gradient(135deg, #4caf50, #2196f3);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            color: white;
+            font-weight: bold;
+        }
+
+        .arb-highlight {
+            background: linear-gradient(135deg, #e91e63, #9c27b0);
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            color: white;
+            font-weight: bold;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .filter-match {
+            padding: 8px;
+            margin: 5px 0;
+            background: #222;
+            border-left: 3px solid #4caf50;
+            border-radius: 0 4px 4px 0;
+            font-size: 11px;
+        }
+
+        .filter-match.arb-match {
+            border-left-color: #e91e63;
+        }
+
+        .filter-match .path {
+            color: #2196f3;
+        }
+
+        .filter-match .value {
+            color: #4caf50;
+            font-weight: bold;
+        }
+
+        .filter-match .op {
+            color: #ff9800;
+        }
+
+        .market-badge {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .badge-x12 {
+            background: #2196F3;
+            color: white;
+        }
+
+        .badge-ah {
+            background: #FF9800;
+            color: white;
+        }
+
+        .badge-ou {
+            background: #9C27B0;
+            color: white;
+        }
+
+        .log-details {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background: #1a1a1a;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .log-details.expanded {
+            display: block;
+        }
+
+        .market-tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+
+        .market-tab {
+            padding: 5px 10px;
+            background: #333;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .market-tab.active {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .market-tab:hover {
+            opacity: 0.8;
+        }
+
+        .market-content {
+            display: none;
+        }
+
+        .market-content.active {
+            display: block;
+        }
+
+        .odds-grid {
+            display: grid;
+            grid-template-columns: auto 1fr 1fr 1fr auto auto;
+            gap: 8px;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .odds-grid:first-child {
+            font-weight: bold;
+            color: #888;
+            border-bottom: 2px solid #444;
+        }
+
+        .odds-value {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+
+        .bookie-name {
+            color: #2196F3;
+            font-weight: bold;
+        }
+
+        .ah-grid,
+        .ou-grid {
+            display: grid;
+            grid-template-columns: auto repeat(3, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #333;
+            font-size: 11px;
+        }
+
+        .presets {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+        }
+
+        .preset-category {
+            margin-top: 10px;
+            margin-bottom: 5px;
+            color: #888;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .preset-category:first-child {
+            margin-top: 0;
+        }
+
+        .btn-preset.arb {
+            background: linear-gradient(135deg, #e91e63, #9c27b0);
+        }
+
+        .btn-preset.value {
+            background: linear-gradient(135deg, #4caf50, #2196f3);
+        }
+
+        .btn-preset.basic {
+            background: #555;
+        }
+
+        .btn-preset.advanced {
+            background: linear-gradient(135deg, #ff9800, #f44336);
+        }
+
+        select,
+        input {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 8px;
+            font-size: 13px;
+        }
+
+
+    </style>
+</head>
+
+<body>
+    <div class="panel">
+        <h2>🔍 Filter Configuration</h2>
+
+        <h3>Quick Filters</h3>
+
+        <div id="presetsTab">
+            <!-- Arbitrage Detection -->
+            <div class="preset-category">🎰 Arbitrage Detection</div>
+            <div class="presets">
+                <button class="btn-preset arb" onclick="loadPreset('x12_arbitrage')">⚡ X12 Arb</button>
+                <button class="btn-preset arb" onclick="loadPreset('ah_arbitrage')">⚡ AH Arb</button>
+                <button class="btn-preset arb" onclick="loadPreset('ou_arbitrage')">⚡ OU Arb</button>
+                <button class="btn-preset arb" onclick="loadPreset('low_margin')">📉 Low Margin</button>
+            </div>
+
+            <!-- Value Bet Detection -->
+            <div class="preset-category">💎 Value Bets (vs Fair Odds)</div>
+            <div class="presets">
+                <button class="btn-preset value" onclick="loadPreset('x12_value')">1X2 Value 3%+</button>
+                <button class="btn-preset value" onclick="loadPreset('ah_value')">AH Value 3%+</button>
+                <button class="btn-preset value" onclick="loadPreset('ou_value')">OU Value 3%+</button>
+                <button class="btn-preset value" onclick="loadPreset('big_value')">🔥 Big Value 5%+</button>
+            </div>
+
+            <!-- Basic Filters -->
+            <div class="preset-category">🔍 Basic Filters</div>
+            <div class="presets">
+                <button class="btn-preset basic" onclick="loadPreset('high_odds')">High Odds 5+</button>
+                <button class="btn-preset basic" onclick="loadPreset('low_odds')">Low Odds &lt;1.5</button>
+                <button class="btn-preset basic" onclick="loadPreset('multi_bookie')">Multi-Bookie</button>
+                <button class="btn-preset basic" onclick="loadPreset('has_ah')">Has AH Lines</button>
+            </div>
+
+            <!-- Advanced Filters -->
+            <div class="preset-category">🧠 Advanced</div>
+            <div class="presets">
+                <button class="btn-preset advanced" onclick="loadPreset('best_home')">Best Home Odds</button>
+                <button class="btn-preset advanced" onclick="loadPreset('specific_line')">Line 2.5 Value</button>
+                <button class="btn-preset advanced" onclick="loadPreset('combo_filter')">Combo Filter</button>
+                <button class="btn-preset advanced" onclick="loadPreset('veikkaus_under_fair')">Veikkaus &lt; Fair</button>
+            </div>
+
+            <!-- Per-Line Filters -->
+            <div class="preset-category">🎯 Per-Line (Same Line)</div>
+            <div class="presets">
+                <button class="btn-preset arb" onclick="loadPreset('ah_value_plus_payout')">AH Value + Payout</button>
+            </div>
+        </div>
+
+
+        <h3>Filter JSON</h3>
+        <textarea id="filterInput">{
+  "field": {
+    "op": "divide",
+    "left": "bookmakers.Veikkaus.x12",
+    "right": "bookmakers.Pinnacle.fair_x12"
+  },
+  "op": "gt",
+  "value": 1.03
+}</textarea>
+        <div id="filterDescription" style="font-size: 11px; color: #888; margin-top: -10px;">
+            📌 Finds 1X2 odds > 3% above Pinnacle fair odds
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+            <button class="btn-subscribe" onclick="subscribe()">▶️ Subscribe</button>
+            <button class="btn-update" onclick="updateFilter()">🔄 Update</button>
+            <button class="btn-remove" onclick="removeFilter()">⏹️ Remove</button>
+        </div>
+        <div id="status">Status: Disconnected</div>
+        <div id="stats">Matches: 0</div>
+
+        <div id="helpSection" style="margin-top: 10px; padding: 10px; background: #222; border-radius: 4px; font-size: 11px; display: none;">
+            <div style="color: #4caf50; font-weight: bold; margin-bottom: 8px;">📚 Quick Reference</div>
+            
+            <div style="color: #888; margin-bottom: 4px;">PATHS:</div>
+            <div style="color: #2196f3; margin-bottom: 8px;">
+                <code>bookmakers.Veikkaus.x12_h</code> - Home odds<br>
+                <code>bookmakers.Pinnacle.ou_o[2.5]</code> - Over 2.5<br>
+                <code>bookmakers.Pinnacle.fair_ah_h</code> - Fair AH home
+            </div>
+            
+            <div style="color: #888; margin-bottom: 4px;">OPERATORS:</div>
+            <div style="color: #ff9800; margin-bottom: 8px;">
+                <code>gt, gte, lt, lte, eq, neq, exists</code>
+            </div>
+            
+            <div style="color: #888; margin-bottom: 4px;">VECTOR FUNCTIONS:</div>
+            <div style="color: #9c27b0; margin-bottom: 8px;">
+                <code>max, min, avg, sum, count</code><br>
+                <code>max_per_line, min_per_line</code>
+            </div>
+            
+            <div style="color: #888; margin-bottom: 4px;">ARITHMETIC:</div>
+            <div style="color: #e91e63;">
+                <code>divide, multiply, add, subtract</code>
+            </div>
+        </div>
+        <button onclick="document.getElementById('helpSection').style.display = document.getElementById('helpSection').style.display === 'none' ? 'block' : 'none'" style="background: transparent; color: #666; border: 1px solid #444; padding: 5px 10px; margin-top: 10px; font-size: 11px;">
+            ❓ Toggle Help
+        </button>
+    </div>
+
+    <div class="panel">
+        <h2>📡 Live Feed <span style="font-weight: normal; font-size: 14px; color: #888;">(Click to expand)</span></h2>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let ws, matchCount = 0;
+
+        const presets = {
+            // ═══════════════════════════════════════════
+            // ARBITRAGE DETECTION
+            // ═══════════════════════════════════════════
+            
+            // X12 Arbitrage: margin < 100% across best odds (4 bookmakers)
+            x12_arbitrage: {
+                "and": [
+                    {
+                        "function": "max",
+                        "source": ["bookmakers.Veikkaus.x12_h", "bookmakers.Pinnacle.x12_h", "bookmakers.Veikkaus.x12_h", "bookmakers.Betfair.x12_h"],
+                        "as": "max_h"
+                    },
+                    {
+                        "function": "max",
+                        "source": ["bookmakers.Veikkaus.x12_x", "bookmakers.Pinnacle.x12_x", "bookmakers.Veikkaus.x12_x", "bookmakers.Betfair.x12_x"],
+                        "as": "max_x"
+                    },
+                    {
+                        "function": "max",
+                        "source": ["bookmakers.Veikkaus.x12_a", "bookmakers.Pinnacle.x12_a", "bookmakers.Veikkaus.x12_a", "bookmakers.Betfair.x12_a"],
+                        "as": "max_a"
+                    },
+                    {
+                        "field": {
+                            "op": "add",
+                            "left": {
+                                "op": "add",
+                                "left": { "op": "divide", "left": 1000000, "right": "$max_h" },
+                                "right": { "op": "divide", "left": 1000000, "right": "$max_x" }
+                            },
+                            "right": { "op": "divide", "left": 1000000, "right": "$max_a" }
+                        },
+                        "op": "lt",
+                        "value": 1000
+                    }
+                ]
+            },
+
+            // AH Arbitrage: per-line arbitrage check across bookmakers (4 bookmakers)
+            ah_arbitrage: {
+                "and": [
+                    {
+                        "function": "max_per_line",
+                        "source": ["bookmakers.Veikkaus.ah_h", "bookmakers.Pinnacle.ah_h", "bookmakers.Veikkaus.ah_h", "bookmakers.Betfair.ah_h"],
+                        "as": "max_ah_h"
+                    },
+                    {
+                        "function": "max_per_line",
+                        "source": ["bookmakers.Veikkaus.ah_a", "bookmakers.Pinnacle.ah_a", "bookmakers.Veikkaus.ah_a", "bookmakers.Betfair.ah_a"],
+                        "as": "max_ah_a"
+                    },
+                    {
+                        "field": {
+                            "op": "add",
+                            "left": { "op": "divide", "left": 1000000, "right": "$max_ah_h" },
+                            "right": { "op": "divide", "left": 1000000, "right": "$max_ah_a" }
+                        },
+                        "op": "lt",
+                        "value": 1000
+                    }
+                ]
+            },
+
+            // OU Arbitrage: per-line arbitrage check across bookmakers (4 bookmakers)
+            ou_arbitrage: {
+                "and": [
+                    {
+                        "function": "max_per_line",
+                        "source": ["bookmakers.Veikkaus.ou_o", "bookmakers.Pinnacle.ou_o", "bookmakers.Veikkaus.ou_o", "bookmakers.Betfair.ou_o"],
+                        "as": "max_ou_o"
+                    },
+                    {
+                        "function": "max_per_line",
+                        "source": ["bookmakers.Veikkaus.ou_u", "bookmakers.Pinnacle.ou_u", "bookmakers.Veikkaus.ou_u", "bookmakers.Betfair.ou_u"],
+                        "as": "max_ou_u"
+                    },
+                    {
+                        "field": {
+                            "op": "add",
+                            "left": { "op": "divide", "left": 1000000, "right": "$max_ou_o" },
+                            "right": { "op": "divide", "left": 1000000, "right": "$max_ou_u" }
+                        },
+                        "op": "lt",
+                        "value": 1000
+                    }
+                ]
+            },
+
+            // Low Margin: X12 margin under 102% (near-arbitrage)
+            low_margin: {
+                "and": [
+                    {
+                        "function": "max",
+                        "source": ["bookmakers.Veikkaus.x12_h", "bookmakers.Pinnacle.x12_h"],
+                        "as": "best_h"
+                    },
+                    {
+                        "function": "max",
+                        "source": ["bookmakers.Veikkaus.x12_x", "bookmakers.Pinnacle.x12_x"],
+                        "as": "best_x"
+                    },
+                    {
+                        "function": "max",
+                        "source": ["bookmakers.Veikkaus.x12_a", "bookmakers.Pinnacle.x12_a"],
+                        "as": "best_a"
+                    },
+                    {
+                        "field": {
+                            "op": "add",
+                            "left": {
+                                "op": "add",
+                                "left": { "op": "divide", "left": 1000000, "right": "$best_h" },
+                                "right": { "op": "divide", "left": 1000000, "right": "$best_x" }
+                            },
+                            "right": { "op": "divide", "left": 1000000, "right": "$best_a" }
+                        },
+                        "op": "lt",
+                        "value": 1020
+                    }
+                ]
+            },
+
+            // ═══════════════════════════════════════════
+            // VALUE BET DETECTION
+            // ═══════════════════════════════════════════
+            
+            // X12 Value: any 1X2 outcome > 3% above fair odds
+            x12_value: {
+                "field": { 
+                    "op": "divide", 
+                    "left": "bookmakers.Veikkaus.x12", 
+                    "right": "bookmakers.Pinnacle.fair_x12" 
+                },
+                "op": "gt",
+                "value": 1.03
+            },
+
+            // AH Value: any AH line > 3% above fair odds (auto line matching)
+            ah_value: {
+                "field": { 
+                    "op": "divide", 
+                    "left": "bookmakers.Veikkaus.ah", 
+                    "right": "bookmakers.Pinnacle.fair_ah" 
+                },
+                "op": "gt",
+                "value": 1.03
+            },
+
+            // OU Value: any OU line > 3% above fair odds (auto line matching)
+            ou_value: {
+                "field": { 
+                    "op": "divide", 
+                    "left": "bookmakers.Veikkaus.ou", 
+                    "right": "bookmakers.Pinnacle.fair_ou" 
+                },
+                "op": "gt",
+                "value": 1.03
+            },
+
+            // Big Value: 5%+ above fair odds on any market
+            big_value: {
+                "or": [
+                    {
+                        "field": { 
+                            "op": "divide", 
+                            "left": "bookmakers.Veikkaus.x12", 
+                            "right": "bookmakers.Pinnacle.fair_x12" 
+                        },
+                        "op": "gt",
+                        "value": 1.05
+                    },
+                    {
+                        "field": { 
+                            "op": "divide", 
+                            "left": "bookmakers.Veikkaus.ah", 
+                            "right": "bookmakers.Pinnacle.fair_ah" 
+                        },
+                        "op": "gt",
+                        "value": 1.05
+                    },
+                    {
+                        "field": { 
+                            "op": "divide", 
+                            "left": "bookmakers.Veikkaus.ou", 
+                            "right": "bookmakers.Pinnacle.fair_ou" 
+                        },
+                        "op": "gt",
+                        "value": 1.05
+                    }
+                ]
+            },
+
+            // ═══════════════════════════════════════════
+            // BASIC FILTERS
+            // ═══════════════════════════════════════════
+
+            // High Odds: any outcome above 5.0
+            high_odds: {
+                "field": "bookmakers.Veikkaus.x12",
+                "op": "gt",
+                "value": 5000
+            },
+
+            // Low Odds: odds under 1.5 (strong favorites)
+            low_odds: {
+                "field": "bookmakers.Pinnacle.x12",
+                "op": "lt",
+                "value": 1500
+            },
+
+            // Multi-Bookie: both Veikkaus and Pinnacle have X12
+            multi_bookie: {
+                "and": [
+                    { "field": "bookmakers.Veikkaus.x12", "op": "exists" },
+                    { "field": "bookmakers.Pinnacle.x12", "op": "exists" }
+                ]
+            },
+
+            // Has AH: fixture has Asian Handicap lines available
+            has_ah: {
+                "and": [
+                    { "field": "bookmakers.Pinnacle.ah_lines", "op": "exists" },
+                    { "field": "bookmakers.Veikkaus.ah_lines", "op": "exists" }
+                ]
+            },
+
+            // ═══════════════════════════════════════════
+            // ADVANCED FILTERS
+            // ═══════════════════════════════════════════
+
+            // Best Home Odds: get max home odds, filter > 2.5
+            best_home: {
+                "and": [
+                    {
+                        "function": "max",
+                        "source": [
+                            "bookmakers.Veikkaus.x12_h", 
+                            "bookmakers.Pinnacle.x12_h", 
+                            "bookmakers.Veikkaus.x12_h",
+                            "bookmakers.Betfair.x12_h"
+                        ],
+                        "as": "best_home"
+                    },
+                    {
+                        "field": "$best_home",
+                        "op": "gt",
+                        "value": 2500
+                    }
+                ]
+            },
+
+            // Specific Line: Over 2.5 goals value bet
+            specific_line: {
+                "field": {
+                    "op": "divide",
+                    "left": "bookmakers.Veikkaus.ou_o[2.5]",
+                    "right": "bookmakers.Pinnacle.fair_ou_o[2.5]"
+                },
+                "op": "gt",
+                "value": 1.02
+            },
+
+            // Combo Filter: X12 value AND OU available
+            combo_filter: {
+                "and": [
+                    {
+                        "field": { 
+                            "op": "divide", 
+                            "left": "bookmakers.Veikkaus.x12", 
+                            "right": "bookmakers.Pinnacle.fair_x12" 
+                        },
+                        "op": "gt",
+                        "value": 1.02
+                    },
+                    { "field": "bookmakers.Veikkaus.ou_lines", "op": "exists" },
+                    { "field": "bookmakers.Veikkaus.x12_h", "op": "lt", "value": 3000 }
+                ]
+            },
+
+            // Veikkaus under fair odds (potential drop/steam move)
+            veikkaus_under_fair: {
+                "field": { 
+                    "op": "divide", 
+                    "left": "bookmakers.Veikkaus.x12", 
+                    "right": "bookmakers.Pinnacle.fair_x12" 
+                },
+                "op": "lt",
+                "value": 0.97
+            },
+
+            // Per-Line AND: same line must have value AND low margin
+            ah_value_plus_payout: {
+                "and": [
+                    {
+                        "function": "max_per_line",
+                        "source": ["bookmakers.Veikkaus.ah_h", "bookmakers.Pinnacle.ah_h", "bookmakers.Betfair.ah_h"],
+                        "as": "max_ah_h"
+                    },
+                    {
+                        "function": "max_per_line",
+                        "source": ["bookmakers.Veikkaus.ah_a", "bookmakers.Pinnacle.ah_a", "bookmakers.Betfair.ah_a"],
+                        "as": "max_ah_a"
+                    },
+                    {
+                        "per_line_and": [
+                            {
+                                "field": {
+                                    "op": "divide",
+                                    "left": "bookmakers.Veikkaus.ah",
+                                    "right": "bookmakers.Pinnacle.fair_ah"
+                                },
+                                "op": "gt",
+                                "value": 1.01
+                            },
+                            {
+                                "field": {
+                                    "op": "add",
+                                    "left": { "op": "divide", "left": 1000000, "right": "$max_ah_h" },
+                                    "right": { "op": "divide", "left": 1000000, "right": "$max_ah_a" }
+                                },
+                                "op": "lt",
+                                "value": 1020
+                            }
+                        ]
+                    }
+                ]
+            }
+        };
+
+
+        const presetDescriptions = {
+            // Arbitrage
+            x12_arbitrage: "⚡ Detects X12 arbitrage: margin < 100% using best odds from Veikkaus, Pinnacle, Veikkaus, Betfair",
+            ah_arbitrage: "⚡ Detects AH arbitrage per-line: max_per_line across 4 bookies, checks each line for arb",
+            ou_arbitrage: "⚡ Detects OU arbitrage per-line: max_per_line across 4 bookies, checks each totals line",
+            low_margin: "📉 Near-arbitrage: X12 margin under 102% (profitable with rebates/bonuses)",
+            
+            // Value
+            x12_value: "💎 1X2 value bet: any outcome > 3% above Pinnacle fair odds",
+            ah_value: "💎 AH value bet: any handicap line > 3% above fair (auto-matches lines)",
+            ou_value: "💎 OU value bet: any totals line > 3% above fair (auto-matches lines)",
+            big_value: "🔥 Big value: any market/line > 5% above fair odds",
+            
+            // Basic
+            high_odds: "🎯 High odds: any X12 outcome above 5.00",
+            low_odds: "🎯 Low odds: any outcome under 1.50 (heavy favorites)",
+            multi_bookie: "🏦 Multi-bookie: both Veikkaus AND Pinnacle have X12 odds",
+            has_ah: "📊 Has AH: fixture has Asian Handicap lines from multiple bookies",
+            
+            // Advanced
+            best_home: "🏆 Vector aggregation: calculates max home odds across bookies, filters > 2.50",
+            specific_line: "🎯 Specific line: Over 2.5 goals > 2% above Pinnacle fair odds",
+            combo_filter: "🧩 Combo: X12 value 2%+ AND has OU lines AND home odds < 3.00",
+            veikkaus_under_fair: "📉 Veikkaus odds < 97% of fair (steam move / line drop indicator)",
+            
+            // Per-Line
+            ah_value_plus_payout: "🎯 per_line_and: SAME line must have value > 1% AND payout > 98%"
+        };
+
+        function loadPreset(name) {
+            document.getElementById('filterInput').value = JSON.stringify(presets[name], null, 2);
+            const desc = presetDescriptions[name] || "Custom filter";
+            document.getElementById('filterDescription').textContent = "📌 " + desc;
+        }
+
+        function connect() {
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Status: ✅ Connected';
+                document.getElementById('status').style.color = '#4CAF50';
+            };
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Status: ❌ Disconnected';
+                document.getElementById('status').style.color = '#f44336';
+                setTimeout(connect, 1000);
+            };
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'odds_update' || msg.type === 'odds_snapshot') {
+                    logMessage(msg);
+                    matchCount++;
+                    document.getElementById('stats').textContent = `Matches: ${matchCount}`;
+                }
+            };
+        }
+
+        function subscribe() {
+            try {
+                const filter = JSON.parse(document.getElementById('filterInput').value);
+                ws.send(JSON.stringify({ type: 'subscribe', filter: filter }));
+                matchCount = 0;
+                document.getElementById('log').innerHTML = '';
+                logSystem('✅ Subscribed with filter');
+            } catch (e) { alert('Invalid JSON: ' + e.message); }
+        }
+
+        function updateFilter() {
+            try {
+                const filter = JSON.parse(document.getElementById('filterInput').value);
+                ws.send(JSON.stringify({ type: 'update_filter', filter: filter }));
+                logSystem('🔄 Filter updated');
+            } catch (e) { alert('Invalid JSON: ' + e.message); }
+        }
+
+        function removeFilter() {
+            ws.send(JSON.stringify({ type: 'remove_filter' }));
+            logSystem('⏹️ Filter removed (receiving all)');
+        }
+
+        function logMessage(msg) {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const time = new Date().toLocaleTimeString();
+            const bookies = Object.keys(msg.bookmakers).join(', ');
+
+            // Detect available markets
+            let markets = [];
+            for (const [bookie, odds] of Object.entries(msg.bookmakers)) {
+                if (odds.x12 && !markets.includes('X12')) markets.push('X12');
+                if (odds.ah_h && odds.ah_h.length > 0 && !markets.includes('AH')) markets.push('AH');
+                if (odds.ou_o && odds.ou_o.length > 0 && !markets.includes('OU')) markets.push('OU');
+            }
+
+            const marketBadges = markets.map(m =>
+                `<span class="market-badge badge-${m.toLowerCase()}">${m}</span>`
+            ).join(' ');
+
+            // Check for notable filter matches
+            let highlights = [];
+            if (msg.filter_matches && msg.filter_matches.length > 0) {
+                for (const match of msg.filter_matches) {
+                    // Check for arbitrage (margin < 100% means payout > 100%)
+                    if (match.op === 'lt' && match.threshold && match.threshold <= 1020 && match.result < 1000) {
+                        const payout = (100000 / match.result).toFixed(2);
+                        highlights.push(`<span class="arb-highlight">💰 ${payout}% payout</span>`);
+                    }
+                    // Check for value bets
+                    else if (match.op === 'gt' && match.result && match.threshold) {
+                        const ratio = match.result;
+                        if (ratio > 1.0 && ratio < 2.0) {
+                            const valuePercent = ((ratio - 1) * 100).toFixed(1);
+                            highlights.push(`<span class="match-highlight">+${valuePercent}% value</span>`);
+                        }
+                    }
+                }
+            }
+
+            const header = document.createElement('div');
+            header.className = 'log-header';
+            header.innerHTML = `
+                <span class="timestamp">[${time}]</span>
+                <span class="fixture-id">#${msg.fixture_id}</span>
+                <span class="bookies">(${bookies})</span>
+                ${marketBadges}
+                ${highlights.join(' ')}
+            `;
+            entry.appendChild(header);
+
+            const details = document.createElement('div');
+            details.className = 'log-details';
+            details.innerHTML = generateDetails(msg, markets);
+            entry.appendChild(details);
+
+            entry.onclick = () => details.classList.toggle('expanded');
+            log.insertBefore(entry, log.firstChild);
+            if (log.children.length > 100) log.removeChild(log.lastChild);
+        }
+
+        function generateDetails(msg, markets) {
+            let html = '';
+
+            // Add Filter tab if there are matches
+            const hasFilterMatches = msg.filter_matches && msg.filter_matches.length > 0;
+            
+            // Market tabs + Filter tab + Raw JSON tab
+            let allTabs = hasFilterMatches ? ['Filter', ...markets, 'Raw'] : [...markets, 'Raw'];
+            html += '<div class="market-tabs">';
+            allTabs.forEach((tab, idx) => {
+                html += `<div class="market-tab ${idx === 0 ? 'active' : ''}" onclick="switchMarketTab(event, '${tab}')">${tab}</div>`;
+            });
+            html += '</div>';
+
+            // Filter Matches Tab
+            if (hasFilterMatches) {
+                html += `<div class="market-content active" data-market="Filter">`;
+                html += '<div style="margin-bottom: 10px; color: #888;">Why this update matched your filter:</div>';
+                
+                for (const match of msg.filter_matches) {
+                    const isArb = match.op === 'lt' && match.result < 1000;
+                    html += `<div class="filter-match ${isArb ? 'arb-match' : ''}">`;
+                    
+                    // Left operand
+                    if (match.left_operand) {
+                        html += `<span class="path">${match.left_operand.path}</span>`;
+                        html += ` = <span class="value">${formatOdds(match.left_operand.value)}</span>`;
+                    }
+                    
+                    // Operation and calculation
+                    if (match.calculation_op) {
+                        html += ` <span class="op">${match.calculation_op}</span> `;
+                        if (match.right_operand) {
+                            html += `<span class="path">${match.right_operand.path}</span>`;
+                            html += ` = <span class="value">${formatOdds(match.right_operand.value)}</span>`;
+                        }
+                        html += ` → `;
+                    }
+                    
+                    // Result and comparison
+                    const resultDisplay = match.calculation_op ? match.result.toFixed(4) : formatOdds(match.result);
+                    html += `<span class="value">${resultDisplay}</span>`;
+                    html += ` <span class="op">${match.op}</span>`;
+                    if (match.threshold !== null) {
+                        html += ` <span class="value">${match.threshold}</span>`;
+                    }
+                    
+                    // Value interpretation
+                    if (match.calculation_op === 'divide' && match.result > 1) {
+                        const valuePercent = ((match.result - 1) * 100).toFixed(1);
+                        html += ` <span style="color: #4caf50; margin-left: 10px;">(+${valuePercent}% edge)</span>`;
+                    } else if (match.op === 'lt' && match.result < 1000) {
+                        const payout = (100000 / match.result).toFixed(2);
+                        const profit = (payout - 100).toFixed(2);
+                        html += ` <span style="color: #e91e63; margin-left: 10px;">(${payout}% payout = +${profit}% ARB!)</span>`;
+                    }
+                    
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+
+            // X12 Market
+            if (markets.includes('X12')) {
+                const x12Active = !hasFilterMatches && markets[0] === 'X12';
+                html += `<div class="market-content ${x12Active ? 'active' : ''}" data-market="X12">`;
+                html += '<div class="odds-grid"><div>Bookie</div><div>Home</div><div>Draw</div><div>Away</div><div>Ratio</div></div>';
+
+                for (const [bookie, odds] of Object.entries(msg.bookmakers)) {
+                    if (odds.x12) {
+                        const home = (odds.x12_h / 1000).toFixed(3);
+                        const draw = (odds.x12_x / 1000).toFixed(3);
+                        const away = (odds.x12_a / 1000).toFixed(3);
+                        const ratio = odds.fair_x12 ? (odds.x12_h / odds.fair_x12_h).toFixed(4) : '-';
+
+                        html += `<div class="odds-grid">
+                            <div class="bookie-name">${bookie}</div>
+                            <div class="odds-value">${home}</div>
+                            <div class="odds-value">${draw}</div>
+                            <div class="odds-value">${away}</div>
+                            <div class="odds-value">${ratio}</div>
+                        </div>`;
+                    }
+                }
+                html += '</div>';
+            }
+
+            // AH Market
+            if (markets.includes('AH')) {
+                const ahActive = !hasFilterMatches && markets[0] === 'AH';
+                html += `<div class="market-content ${ahActive ? 'active' : ''}" data-market="AH">`;
+
+                for (const [bookie, odds] of Object.entries(msg.bookmakers)) {
+                    if (odds.ah_lines && odds.ah_lines.length > 0) {
+                        html += `<div style="margin-bottom: 15px;"><strong class="bookie-name">${bookie}</strong>`;
+                        html += '<div class="ah-grid"><div>Line</div><div>Home</div><div>Away</div></div>';
+
+                        odds.ah_lines.forEach((line, idx) => {
+                            const home = odds.ah_h[idx] ? (odds.ah_h[idx] / 1000).toFixed(3) : '-';
+                            const away = odds.ah_a[idx] ? (odds.ah_a[idx] / 1000).toFixed(3) : '-';
+
+                            html += `<div class="ah-grid">
+                                <div>${line.toFixed(2)}</div>
+                                <div class="odds-value">${home}</div>
+                                <div class="odds-value">${away}</div>
+                            </div>`;
+                        });
+                        html += '</div>';
+                    }
+                }
+                html += '</div>';
+            }
+
+            // OU Market
+            if (markets.includes('OU')) {
+                const ouActive = !hasFilterMatches && markets[0] === 'OU';
+                html += `<div class="market-content ${ouActive ? 'active' : ''}" data-market="OU">`;
+
+                for (const [bookie, odds] of Object.entries(msg.bookmakers)) {
+                    if (odds.ou_lines && odds.ou_lines.length > 0) {
+                        html += `<div style="margin-bottom: 15px;"><strong class="bookie-name">${bookie}</strong>`;
+                        html += '<div class="ou-grid"><div>Line</div><div>Over</div><div>Under</div></div>';
+
+                        odds.ou_lines.forEach((line, idx) => {
+                            const over = odds.ou_o[idx] ? (odds.ou_o[idx] / 1000).toFixed(3) : '-';
+                            const under = odds.ou_u[idx] ? (odds.ou_u[idx] / 1000).toFixed(3) : '-';
+
+                            html += `<div class="ou-grid">
+                                <div>${line.toFixed(1)}</div>
+                                <div class="odds-value">${over}</div>
+                                <div class="odds-value">${under}</div>
+                            </div>`;
+                        });
+                        html += '</div>';
+                    }
+                }
+                html += '</div>';
+            }
+
+            // Raw JSON
+            html += `<div class="market-content" data-market="Raw">`;
+            html += `<pre style="background: #111; padding: 10px; border-radius: 4px; color: #4CAF50; font-size: 11px; overflow-x: auto; white-space: pre-wrap;">${JSON.stringify(msg, null, 2)}</pre>`;
+            html += '</div>';
+
+            return html;
+        }
+
+        function formatOdds(value) {
+            if (value === null || value === undefined) return '-';
+            if (value >= 1000) {
+                return (value / 1000).toFixed(3);
+            }
+            return value.toString();
+        }
+
+        function switchMarketTab(event, market) {
+            event.stopPropagation();
+            const container = event.target.closest('.log-details');
+
+            // Update tabs
+            container.querySelectorAll('.market-tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Update content
+            container.querySelectorAll('.market-content').forEach(content => content.classList.remove('active'));
+            container.querySelector(`[data-market="${market}"]`).classList.add('active');
+        }
+
+        function logSystem(text) {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.style.color = '#FFC107';
+            entry.textContent = `[SYSTEM] ${text}`;
+            log.insertBefore(entry, log.firstChild);
+        }
+
+        connect();
+    </script>
+</body>
+
+</html>

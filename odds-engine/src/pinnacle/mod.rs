@@ -5,20 +5,24 @@ pub mod db;
 use crate::pinnacle::client::PinnacleApiClient;
 use crate::pinnacle::db::PinnacleDbService;
 use crate::pinnacle::types::PinnaclePeriod;
+use crate::processor_client::{ProcessorClient, OddsUpdate};
 use sqlx::PgPool;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, info};
 
 pub struct PinnacleService {
     client: PinnacleApiClient,
     db: PinnacleDbService,
+    processor_client: Option<Arc<ProcessorClient>>,
 }
 
 impl PinnacleService {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: PgPool, processor_client: Option<Arc<ProcessorClient>>) -> Self {
         Self {
             client: PinnacleApiClient::new(),
             db: PinnacleDbService::new(pool),
+            processor_client,
         }
     }
 
@@ -42,6 +46,9 @@ impl PinnacleService {
     }
 
     async fn process_cycle(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Record when we start fetching odds for latency measurement
+        let fetch_start_time = chrono::Utc::now().timestamp_millis();
+
         // Fetch odds
         let market_data = match self.client.fetch_odds().await? {
             Some(data) => data,
@@ -114,7 +121,7 @@ impl PinnacleService {
                 if let Some(&(fixture_id, ref existing_data)) = existing_odds.get(&event.event_id) {
                     // Market closed but we have existing odds - set all odds to 0
                     let zero_period = self.create_zero_period(period);
-                    self.db.create_new_odds_entry(
+                    let db_updated = self.db.create_new_odds_entry(
                         fixture_id,
                         event.event_id,
                         &zero_period,
@@ -122,7 +129,9 @@ impl PinnacleService {
                         &event.away,
                         existing_data.as_ref()
                     ).await?;
-                    fixtures_updated += 1;
+                    if db_updated {
+                        fixtures_updated += 1;
+                    }
                     events_processed += 1;
                 } else {
                     debug!("Skipping event {}: Market closed (status={}, has_odds={}, future={}, meta={})",
@@ -133,17 +142,11 @@ impl PinnacleService {
 
             events_processed += 1;
 
-            if let Some(&(fixture_id, ref existing_data)) = existing_odds.get(&event.event_id) {
-                // Update existing odds
-                self.db.create_new_odds_entry(
-                    fixture_id,
-                    event.event_id,
-                    period,
-                    &event.home,
-                    &event.away,
-                    existing_data.as_ref()
-                ).await?;
-                fixtures_updated += 1;
+            // Determine fixture_id first (without doing DB operations yet)
+            let (fixture_id_for_update, existing_data) = if let Some(&(fixture_id, ref existing_data)) = existing_odds.get(&event.event_id) {
+                // Existing odds - we have fixture_id
+                // existing_data is &Option<Value>, convert to Option<&Value>
+                (Some(fixture_id), existing_data.as_ref())
             } else {
                 // New entry - find fixture
                 let start_time = match chrono::DateTime::parse_from_rfc3339(&event.starts) {
@@ -160,17 +163,38 @@ impl PinnacleService {
                 ).await?;
 
                 if let Some(fid) = fixture_id {
-                    self.db.create_new_odds_entry(
-                        fid,
-                        event.event_id,
-                        period,
-                        &event.home,
-                        &event.away,
-                        None
-                    ).await?;
-                    fixtures_updated += 1;
+                    (Some(fid), None)
                 } else {
                     info!("No matching fixture found for event {} ({} v {}) in league {}", event.event_id, event.home, event.away, event.league_id);
+                    (None, None)
+                }
+            };
+
+            // Perform database operations FIRST
+            if let Some(fixture_id) = fixture_id_for_update {
+                let db_updated = self.db.create_new_odds_entry(
+                    fixture_id,
+                    event.event_id,
+                    period,
+                    &event.home,
+                    &event.away,
+                    existing_data
+                ).await?;
+                
+                // Only send to processor if odds actually changed (database was updated)
+                if db_updated {
+                    if let Some(ref client) = self.processor_client {
+                        // Use event.last timestamp as start time for latency measurement
+                        // This represents when Pinnacle last updated the odds for this event
+                        // Convert from seconds to milliseconds to match our timestamp format
+                        let start_timestamp = event.last
+                            .map(|last| last * 1000) // Convert seconds to milliseconds
+                            .unwrap_or(fetch_start_time); // Fallback to fetch start time
+
+                        let update = self.create_processor_update(fixture_id, period, start_timestamp);
+                        let _ = client.send(&update).await;
+                    }
+                    fixtures_updated += 1;
                 }
             }
         }
@@ -234,5 +258,156 @@ impl PinnacleService {
                 open_team_total: Some(false),
             }),
         }
+    }
+
+    fn create_processor_update(&self, fixture_id: i64, period: &PinnaclePeriod, start_timestamp: i64) -> OddsUpdate {
+        // Pinnacle bookie_id = 2, decimals = 3
+        let bookie_id = 2i64;
+        let decimals = 3i32;
+        let timestamp = chrono::Utc::now().timestamp();
+
+        let mut update = OddsUpdate {
+            fixture_id,
+            bookie_id,
+            bookmaker: "Pinnacle".to_string(),
+            timestamp,
+            start: start_timestamp,
+            decimals,
+            ..Default::default()
+        };
+
+        // Build IDs
+        let mut line_ids = serde_json::Map::new();
+        let mut max_stakes_entry = serde_json::Map::new();
+        max_stakes_entry.insert("t".to_string(), serde_json::json!(timestamp));
+
+        // X12 odds
+        if let Some(ref ml) = period.money_line {
+            let x12 = [
+                self.transform_pinnacle_odds(ml.home),
+                self.transform_pinnacle_odds(ml.draw),
+                self.transform_pinnacle_odds(ml.away),
+            ];
+            update.x12 = Some(x12);
+
+            // Max stakes for X12
+            if let Some(ref meta) = period.meta {
+                if let Some(max_ml) = meta.max_money_line {
+                    max_stakes_entry.insert("max_stake_x12".to_string(), serde_json::json!([max_ml, max_ml, max_ml]));
+                }
+            }
+        }
+
+        // AH odds (spreads)
+        if let Some(ref spreads) = period.spreads {
+            let mut lines: Vec<f64> = Vec::new();
+            let mut ah_h: Vec<i32> = Vec::new();
+            let mut ah_a: Vec<i32> = Vec::new();
+            let mut ah_line_ids: Vec<i64> = Vec::new();
+
+            for spread in spreads.values() {
+                lines.push(spread.hdp);
+                ah_h.push(self.transform_pinnacle_odds(spread.home));
+                ah_a.push(self.transform_pinnacle_odds(spread.away));
+                ah_line_ids.push(spread.alt_line_id.unwrap_or(0));
+            }
+
+            if !lines.is_empty() {
+                update.ah_lines = Some(lines);
+                update.ah_h = Some(ah_h);
+                update.ah_a = Some(ah_a);
+                line_ids.insert("ah".to_string(), serde_json::json!(ah_line_ids));
+
+                // Max stakes for AH
+                if let Some(ref meta) = period.meta {
+                    if let Some(max_spread) = meta.max_spread {
+                        let h_stakes: Vec<f64> = (0..spreads.len()).map(|_| max_spread).collect();
+                        let a_stakes = h_stakes.clone();
+                        max_stakes_entry.insert("max_stake_ah".to_string(), serde_json::json!({
+                            "h": h_stakes,
+                            "a": a_stakes
+                        }));
+                    }
+                }
+            }
+        }
+
+        // OU odds (totals)
+        if let Some(ref totals) = period.totals {
+            let mut lines: Vec<f64> = Vec::new();
+            let mut ou_o: Vec<i32> = Vec::new();
+            let mut ou_u: Vec<i32> = Vec::new();
+            let mut ou_line_ids: Vec<i64> = Vec::new();
+
+            for total in totals.values() {
+                lines.push(total.points);
+                ou_o.push(self.transform_pinnacle_odds(total.over));
+                ou_u.push(self.transform_pinnacle_odds(total.under));
+                ou_line_ids.push(total.alt_line_id.unwrap_or(0));
+            }
+
+            if !lines.is_empty() {
+                update.ou_lines = Some(lines);
+                update.ou_o = Some(ou_o);
+                update.ou_u = Some(ou_u);
+                line_ids.insert("ou".to_string(), serde_json::json!(ou_line_ids));
+
+                // Max stakes for OU
+                if let Some(ref meta) = period.meta {
+                    if let Some(max_total) = meta.max_total {
+                        let o_stakes: Vec<f64> = (0..totals.len()).map(|_| max_total).collect();
+                        let u_stakes = o_stakes.clone();
+                        max_stakes_entry.insert("max_stake_ou".to_string(), serde_json::json!({
+                            "o": o_stakes,
+                            "u": u_stakes
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Build IDs structure
+        if !line_ids.is_empty() {
+            update.ids = Some(serde_json::json!({
+                "t": timestamp,
+                "line_ids": line_ids
+            }));
+        }
+
+        // Build max_stakes structure
+        if max_stakes_entry.len() > 1 {  // More than just "t"
+            update.max_stakes = Some(serde_json::Value::Object(max_stakes_entry));
+        }
+
+        // Build latest_t
+        let mut latest_t = serde_json::Map::new();
+        if update.x12.is_some() {
+            latest_t.insert("x12_ts".to_string(), serde_json::json!(timestamp));
+        }
+        if update.ah_lines.is_some() {
+            latest_t.insert("ah_ts".to_string(), serde_json::json!(timestamp));
+            latest_t.insert("lines_ts".to_string(), serde_json::json!(timestamp));
+        }
+        if update.ou_lines.is_some() {
+            latest_t.insert("ou_ts".to_string(), serde_json::json!(timestamp));
+            latest_t.insert("lines_ts".to_string(), serde_json::json!(timestamp));
+        }
+        if update.ids.is_some() {
+            latest_t.insert("ids_ts".to_string(), serde_json::json!(timestamp));
+        }
+        if update.max_stakes.is_some() {
+            latest_t.insert("stakes_ts".to_string(), serde_json::json!(timestamp));
+        }
+        if !latest_t.is_empty() {
+            update.latest_t = Some(serde_json::Value::Object(latest_t));
+        }
+
+        update
+    }
+
+    fn transform_pinnacle_odds(&self, decimal_odds: f64) -> i32 {
+        // Pinnacle returns decimal odds with 3 decimals (e.g., 1.952, 2.105)
+        // Convert to basis points with 3 decimals (1952, 2105)
+        (decimal_odds * 1000.0).round() as i32
     }
 }

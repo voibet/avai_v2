@@ -1,8 +1,8 @@
 mod config;
 mod shared;
 mod monaco;
-
 mod pinnacle;
+mod processor_client;
 
 use axum::{
     extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
@@ -14,9 +14,10 @@ use config::Config;
 use dashmap::DashMap;
 use monaco::{client::MonacoApiClient, stream::MonacoWebSocketClient, types::MarketMapping};
 use monaco::order_book::MonacoOrderBook;
+use processor_client::ProcessorClient;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::{broadcast, Mutex};
 use tracing::info;
 
@@ -33,6 +34,8 @@ pub struct AppState {
     pub event_to_fixture: DashMap<String, i64>,
     // OrderBook tracker
     pub order_book: Arc<Mutex<MonacoOrderBook>>,
+    // Processor client for sending updates
+    pub processor_client: Option<Arc<ProcessorClient>>,
 }
 
 // --- Main ---
@@ -52,18 +55,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Postgres with proper pool configuration
     info!("🔌 Connecting to Postgres...");
     let pool = PgPoolOptions::new()
-        .max_connections(20)
-        .min_connections(2)
-        .acquire_timeout(Duration::from_secs(5))
-        .idle_timeout(Duration::from_secs(600))  // 10 minutes
-        .max_lifetime(Duration::from_secs(1800))  // 30 minutes
+        .max_connections(DB_MAX_CONNECTIONS)
+        .min_connections(DB_MIN_CONNECTIONS)
+        .acquire_timeout(Duration::from_secs(DB_ACQUIRE_TIMEOUT_SECS))
+        .idle_timeout(Duration::from_secs(DB_IDLE_TIMEOUT_SECS))
+        .max_lifetime(Duration::from_secs(DB_MAX_LIFETIME_SECS))
         .connect(&config.database_url)
         .await?;
     
     info!("✅ Connected to Postgres");
 
+    // Initialize processor client
+    let processor_client = processor_client::create_processor_client(
+        config.processor_enabled,
+        config.processor_port,
+    );
+
     // Initialize State
-    let (tx, _rx) = broadcast::channel(1000);
+    let (tx, _rx) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
     let state = Arc::new(AppState {
         config: config.clone(),
         tx: tx.clone(),
@@ -71,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         market_mapping: DashMap::new(),
         event_to_fixture: DashMap::new(),
         order_book: Arc::new(Mutex::new(MonacoOrderBook::new())),
+        processor_client,
     });
 
     // Initialize Monaco Client & Ingestion
@@ -122,10 +132,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Spawn Ingestion Task
-        info!("📡 Starting ingestion engine...");
+        info!("📡 Starting Monaco ingestion engine...");
         let ingestion_state = state.clone();
         tokio::spawn(async move {
-            start_ingestion_engine(ingestion_state, monaco_ws).await;
+            monaco::handlers::start_ingestion_engine(ingestion_state, monaco_ws).await;
         });
 
         // Spawn Periodic Market Refresh Task (every 60 minutes)
@@ -133,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let refresh_state = state.clone();
         let refresh_api = monaco_api.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(3600)); // 60 minutes
+            let mut interval = tokio::time::interval(Duration::from_secs(MARKET_REFRESH_INTERVAL_SECS));
             loop {
                 interval.tick().await;
                 info!("🔄 Refreshing markets for new events...");
@@ -158,8 +168,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if state.config.pinnacle_odds_enabled {
         info!("🏔️ Starting Pinnacle Service...");
         let pinnacle_pool = pool.clone();
+        let pinnacle_processor_client = state.processor_client.clone();
         tokio::spawn(async move {
-            let mut pinnacle_service = crate::pinnacle::PinnacleService::new(pinnacle_pool);
+            let mut pinnacle_service = crate::pinnacle::PinnacleService::new(pinnacle_pool, pinnacle_processor_client);
             pinnacle_service.run().await;
         });
     } else {
@@ -177,10 +188,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ Rust Odds Engine is ready!");
     
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    
+    // Graceful shutdown handler
+    let shutdown_signal = async {
+        let _ = tokio::signal::ctrl_c().await;
+        info!("🛑 Shutdown signal received, stopping server...");
+    };
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal)
+        .await?;
+
+    info!("👋 Rust Odds Engine stopped gracefully");
 
     Ok(())
 }
+
+// --- Constants ---
+const BROADCAST_CHANNEL_CAPACITY: usize = 1000;
+const DB_MAX_CONNECTIONS: u32 = 20;
+const DB_MIN_CONNECTIONS: u32 = 2;
+const DB_ACQUIRE_TIMEOUT_SECS: u64 = 5;
+const DB_IDLE_TIMEOUT_SECS: u64 = 600;
+const DB_MAX_LIFETIME_SECS: u64 = 1800;
+const MARKET_REFRESH_INTERVAL_SECS: u64 = 3600;
 
 // --- Handlers ---
 
@@ -210,204 +241,3 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
     }
 }
 
-// --- Ingestion Engine ---
-
-async fn start_ingestion_engine(state: Arc<AppState>, monaco_ws: MonacoWebSocketClient) {
-    info!("🔥 Ingestion Engine Started");
-    
-    // Start Monaco WebSocket (authentication already completed during market fetch)
-    let ws_client = Arc::new(monaco_ws);
-    let ws_client_clone = ws_client.clone();
-    tokio::spawn(async move {
-        info!("🚀 Launching Monaco WebSocket connection...");
-        ws_client_clone.start().await;
-    });
-
-    // Subscribe to Monaco messages
-    let mut rx = ws_client.subscribe();
-    info!("📻 Subscribed to Monaco message stream");
-
-    let mut message_count = 0;
-    
-    while let Ok(msg) = rx.recv().await {
-        message_count += 1;
-
-        // Process messages
-        if let Some(msg_type) = msg["type"].as_str() {
-            match msg_type {
-                "MarketPriceUpdate" => {
-                    let state_clone = state.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_price_update(state_clone, msg).await {
-                            tracing::error!("Error handling price update: {}", e);
-                        }
-                    });
-                }
-                "MarketStatusUpdate" => {
-                    let state_clone = state.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = handle_market_status_update(state_clone, msg).await {
-                            tracing::error!("Error handling market status update: {}", e);
-                        }
-                    });
-                }
-                _ => {}
-            }
-        }
-        
-        if message_count % 200 == 0 {
-            info!("📊 Processed {} messages total", message_count);
-        }
-    }
-}
-
-async fn handle_price_update(
-    state: Arc<AppState>,
-    message: Value,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Extract message fields
-    let market_id = match message["marketId"].as_str() {
-        Some(id) => id,
-        None => return Ok(()),
-    };
-
-    let event_id = match message["eventId"].as_str() {
-        Some(id) => id,
-        None => return Ok(()),
-    };
-
-    // Check if we have prices
-    if message["prices"].as_array().map_or(true, |p| p.is_empty()) {
-        return Ok(());
-    }
-
-    // Lookup market mapping
-    let mapping_key = format!("{}-{}", event_id, market_id);
-    let market_mapping = match state.market_mapping.get(&mapping_key) {
-        Some(mapping) => mapping.clone(),
-        None => {
-            // Market not yet mapped - need to fetch and process
-            // For now, skip
-            return Ok(());
-        }
-    };
-
-    // Get fixture ID
-    let fixture_id = match market_mapping.fixture_id {
-        Some(id) => id,
-        None => return Ok(()),
-    };
-
-    // Update OrderBook
-    let order_book = {
-        let mut ob = state.order_book.lock().await;
-        ob.update(
-            fixture_id,
-            &message,
-            &market_mapping.market_type,
-            market_mapping.outcome_mappings.as_ref(),
-        )
-    };
-
-    // Get all market mappings for this fixture (needed for database update)
-    let mut mappings = HashMap::new();
-    for entry in state.market_mapping.iter() {
-        if entry.value().fixture_id == Some(fixture_id) {
-            mappings.insert(entry.key().clone(), entry.value().clone());
-        }
-    }
-
-    // Update database with best prices
-    monaco::db::update_database_with_best_prices(
-        &state.db,
-        fixture_id,
-        &market_mapping.market_type,
-        &order_book,
-        &mappings,
-    )
-    .await?;
-
-    Ok(())
-}
-
-async fn handle_market_status_update(
-    state: Arc<AppState>,
-    message: Value,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Extract message fields
-    let market_id = match message["marketId"].as_str() {
-        Some(id) => id,
-        None => return Ok(()),
-    };
-
-    let event_id = match message["eventId"].as_str() {
-        Some(id) => id,
-        None => return Ok(()),
-    };
-
-    let status = message["status"].as_str().unwrap_or("Unknown");
-    let in_play_status = message["inPlayStatus"].as_str().unwrap_or("NotApplicable");
-
-    // Check if market should be zeroed out
-    // Zero out if: status != "Open" OR inPlayStatus == "InPlay"
-    let should_zero = status != "Open" || in_play_status == "InPlay";
-
-    if !should_zero {
-        return Ok(()); // Market is open and pre-play, nothing to do
-    }
-
-    info!("🔒 Market {} closed/in-play (status: {}, inPlay: {}), zeroing odds", market_id, status, in_play_status);
-
-    // Lookup market mapping
-    let mapping_key = format!("{}-{}", event_id, market_id);
-    let market_mapping = match state.market_mapping.get(&mapping_key) {
-        Some(mapping) => mapping.clone(),
-        None => {
-            // Market not mapped yet, skip
-            return Ok(());
-        }
-    };
-
-    // Get fixture ID
-    let fixture_id = match market_mapping.fixture_id {
-        Some(id) => id,
-        None => return Ok(()),
-    };
-
-    // Zero out the order book for this market
-    {
-        let mut ob = state.order_book.lock().await;
-        ob.remove(fixture_id, &market_mapping.market_type);
-    }
-
-    // Create empty order book (all outcomes with empty price levels)
-    let empty_order_book = {
-        let mut book = HashMap::new();
-        if let Some(outcome_mappings) = &market_mapping.outcome_mappings {
-            for outcome_id in outcome_mappings.keys() {
-                book.insert(outcome_id.clone(), vec![]);
-            }
-        }
-        book
-    };
-
-    // Get all market mappings for this fixture (needed for database update)
-    let mut mappings = HashMap::new();
-    for entry in state.market_mapping.iter() {
-        if entry.value().fixture_id == Some(fixture_id) {
-            mappings.insert(entry.key().clone(), entry.value().clone());
-        }
-    }
-
-    // Update database with zeroed prices
-    monaco::db::update_database_with_best_prices(
-        &state.db,
-        fixture_id,
-        &market_mapping.market_type,
-        &empty_order_book,
-        &mappings,
-    )
-    .await?;
-
-    Ok(())
-}

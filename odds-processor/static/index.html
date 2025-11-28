@@ -1,0 +1,1008 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>odds-processor Debug</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            background: #0a0a0f;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding: 12px;
+            font-size: 11px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #1a1a2e;
+        }
+
+        h1 {
+            font-size: 16px;
+            color: #00ff88;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+
+        .status-dot.connected {
+            background: #00ff88;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+            padding: 10px;
+            background: #12121a;
+            border-radius: 4px;
+        }
+
+        .stat {
+            display: flex;
+            gap: 4px;
+        }
+
+        .stat-label {
+            color: #666;
+        }
+
+        .stat-value {
+            color: #00ff88;
+            font-weight: 600;
+        }
+
+        .stat-value.warn {
+            color: #ff9500;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 280px 1fr 320px;
+            gap: 12px;
+            height: calc(100vh - 120px);
+        }
+
+        .panel {
+            background: #12121a;
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 8px 10px;
+            background: #1a1a2e;
+            font-size: 10px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .update-item {
+            padding: 6px 8px;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            border-left: 2px solid transparent;
+        }
+
+        .update-item:hover {
+            background: #1a1a2e;
+        }
+
+        .update-item.selected {
+            background: #1a2a1e;
+            border-left-color: #00ff88;
+        }
+
+        .fixture-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .fixture-id {
+            color: #00ff88;
+            font-weight: 600;
+        }
+
+        .bookmaker {
+            color: #ff9500;
+            font-size: 10px;
+        }
+
+        .latency {
+            font-size: 9px;
+            color: #666;
+        }
+
+        .latency.fast {
+            color: #00ff88;
+        }
+
+        .latency.medium {
+            color: #ff9500;
+        }
+
+        .latency.slow {
+            color: #ff4444;
+        }
+
+        .graph-container {
+            height: 120px;
+            background: #0a0a0f;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .graph-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .graph-label {
+            position: absolute;
+            top: 4px;
+            left: 6px;
+            font-size: 9px;
+            color: #666;
+        }
+
+        .graph-value {
+            position: absolute;
+            top: 4px;
+            right: 6px;
+            font-size: 10px;
+            color: #00ff88;
+            font-weight: 600;
+        }
+
+        .section-title {
+            font-weight: 600;
+            color: #ff9500;
+            margin: 10px 0 6px;
+            font-size: 10px;
+            text-transform: uppercase;
+        }
+
+        .latency-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .latency-card {
+            background: #0a0a0f;
+            padding: 8px;
+            border-radius: 3px;
+            text-align: center;
+        }
+
+        .latency-card-label {
+            font-size: 9px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .latency-card-value {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .odds-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+        }
+
+        .odds-table th {
+            text-align: left;
+            padding: 4px 6px;
+            background: #1a1a2e;
+            color: #888;
+            font-weight: 500;
+        }
+
+        .odds-table td {
+            padding: 4px 6px;
+            border-bottom: 1px solid #1a1a2e;
+        }
+
+        .odds-table .bookie {
+            color: #ff9500;
+        }
+
+        .odds-table .odds {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .odds-table .top {
+            color: #00ff88;
+        }
+
+        .odds-table .change-up {
+            color: #00ff88;
+        }
+
+        .odds-table .change-down {
+            color: #ff4444;
+        }
+
+        .json-view {
+            white-space: pre-wrap;
+            word-break: break-all;
+            font-size: 10px;
+            line-height: 1.3;
+            background: #0a0a0f;
+            padding: 8px;
+            border-radius: 3px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .json-key {
+            color: #ff9500;
+        }
+
+        .json-string {
+            color: #98c379;
+        }
+
+        .json-number {
+            color: #d19a66;
+        }
+
+        .json-bool {
+            color: #56b6c2;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 2px;
+            margin-bottom: 8px;
+        }
+
+        .tab {
+            padding: 4px 10px;
+            background: #1a1a2e;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+        }
+
+        .tab.active {
+            background: #00ff88;
+            color: #0a0a0f;
+        }
+
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+            border-bottom: 1px solid #1a1a2e;
+            font-size: 10px;
+        }
+
+        .history-time {
+            color: #666;
+        }
+
+        .history-odds {
+            color: #fff;
+        }
+
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0a0a0f;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 2px;
+        }
+
+        .pause-btn {
+            padding: 4px 10px;
+            background: #1a1a2e;
+            border: none;
+            color: #fff;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 10px;
+        }
+
+        .pause-btn.paused {
+            background: #ff9500;
+            color: #0a0a0f;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>⚡ odds-processor debug</h1>
+        <div style="display: flex; gap: 12px; align-items: center;">
+            <button class="pause-btn" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
+            <div class="status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="stats-row">
+        <div class="stat"><span class="stat-label">Fixtures:</span><span class="stat-value" id="fixturesCount">0</span>
+        </div>
+        <div class="stat"><span class="stat-label">Updates:</span><span class="stat-value" id="updatesReceived">0</span>
+        </div>
+        <div class="stat"><span class="stat-label">Rate:</span><span class="stat-value" id="updatesPerSec">0/s</span>
+        </div>
+        <div class="stat"><span class="stat-label">Avg Total:</span><span class="stat-value" id="avgTotal">-</span>
+        </div>
+        <div class="stat"><span class="stat-label">Clients:</span><span class="stat-value" id="wsClients">0</span></div>
+        <div class="stat"><span class="stat-label">Uptime:</span><span class="stat-value" id="uptime">0s</span></div>
+    </div>
+
+    <div class="main-grid">
+        <!-- Left: Updates List -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>Updates</span>
+                <span id="updateCount">0</span>
+            </div>
+            <div class="panel-content" id="updatesList"></div>
+        </div>
+
+        <!-- Center: Graphs & Details -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>Latency & Performance</span>
+                <span id="selectedFixture">-</span>
+            </div>
+            <div class="panel-content">
+                <div class="graph-container">
+                    <span class="graph-label">Latency (ms)</span>
+                    <span class="graph-value" id="latencyGraphValue">-</span>
+                    <canvas class="graph-canvas" id="latencyGraph"></canvas>
+                </div>
+
+                <div class="graph-container">
+                    <span class="graph-label">Updates/sec</span>
+                    <span class="graph-value" id="rateGraphValue">-</span>
+                    <canvas class="graph-canvas" id="rateGraph"></canvas>
+                </div>
+
+                <div class="latency-grid">
+                    <div class="latency-card">
+                        <div class="latency-card-label">API → Engine</div>
+                        <div class="latency-card-value" id="detailOddsReceivedToSent">-</div>
+                    </div>
+                    <div class="latency-card">
+                        <div class="latency-card-label">Engine → Proc</div>
+                        <div class="latency-card-value" id="detailEngineToProc">-</div>
+                    </div>
+                    <div class="latency-card">
+                        <div class="latency-card-label">Processing</div>
+                        <div class="latency-card-value" id="detailProcessing">-</div>
+                    </div>
+                    <div class="latency-card">
+                        <div class="latency-card-label">Proc → Client</div>
+                        <div class="latency-card-value" id="detailProcToClient">-</div>
+                    </div>
+                    <div class="latency-card">
+                        <div class="latency-card-label">Total</div>
+                        <div class="latency-card-value" id="detailTotal">-</div>
+                    </div>
+                </div>
+
+                <div class="section-title">X12 Odds Comparison</div>
+                <table class="odds-table" id="oddsTable">
+                    <thead>
+                        <tr>
+                            <th>Bookie</th>
+                            <th>1</th>
+                            <th>1 Fair</th>
+                            <th>X</th>
+                            <th>X Fair</th>
+                            <th>2</th>
+                            <th>2 Fair</th>
+                        </tr>
+                    </thead>
+                    <tbody id="oddsTableBody"></tbody>
+                </table>
+
+                <div class="section-title">Asian Handicap (AH)</div>
+                <div id="ahOddsContainer" style="max-height: 200px; overflow-y: auto;">
+                    <div style="color: #666; font-size: 10px; padding: 8px;">No AH odds available</div>
+                </div>
+
+                <div class="section-title">Over/Under (OU)</div>
+                <div id="ouOddsContainer" style="max-height: 200px; overflow-y: auto;">
+                    <div style="color: #666; font-size: 10px; padding: 8px;">No OU odds available</div>
+                </div>
+
+                <div class="section-title">Odds History (Selected Fixture)</div>
+                <div id="oddsHistory" style="max-height: 150px; overflow-y: auto;"></div>
+            </div>
+        </div>
+
+        <!-- Right: Raw Data -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>Raw Data</span>
+            </div>
+            <div class="panel-content">
+                <div class="tabs">
+                    <div class="tab active" onclick="showTab('bookmakers')">Bookmakers</div>
+                    <div class="tab" onclick="showTab('timestamps')">Timestamps</div>
+                    <div class="tab" onclick="showTab('full')">Full JSON</div>
+                </div>
+                <div class="json-view" id="rawDataView">Select an update</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const WS_URL = `ws://${window.location.host}/ws`;
+        const STATS_URL = `/stats`;
+        const MAX_UPDATES = 200;
+        const GRAPH_POINTS = 100;
+
+        let ws = null;
+        let updates = [];
+        let selectedFixtureId = null;
+        let paused = false;
+        let currentTab = 'bookmakers';
+        let latencyHistory = [];
+        let rateHistory = [];
+        let fixtureOddsHistory = {}; // fixture_id -> [{timestamp, bookmaker, x12}, ...]
+        let lastUpdateCount = 0;
+        let lastRateCheck = Date.now();
+
+        function connect() {
+            ws = new WebSocket(WS_URL);
+            ws.onopen = () => {
+                document.getElementById('statusDot').classList.add('connected');
+                document.getElementById('statusText').textContent = 'Connected';
+            };
+            ws.onclose = () => {
+                document.getElementById('statusDot').classList.remove('connected');
+                document.getElementById('statusText').textContent = 'Disconnected';
+                setTimeout(connect, 2000);
+            };
+            ws.onmessage = (event) => {
+                if (paused) return;
+
+                const now = Date.now();
+                const data = JSON.parse(event.data);
+                data._clientReceivedAt = now;
+
+                // Latency: start (first touch) to now (client received)
+                if (data.start) {
+                    data._total = now - data.start;
+                }
+                // Pipeline latency: start to end (processor sent)
+                if (data.start && data.end) {
+                    data._pipeline = data.end - data.start;
+                }
+                // Network latency: end to now (client received)
+                if (data.end) {
+                    data._network = now - data.end;
+                }
+
+                handleUpdate(data);
+            };
+        }
+
+        function togglePause() {
+            paused = !paused;
+            const btn = document.getElementById('pauseBtn');
+            btn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+            btn.classList.toggle('paused', paused);
+        }
+
+        function handleUpdate(data) {
+            updates.unshift(data);
+            if (updates.length > MAX_UPDATES) updates.pop();
+
+            // Track latency for graph
+            if (data._total && data._total > 0 && data._total < 10000) {
+                latencyHistory.push(data._total);
+                if (latencyHistory.length > GRAPH_POINTS) latencyHistory.shift();
+            }
+
+            // Track odds history per fixture
+            if (data.fixture_id && data.bookmakers) {
+                if (!fixtureOddsHistory[data.fixture_id]) {
+                    fixtureOddsHistory[data.fixture_id] = [];
+                }
+                for (const [bookie, odds] of Object.entries(data.bookmakers)) {
+                    if (odds.x12) {
+                        fixtureOddsHistory[data.fixture_id].push({
+                            time: data._clientReceivedAt,
+                            bookie,
+                            x12: odds.x12
+                        });
+                    }
+                }
+                // Keep last 50 entries per fixture
+                if (fixtureOddsHistory[data.fixture_id].length > 50) {
+                    fixtureOddsHistory[data.fixture_id] = fixtureOddsHistory[data.fixture_id].slice(-50);
+                }
+            }
+
+            renderList();
+            drawGraphs();
+
+            // Update detail if this fixture is selected
+            if (data.fixture_id === selectedFixtureId) {
+                renderDetail(data);
+            }
+        }
+
+        function renderList() {
+            const list = document.getElementById('updatesList');
+            document.getElementById('updateCount').textContent = updates.length;
+
+            list.innerHTML = updates.slice(0, 100).map((u, i) => {
+                const latency = u._total ? `${u._total}ms` : '-';
+                const latencyClass = getLatencyClass(u._total);
+                const bookies = Object.keys(u.bookmakers || {}).join(', ') || '-';
+                const selected = u.fixture_id === selectedFixtureId ? 'selected' : '';
+
+                return `
+                    <div class="update-item ${selected}" onclick="selectFixture(${u.fixture_id})">
+                        <div class="fixture-row">
+                            <span class="fixture-id">#${u.fixture_id}</span>
+                            <span class="latency ${latencyClass}">${latency}</span>
+                        </div>
+                        <div class="bookmaker">${bookies}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function selectFixture(fixtureId) {
+            selectedFixtureId = fixtureId;
+            document.getElementById('selectedFixture').textContent = `#${fixtureId}`;
+
+            // Find latest update for this fixture
+            const update = updates.find(u => u.fixture_id === fixtureId);
+            if (update) {
+                renderDetail(update);
+            }
+            renderList();
+        }
+
+        function renderDetail(u) {
+            // Latency cards
+            setLatencyCard('detailOddsReceivedToSent', u._oddsReceivedToSent);
+            setLatencyCard('detailEngineToProc', u._engineToProc);
+            setLatencyCard('detailProcessing', u._processing);
+            setLatencyCard('detailProcToClient', u._procToClient);
+            setLatencyCard('detailTotal', u._total);
+
+            // X12 Odds table
+            const tbody = document.getElementById('oddsTableBody');
+            let rows = '';
+
+            // Add bookmaker rows (all odds in 3 decimals: 1892 = 1.892)
+            for (const [bookie, odds] of Object.entries(u.bookmakers || {})) {
+                if (odds.x12) {
+                    const fair1 = odds.fair_x12_h ? (odds.fair_x12_h / 1000).toFixed(3) : '-';
+                    const fairX = odds.fair_x12_x ? (odds.fair_x12_x / 1000).toFixed(3) : '-';
+                    const fair2 = odds.fair_x12_a ? (odds.fair_x12_a / 1000).toFixed(3) : '-';
+                    rows += `<tr>
+                        <td class="bookie">${bookie}</td>
+                        <td class="odds">${(odds.x12_h / 1000).toFixed(3)}</td>
+                        <td style="color: #56b6c2; font-size: 8px;">${fair1}</td>
+                        <td class="odds">${(odds.x12_x / 1000).toFixed(3)}</td>
+                        <td style="color: #56b6c2; font-size: 8px;">${fairX}</td>
+                        <td class="odds">${(odds.x12_a / 1000).toFixed(3)}</td>
+                        <td style="color: #56b6c2; font-size: 8px;">${fair2}</td>
+                    </tr>`;
+                }
+            }
+
+            // Add top row (top odds in 3 decimals)
+            if (u.top?.x12) {
+                rows += `<tr style="background: #1a2a1e;">
+                    <td style="color: #00ff88; font-weight: 600;">TOP</td>
+                    <td class="top">${(u.top.x12_h / 1000).toFixed(3)} <small style="color:#666">${u.top.x12_bookies?.[0] || ''}</small></td>
+                    <td></td>
+                    <td class="top">${(u.top.x12_x / 1000).toFixed(3)} <small style="color:#666">${u.top.x12_bookies?.[1] || ''}</small></td>
+                    <td></td>
+                    <td class="top">${(u.top.x12_a / 1000).toFixed(3)} <small style="color:#666">${u.top.x12_bookies?.[2] || ''}</small></td>
+                    <td></td>
+                </tr>`;
+            }
+            tbody.innerHTML = rows;
+
+            // Render AH odds
+            renderAHOdds(u);
+
+            // Render OU odds
+            renderOUOdds(u);
+
+            // Odds history
+            const history = fixtureOddsHistory[u.fixture_id] || [];
+            const historyHtml = history.slice(-20).reverse().map(h => {
+                const time = new Date(h.time).toLocaleTimeString();
+                return `<div class="history-item">
+                    <span class="history-time">${time} - ${h.bookie}</span>
+                    <span class="history-odds">${(h.x12_h / 1000).toFixed(3)} / ${(h.x12_x / 1000).toFixed(3)} / ${(h.x12_a / 1000).toFixed(3)}</span>
+                </div>`;
+            }).join('');
+            document.getElementById('oddsHistory').innerHTML = historyHtml || '<div style="color:#666">No history yet</div>';
+
+            // Raw data
+            showTab(currentTab, u);
+        }
+
+        function renderAHOdds(u) {
+            const container = document.getElementById('ahOddsContainer');
+            const bookmakers = u.bookmakers || {};
+            const top = u.top || {};
+
+            let html = '';
+            let hasAH = false;
+
+            // Collect all unique lines from bookmakers and top
+            const allLines = new Set();
+            for (const odds of Object.values(bookmakers)) {
+                if (odds.ah_lines) {
+                    odds.ah_lines.forEach(line => allLines.add(line.toFixed(2)));
+                }
+            }
+            if (top.ah_lines) {
+                top.ah_lines.forEach(line => allLines.add(line.toFixed(2)));
+            }
+
+            if (allLines.size > 0) {
+                hasAH = true;
+                const sortedLines = Array.from(allLines).sort((a, b) => parseFloat(a) - parseFloat(b));
+
+                for (const lineStr of sortedLines) {
+                    const line = parseFloat(lineStr);
+                    html += `<div style="margin-bottom: 12px; background: #0a0a0f; padding: 8px; border-radius: 3px;">
+                        <div style="color: #ff9500; font-weight: 600; margin-bottom: 6px;">Line: ${lineStr}</div>
+                        <table class="odds-table" style="font-size: 9px;">
+                            <thead>
+                                <tr>
+                                    <th>Bookie</th>
+                                    <th>Home</th>
+                                    <th>Fair H</th>
+                                    <th>Away</th>
+                                    <th>Fair A</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+
+                    // Bookmaker rows
+                    for (const [bookie, odds] of Object.entries(bookmakers)) {
+                        if (odds.ah_lines) {
+                            const idx = odds.ah_lines.findIndex(l => Math.abs(l - line) < 0.001);
+                            if (idx !== -1) {
+                                const homeOdds = odds.ah_h?.[idx] || 0;
+                                const awayOdds = odds.ah_a?.[idx] || 0;
+                                const fairHome = odds.fair_ah_h?.[idx] || 0;
+                                const fairAway = odds.fair_ah_a?.[idx] || 0;
+
+                                html += `<tr>
+                                    <td class="bookie">${bookie}</td>
+                                    <td class="odds">${(homeOdds / 1000).toFixed(3)}</td>
+                                    <td style="color: #56b6c2; font-size: 8px;">${(fairHome / 1000).toFixed(3)}</td>
+                                    <td class="odds">${(awayOdds / 1000).toFixed(3)}</td>
+                                    <td style="color: #56b6c2; font-size: 8px;">${(fairAway / 1000).toFixed(3)}</td>
+                                </tr>`;
+                            }
+                        }
+                    }
+
+                    // Top row
+                    if (top.ah_lines) {
+                        const idx = top.ah_lines.findIndex(l => Math.abs(l - line) < 0.001);
+                        if (idx !== -1) {
+                            const homeOdds = top.ah_h?.[idx] || 0;
+                            const awayOdds = top.ah_a?.[idx] || 0;
+                            const homeBookie = top.ah_h_bookies?.[idx] || '';
+                            const awayBookie = top.ah_a_bookies?.[idx] || '';
+
+                            html += `<tr style="background: #1a2a1e;">
+                                <td style="color: #00ff88; font-weight: 600;">TOP</td>
+                                <td class="top">${(homeOdds / 1000).toFixed(3)} <small style="color:#666">${homeBookie}</small></td>
+                                <td></td>
+                                <td class="top">${(awayOdds / 1000).toFixed(3)} <small style="color:#666">${awayBookie}</small></td>
+                                <td></td>
+                            </tr>`;
+                        }
+                    }
+
+                    html += `</tbody></table></div>`;
+                }
+            }
+
+            container.innerHTML = hasAH ? html : '<div style="color: #666; font-size: 10px; padding: 8px;">No AH odds available</div>';
+        }
+
+        function renderOUOdds(u) {
+            const container = document.getElementById('ouOddsContainer');
+            const bookmakers = u.bookmakers || {};
+            const top = u.top || {};
+
+            let html = '';
+            let hasOU = false;
+
+            // Collect all unique lines
+            const allLines = new Set();
+            for (const odds of Object.values(bookmakers)) {
+                if (odds.ou_lines) {
+                    odds.ou_lines.forEach(line => allLines.add(line.toFixed(2)));
+                }
+            }
+            if (top.ou_lines) {
+                top.ou_lines.forEach(line => allLines.add(line.toFixed(2)));
+            }
+
+            if (allLines.size > 0) {
+                hasOU = true;
+                const sortedLines = Array.from(allLines).sort((a, b) => parseFloat(a) - parseFloat(b));
+
+                for (const lineStr of sortedLines) {
+                    const line = parseFloat(lineStr);
+                    html += `<div style="margin-bottom: 12px; background: #0a0a0f; padding: 8px; border-radius: 3px;">
+                        <div style="color: #ff9500; font-weight: 600; margin-bottom: 6px;">Line: ${lineStr}</div>
+                        <table class="odds-table" style="font-size: 9px;">
+                            <thead>
+                                <tr>
+                                    <th>Bookie</th>
+                                    <th>Over</th>
+                                    <th>Fair O</th>
+                                    <th>Under</th>
+                                    <th>Fair U</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+
+                    // Bookmaker rows
+                    for (const [bookie, odds] of Object.entries(bookmakers)) {
+                        if (odds.ou_lines) {
+                            const idx = odds.ou_lines.findIndex(l => Math.abs(l - line) < 0.001);
+                            if (idx !== -1) {
+                                const overOdds = odds.ou_o?.[idx] || 0;
+                                const underOdds = odds.ou_u?.[idx] || 0;
+                                const fairOver = odds.fair_ou_o?.[idx] || 0;
+                                const fairUnder = odds.fair_ou_u?.[idx] || 0;
+
+                                html += `<tr>
+                                    <td class="bookie">${bookie}</td>
+                                    <td class="odds">${(overOdds / 1000).toFixed(3)}</td>
+                                    <td style="color: #56b6c2; font-size: 8px;">${(fairOver / 1000).toFixed(3)}</td>
+                                    <td class="odds">${(underOdds / 1000).toFixed(3)}</td>
+                                    <td style="color: #56b6c2; font-size: 8px;">${(fairUnder / 1000).toFixed(3)}</td>
+                                </tr>`;
+                            }
+                        }
+                    }
+
+                    // Top row
+                    if (top.ou_lines) {
+                        const idx = top.ou_lines.findIndex(l => Math.abs(l - line) < 0.001);
+                        if (idx !== -1) {
+                            const overOdds = top.ou_o?.[idx] || 0;
+                            const underOdds = top.ou_u?.[idx] || 0;
+                            const overBookie = top.ou_o_bookies?.[idx] || '';
+                            const underBookie = top.ou_u_bookies?.[idx] || '';
+
+                            html += `<tr style="background: #1a2a1e;">
+                                <td style="color: #00ff88; font-weight: 600;">TOP</td>
+                                <td class="top">${(overOdds / 1000).toFixed(3)} <small style="color:#666">${overBookie}</small></td>
+                                <td></td>
+                                <td class="top">${(underOdds / 1000).toFixed(3)} <small style="color:#666">${underBookie}</small></td>
+                                <td></td>
+                            </tr>`;
+                        }
+                    }
+
+                    html += `</tbody></table></div>`;
+                }
+            }
+
+            container.innerHTML = hasOU ? html : '<div style="color: #666; font-size: 10px; padding: 8px;">No OU odds available</div>';
+        }
+
+        function setLatencyCard(id, value) {
+            const el = document.getElementById(id);
+            if (value !== undefined && value !== null) {
+                el.textContent = value + 'ms';
+                el.style.color = value < 10 ? '#00ff88' : value < 50 ? '#ff9500' : '#ff4444';
+            } else {
+                el.textContent = '-';
+                el.style.color = '#666';
+            }
+        }
+
+        function showTab(tab, data = null) {
+            currentTab = tab;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`.tab:nth-child(${['bookmakers', 'timestamps', 'full'].indexOf(tab) + 1})`).classList.add('active');
+
+            const u = data || updates.find(u => u.fixture_id === selectedFixtureId);
+            if (!u) {
+                document.getElementById('rawDataView').innerHTML = 'Select an update';
+                return;
+            }
+
+            let obj;
+            switch (tab) {
+                case 'bookmakers': obj = u.bookmakers || {}; break;
+                case 'timestamps': obj = {
+                    timestamp: u.timestamp,
+                    start: u.start,
+                    end: u.end,
+                    _clientReceivedAt: u._clientReceivedAt,
+                    _pipeline: u._pipeline,
+                    _network: u._network,
+                    _total: u._total
+                }; break;
+                case 'full': obj = u; break;
+            }
+            document.getElementById('rawDataView').innerHTML = syntaxHighlight(obj);
+        }
+
+        function getLatencyClass(ms) {
+            if (ms === null || ms === undefined) return '';
+            if (ms < 50) return 'fast';
+            if (ms < 200) return 'medium';
+            return 'slow';
+        }
+
+        function syntaxHighlight(obj) {
+            const json = JSON.stringify(obj, null, 2);
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (match) => {
+                let cls = 'json-number';
+                if (/^"/.test(match)) {
+                    cls = /:$/.test(match) ? 'json-key' : 'json-string';
+                } else if (/true|false/.test(match)) {
+                    cls = 'json-bool';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        function drawGraphs() {
+            drawGraph('latencyGraph', latencyHistory, '#00ff88', 'latencyGraphValue', 'ms');
+            drawGraph('rateGraph', rateHistory, '#ff9500', 'rateGraphValue', '/s');
+        }
+
+        function drawGraph(canvasId, data, color, valueId, suffix) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * 2;
+            canvas.height = rect.height * 2;
+            ctx.scale(2, 2);
+
+            const w = rect.width;
+            const h = rect.height;
+
+            ctx.clearRect(0, 0, w, h);
+
+            if (data.length < 2) return;
+
+            const max = Math.max(...data, 1);
+            const min = Math.min(...data, 0);
+            const range = max - min || 1;
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+
+            for (let i = 0; i < data.length; i++) {
+                const x = (i / (GRAPH_POINTS - 1)) * w;
+                const y = h - ((data[i] - min) / range) * (h - 10) - 5;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Fill
+            ctx.lineTo(w, h);
+            ctx.lineTo(0, h);
+            ctx.closePath();
+            ctx.fillStyle = color + '20';
+            ctx.fill();
+
+            // Update value
+            const latest = data[data.length - 1];
+            document.getElementById(valueId).textContent = latest ? latest.toFixed(0) + suffix : '-';
+        }
+
+        async function fetchStats() {
+            try {
+                const res = await fetch(STATS_URL);
+                const stats = await res.json();
+                document.getElementById('fixturesCount').textContent = stats.fixtures_count || 0;
+                document.getElementById('updatesReceived').textContent = stats.updates_received || 0;
+
+                // Calculate rate
+                const now = Date.now();
+                const elapsed = (now - lastRateCheck) / 1000;
+                const rate = (stats.updates_received - lastUpdateCount) / elapsed;
+                lastUpdateCount = stats.updates_received;
+                lastRateCheck = now;
+
+                if (rate > 0) {
+                    rateHistory.push(rate);
+                    if (rateHistory.length > GRAPH_POINTS) rateHistory.shift();
+                }
+
+                document.getElementById('updatesPerSec').textContent = rate.toFixed(1) + '/s';
+                document.getElementById('wsClients').textContent = stats.ws_clients || 0;
+                document.getElementById('uptime').textContent = formatUptime(stats.uptime_seconds || 0);
+
+                // Update avg latency
+                if (latencyHistory.length > 0) {
+                    const avg = latencyHistory.reduce((a, b) => a + b, 0) / latencyHistory.length;
+                    const el = document.getElementById('avgTotal');
+                    el.textContent = avg.toFixed(0) + 'ms';
+                    el.className = 'stat-value' + (avg > 50 ? ' warn' : '');
+                }
+
+                drawGraphs();
+            } catch (e) { }
+        }
+
+        function formatUptime(s) {
+            if (s < 60) return s + 's';
+            if (s < 3600) return Math.floor(s / 60) + 'm';
+            return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+        }
+
+        connect();
+        fetchStats();
+        setInterval(fetchStats, 1000);
+    </script>
+</body>
+
+</html>

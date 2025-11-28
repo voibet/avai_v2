@@ -16,7 +16,7 @@ function log(message: string): void {
   console.log(`${time} AutoRefresh: ${message}`);
 }
 
-export function isAutoRefreshRunning() {
+function isAutoRefreshRunning() {
   // Check if we're currently executing AND haven't exceeded max time
   if (isExecuting && executionStartTime) {
     const elapsed = Date.now() - executionStartTime;

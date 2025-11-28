@@ -164,7 +164,7 @@ impl PinnacleDbService {
         home_team: &str,
         away_team: &str,
         existing_data: Option<&Value>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
         let timestamp = Utc::now().timestamp();
 
         let transform_odds = |odds: f64| -> i32 {
@@ -390,9 +390,10 @@ impl PinnacleDbService {
                 .await?;
 
             info!("✅ Updated odds for {} v {} (fixture: {}). Changes: {:?}. Database updated.", home_team, away_team, fixture_id, updates);
+            Ok(true) // Database was updated
+        } else {
+            Ok(false) // No changes, database not updated
         }
-
-        Ok(())
     }
 
     fn merge_history(&self, existing: Option<&Value>, new_items: Vec<Value>) -> Vec<Value> {

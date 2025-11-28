@@ -240,13 +240,14 @@ export async function GET(request: Request) {
           // Check if it's the odds_updates channel
           if (msg.channel === 'odds_updates') {
             try {
-              // Extract fixture ID from payload
+              // Extract fixture ID and bookie from payload (format: "fixture_id|bookie")
               if (!msg.payload) {
                 console.error('[Odds Stream] Received notification without payload');
                 return;
               }
 
-              const fixtureId = parseInt(msg.payload);
+              const [fixtureIdStr, bookie] = msg.payload.split('|');
+              const fixtureId = parseInt(fixtureIdStr);
 
               if (fixtureId && !isNaN(fixtureId)) {
                 // Process if: listening to all fixtures OR this specific fixture is in our list

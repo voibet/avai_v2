@@ -41,10 +41,10 @@ export function parseTableParams(searchParams: URLSearchParams): TableParams {
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
   const limit = Math.max(1, Math.min(1000, parseInt(searchParams.get('limit') || '50')));
   
-  // Parse sorting
+  // Parse sorting - support both camelCase (sortColumn/sortDirection) and snake_case (sort_by/sort_direction)
   let sort: TableSort | undefined;
-  const sortColumn = searchParams.get('sortColumn');
-  const sortDirection = searchParams.get('sortDirection') as SortDirection;
+  const sortColumn = searchParams.get('sortColumn') || searchParams.get('sort_by');
+  const sortDirection = (searchParams.get('sortDirection') || searchParams.get('sort_direction')) as SortDirection;
   if (sortColumn && (sortDirection === 'asc' || sortDirection === 'desc')) {
     sort = { column: sortColumn, direction: sortDirection };
   }

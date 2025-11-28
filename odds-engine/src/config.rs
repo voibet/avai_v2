@@ -10,6 +10,8 @@ pub struct Config {
     pub server_port: u16,
     pub monaco_odds_enabled: bool,
     pub pinnacle_odds_enabled: bool,
+    pub processor_enabled: bool,
+    pub processor_port: u16,
 }
 
 impl Config {
@@ -30,6 +32,11 @@ impl Config {
             server_port,
             monaco_odds_enabled: env::var("MONACO_ODDS").map(|v| v == "true").unwrap_or(true),
             pinnacle_odds_enabled: env::var("PINNACLE_ODDS").map(|v| v == "true").unwrap_or(true),
+            processor_enabled: env::var("PROCESSOR_ENABLED").map(|v| v == "true").unwrap_or(true),
+            processor_port: env::var("PROCESSOR_PORT")
+                .unwrap_or_else(|_| "9000".to_string())
+                .parse()
+                .unwrap_or(9000),
         }
     }
 }

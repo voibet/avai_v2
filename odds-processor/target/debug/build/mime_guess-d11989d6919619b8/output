@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=C:\Users\eemel\apps\avai_v2\odds-processor\target\debug\build\mime_guess-d11989d6919619b8\out\mime_types_generated.rs

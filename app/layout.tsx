@@ -25,6 +25,7 @@ export default function RootLayout({
               </Link>
               <div className="flex space-x-6 text-xs">
                 <Link href="/fixtures" className="text-gray-400 hover:text-white transition-colors pointer-events-auto" style={{ zIndex: 2147483647 }}>FIXTURES</Link>
+                <Link href="/trading" className="text-gray-400 hover:text-white transition-colors pointer-events-auto" style={{ zIndex: 2147483647 }}>TRADING</Link>
                 <Link href="/admin" className="text-gray-400 hover:text-white transition-colors pointer-events-auto" style={{ zIndex: 2147483647 }}>ADMIN</Link>
               </div>
             </div>

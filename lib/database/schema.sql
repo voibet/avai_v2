@@ -230,10 +230,13 @@ CREATE TRIGGER trg_set_updated_at
 BEFORE UPDATE ON football_odds
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- Notify SSE listeners when odds are updated
+-- Notify listeners when odds are updated
 CREATE OR REPLACE FUNCTION notify_odds_update() RETURNS trigger AS $$
 BEGIN
-  PERFORM pg_notify('odds_updates', NEW.fixture_id::text);
+  PERFORM pg_notify(
+    'odds_updates', 
+    NEW.fixture_id::text || '|' || NEW.bookie
+  );
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -243,7 +246,7 @@ CREATE TRIGGER trg_notify_odds_update
 AFTER INSERT OR UPDATE ON football_odds
 FOR EACH ROW EXECUTE FUNCTION notify_odds_update();
 
--- Notify SSE listeners when fixtures are updated
+-- Notify listeners when fixtures are updated
 CREATE OR REPLACE FUNCTION notify_fixture_update() RETURNS trigger AS $$
 BEGIN
   PERFORM pg_notify('fixture_update_' || NEW.id::text, '');
