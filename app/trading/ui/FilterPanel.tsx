@@ -37,28 +37,28 @@ export function FilterPanel({
         <div className="p-2 bg-[#0a0a0f]">
           <div className="flex gap-1 mb-2">
             <button
-              onClick={() => setFilterInput(getFilterJson(VALUE_FILTER))}
-              className="px-2 py-1 bg-[#1a1a2e] text-[#00ff88] rounded text-[9px] hover:bg-[#252540] border border-[#00ff88]/20"
-            >
-              🔥 Value
-            </button>
-            <button
               onClick={() => setFilterInput(getFilterJson(DEFAULT_VALUE_FILTER))}
               className="px-2 py-1 bg-[#1a1a2e] text-[#2196F3] rounded text-[9px] hover:bg-[#252540] border border-[#2196F3]/20"
             >
-              💎 Default
+              Default
+            </button>
+            <button
+              onClick={() => setFilterInput(getFilterJson(VALUE_FILTER))}
+              className="px-2 py-1 bg-[#1a1a2e] text-[#00ff88] rounded text-[9px] hover:bg-[#252540] border border-[#00ff88]/20"
+            >
+              Value
             </button>
             <button
               onClick={() => setFilterInput(getFilterJson(ARBITRAGE_FILTER))}
               className="px-2 py-1 bg-[#1a1a2e] text-[#ff9500] rounded text-[9px] hover:bg-[#252540] border border-[#ff9500]/20"
             >
-              ⚡ Arb
+              Arb
             </button>
             <button
               onClick={() => setFilterInput(getFilterJson(PINNACLE_DROP))}
               className="px-2 py-1 bg-[#1a1a2e] text-[#ff4444] rounded text-[9px] hover:bg-[#252540] border border-[#ff4444]/20"
             >
-              📉 Drop
+              Drop
             </button>
           </div>
 

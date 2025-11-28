@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { FixtureWithOdds } from '../types'
 import { formatOdds, getLatencyClass, parseDropInfo, parseValueInfo, parseArbInfo, formatTimestamp } from '../utils'
 
@@ -6,6 +7,7 @@ interface FixtureDetailsProps {
 }
 
 export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
+  const [showRawJson, setShowRawJson] = useState(false)
   const dropInfo = selectedFixture ? parseDropInfo(selectedFixture.filter_matches, selectedFixture) : null
   const valueInfo = selectedFixture ? parseValueInfo(selectedFixture.filter_matches, selectedFixture) : null
   const arbInfo = selectedFixture ? parseArbInfo(selectedFixture.filter_matches) : null
@@ -56,7 +58,7 @@ export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
             {/* Drop Information */}
             {dropInfo && (
               <div className="bg-[#0a0a0f] rounded p-2 border border-[#ff9500]/30">
-                <div className="text-[#ff9500] text-[9px] font-semibold uppercase mb-1.5">📉 Drop Information</div>
+                <div className="text-[#ff9500] text-[9px] font-semibold uppercase mb-1.5">Drop Information</div>
                 <div className="space-y-1 text-[9px]">
                   <div className="flex justify-between">
                     <span className="text-[#666]">Drop Time:</span>
@@ -93,7 +95,7 @@ export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
             {/* Value Information */}
             {valueInfo && (
               <div className="bg-[#0a0a0f] rounded p-2 border border-[#00ff88]/30">
-                <div className="text-[#00ff88] text-[9px] font-semibold uppercase mb-1.5">🔥 Value Information</div>
+                <div className="text-[#00ff88] text-[9px] font-semibold uppercase mb-1.5">Value Information</div>
                 <div className="space-y-1 text-[9px]">
                   <div className="flex justify-between">
                     <span className="text-[#666]">Bookmaker:</span>
@@ -132,7 +134,7 @@ export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
             {/* Arb Information */}
             {arbInfo && (
               <div className="bg-[#0a0a0f] rounded p-2 border border-[#ff9500]/30">
-                <div className="text-[#ff9500] text-[9px] font-semibold uppercase mb-1.5">⚡ Arbitrage Information</div>
+                <div className="text-[#ff9500] text-[9px] font-semibold uppercase mb-1.5">Arbitrage Information</div>
                 <div className="space-y-1 text-[9px]">
                   <div className="flex justify-between">
                     <span className="text-[#666]">Market:</span>
@@ -200,6 +202,26 @@ export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
                 </div>
               </div>
             )}
+
+            {/* Raw JSON Response */}
+            <div className="bg-[#0a0a0f] rounded border border-[#666]/30">
+              <div
+                className="px-2 py-1.5 cursor-pointer flex justify-between items-center hover:bg-[#1a1a2e]/50 transition-colors"
+                onClick={() => setShowRawJson(!showRawJson)}
+              >
+                <div className="text-[#666] text-[9px] font-semibold uppercase">Raw JSON Response</div>
+                <span className="text-[#666] text-[8px]">{showRawJson ? '▼' : '▶'}</span>
+              </div>
+              {showRawJson && selectedFixture && (
+                <div className="border-t border-[#666]/20">
+                  <div className="max-h-64 overflow-auto">
+                    <pre className="text-[8px] font-mono text-[#888] whitespace-pre-wrap bg-[#000]/20 p-2 rounded">
+                      {JSON.stringify(selectedFixture, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

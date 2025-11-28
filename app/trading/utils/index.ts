@@ -260,9 +260,9 @@ export const parseArbInfo = (
 ): ArbInfo | null => {
   if (!filterMatches || filterMatches.length === 0) return null
 
-  // Look for arb match (op: lt, threshold: 1000)
+  // Look for arb match (op: lt, threshold: 1000 or 1010)
   for (const match of filterMatches) {
-    if (match.op === 'lt' && match.threshold === 1000) {
+    if (match.op === 'lt' && (match.threshold === 1000 || match.threshold === 1010)) {
       const result = match.result
       // Calculate profit: (1000 - result) / result * 100
       const profit = ((1000 - result) / result) * 100

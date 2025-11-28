@@ -25,7 +25,13 @@ export default function TradingPage() {
 
   // Custom hooks
   const { fixtures, setFixtures, loading } = useFixtures()
-  const { connected, ws } = useWebSocket(fixtures, setFixtures, loading)
+  const {
+    fixturesHistory,
+    setFixturesHistory,
+    showFixturesHistory,
+    setShowFixturesHistory,
+  } = useFixturesHistory()
+  const { connected, ws } = useWebSocket(fixtures, setFixtures, setFixturesHistory, loading)
   const { stats } = useStats()
   const {
     showFilter,
@@ -35,13 +41,7 @@ export default function TradingPage() {
     filterError,
     applyFilter,
     clearFilter,
-  } = useFilter(ws, setFixtures)
-  const {
-    fixturesHistory,
-    setFixturesHistory,
-    showFixturesHistory,
-    setShowFixturesHistory,
-  } = useFixturesHistory()
+  } = useFilter(ws, setFixtures, setFixturesHistory)
 
   const {
     now,
