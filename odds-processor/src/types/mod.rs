@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use crate::filters::{FilterExpr, MatchTrace};
 
 /// Incoming update from odds-engine via TCP
@@ -11,7 +11,7 @@ pub struct OddsUpdate {
     #[serde(default)]
     pub bookie_id: i64,
     pub bookmaker: String,
-    pub timestamp: i64,           // Original timestamp
+    pub timestamp: i64,           // Unix timestamp in milliseconds
     #[serde(default)]
     pub start: i64,               // First touch - when odds were received from bookmaker API (ms)
     #[serde(default = "default_decimals")]
@@ -44,11 +44,10 @@ fn default_decimals() -> i32 {
     3
 }
 
-/// Odds for a single bookmaker
+/// Snapshot of odds at a specific time
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct BookmakerOdds {
-    pub bookie_id: i64,
-    pub decimals: i32,
+pub struct OddsSnapshot {
+    pub timestamp: i64,  // Unix timestamp in milliseconds
 
     // X12 - split into separate outcomes
     pub x12_h: Option<i32>,  // Home
@@ -80,8 +79,19 @@ pub struct BookmakerOdds {
 
     // Latest timestamps per market type
     pub latest_t: Option<Value>,
+}
 
-    pub timestamp: i64,
+/// Odds for a single bookmaker
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BookmakerOdds {
+    pub bookie_id: i64,
+    pub decimals: i32,
+
+    #[serde(flatten)]
+    pub current: OddsSnapshot,
+
+    #[serde(skip)]
+    pub history: VecDeque<OddsSnapshot>,
 }
 
 /// Data for a single fixture

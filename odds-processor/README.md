@@ -129,11 +129,146 @@ Filters are JSON objects that define what updates you want to receive.
 
 ### Arithmetic Operators
 
-Used in computed fields: `divide`, `multiply`, `add`, `subtract`
+Used in computed fields: `divide`, `multiply`, `add`, `subtract`, `history`
 
 ### Vector Functions
 
 `avg`, `max`, `min`, `sum`, `count`
+
+### Per-Line Vector Functions
+
+`avg_per_line`, `max_per_line`, `min_per_line`, `sum_per_line`, `count_per_line`
+
+---
+
+## Historical Odds System
+
+The odds processor maintains a **rolling history** of the last 20 odds snapshots per bookmaker for each fixture. This enables:
+- Trend detection (e.g., odds dropping/rising)
+- Pattern recognition (e.g., consistent movement)
+- Temporal comparisons (e.g., current vs. 60 seconds ago)
+
+### How It Works
+
+**Storage:**
+- Each bookmaker's odds include a `current` snapshot and a `history` queue (up to 20 snapshots)
+- When new odds arrive, the current snapshot moves to history before being updated
+- History is stored newest-first (front = most recent, back = oldest)
+
+**Access:**
+- Use the `history` operator to retrieve odds from **within the last X milliseconds**
+- The system finds the **oldest snapshot that is still within the time window**
+- Example: `history(field, 60000)` finds the oldest snapshot from the last 60 seconds
+
+### Using the History Operator
+
+The `history` operator takes:
+- **Left operand**: Field path (e.g., `bookmakers.Pinnacle.x12_h`)
+- **Right operand**: **Maximum age** in milliseconds (e.g., `60000` means "within the last 60 seconds")
+
+**Simple Logic**: The right operand specifies the time window. If you request `60000` (60 seconds), the system returns the oldest historical snapshot that is still within 60 seconds of the current odds. This maximizes trend detection. If no snapshot exists within the window, the filter won't match.
+
+**Example: Detect Dropping Odds**
+
+Check if Pinnacle home odds dropped by more than 5% in the last 60 seconds:
+
+```json
+{
+  "field": {
+    "op": "divide",
+    "left": {
+      "op": "history",
+      "left": "bookmakers.Pinnacle.x12_h",
+      "right": 60000
+    },
+    "right": "bookmakers.Pinnacle.x12_h"
+  },
+  "op": "gt",
+  "value": 1.05
+}
+```
+
+**Example: Trend Detection Across Multiple Lines**
+
+Find Asian Handicap lines where odds have been consistently dropping:
+
+```json
+{
+  "and": [
+    {
+      "field": {
+        "op": "divide",
+        "left": {
+          "op": "history",
+          "left": "bookmakers.Monaco.ah_h",
+          "right": 30000
+        },
+        "right": "bookmakers.Monaco.ah_h"
+      },
+      "op": "gt",
+      "value": 1.02
+    },
+    {
+      "field": {
+        "op": "divide",
+        "left": {
+          "op": "history",
+          "left": "bookmakers.Monaco.ah_h",
+          "right": 60000
+        },
+        "right": "bookmakers.Monaco.ah_h"
+      },
+      "op": "gt",
+      "value": 1.04
+    }
+  ]
+}
+```
+
+This finds lines where:
+- Odds 30s ago were >2% higher than now
+- Odds 60s ago were >4% higher than now
+- Shows consistent downward trend
+
+**Example: Steam Move Detection**
+
+Detect rapid odds changes (steam moves) by comparing current to very recent history:
+
+```json
+{
+  "field": {
+    "op": "subtract",
+    "left": "bookmakers.Pinnacle.x12_h",
+    "right": {
+      "op": "history",
+      "left": "bookmakers.Pinnacle.x12_h",
+      "right": 5000
+    }
+  },
+  "op": "gt",
+  "value": 100
+}
+```
+
+This triggers when odds changed by more than 0.100 (100 points) in the last 5 seconds.
+
+### History Limitations
+
+- History is **in-memory only** (not persisted to database)
+- Maximum 20 snapshots per bookmaker per fixture
+- History resets when fixture is evicted from cache
+- Historical lookups return `None` if no snapshot is old enough
+
+### Maximum Age Guidelines
+
+Common time windows (in milliseconds):
+- `5000` = 5 seconds (steam moves)
+- `30000` = 30 seconds (short-term trends)
+- `60000` = 1 minute (medium-term trends)
+- `300000` = 5 minutes (longer trends)
+- `600000` = 10 minutes (pre-match movement)
+
+
 
 ---
 

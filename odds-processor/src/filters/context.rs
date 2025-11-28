@@ -3,6 +3,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use super::types::ResolvedValue;
 
+pub trait HistoryProvider {
+    /// Get the oldest historical snapshot for a bookmaker that is still within `max_age_ms`.
+    /// Returns None if no snapshot exists within the time window.
+    fn get_snapshot(&self, bookmaker: &str, max_age_ms: i64) -> Option<Value>;
+}
+
 /// Details about an operand in a computation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperandDetail {
@@ -66,6 +72,8 @@ pub struct FilterContext<'a> {
     pub match_traces: Vec<MatchTrace>,
     /// Last arithmetic result with details (for capturing in evaluator)
     pub last_arithmetic_result: Option<ArithmeticResult>,
+    /// Provider for historical data lookup
+    pub history_provider: Option<&'a dyn HistoryProvider>,
 }
 
 impl<'a> FilterContext<'a> {
@@ -75,6 +83,17 @@ impl<'a> FilterContext<'a> {
             vars: HashMap::new(),
             match_traces: Vec::new(),
             last_arithmetic_result: None,
+            history_provider: None,
+        }
+    }
+
+    pub fn with_history(data: &'a Value, provider: &'a dyn HistoryProvider) -> Self {
+        Self {
+            data,
+            vars: HashMap::new(),
+            match_traces: Vec::new(),
+            last_arithmetic_result: None,
+            history_provider: Some(provider),
         }
     }
 

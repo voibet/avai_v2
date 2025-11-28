@@ -79,7 +79,7 @@ pub struct ComputedValue {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArithOp {
-    Divide, Multiply, Add, Subtract
+    Divide, Multiply, Add, Subtract, History
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,6 +127,7 @@ impl std::fmt::Display for ComputedValue {
             ArithOp::Multiply => "*",
             ArithOp::Add => "+",
             ArithOp::Subtract => "-",
+            ArithOp::History => "@",
         };
         write!(f, "({} {} {})", self.left, op_str, self.right)
     }

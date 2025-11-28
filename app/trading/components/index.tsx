@@ -53,6 +53,12 @@ export const RecentUpdateItem = memo(function RecentUpdateItem({
 }) {
   const bookieNames = fixture.bookmakers ? Object.keys(fixture.bookmakers).join(', ') : 'No odds'
 
+  // Check if this fixture has drop information
+  const hasDropInfo = fixture.filter_matches?.some(match => {
+    const path = match.left_operand?.path || match.right_operand?.path
+    return path?.includes('@') && path?.includes('(t:')
+  })
+
   return (
     <div
       onClick={() => onSelect(fixture.id)}
@@ -62,7 +68,12 @@ export const RecentUpdateItem = memo(function RecentUpdateItem({
         }`}
     >
       <div className="flex justify-between items-center">
-        <span className="text-[#00ff88] font-semibold">#{fixture.id}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[#00ff88] font-semibold">#{fixture.id}</span>
+          {hasDropInfo && (
+            <span className="text-[#ff9500] text-[8px] bg-[#ff9500]/10 px-1 py-0.5 rounded">📉</span>
+          )}
+        </div>
         <span className={`text-[9px] ${getLatencyClass(fixture.latency)}`}>
           {fixture.latency !== undefined ? `${fixture.latency}ms` : '-'}
         </span>
@@ -90,6 +101,12 @@ export const FixturesHistoryItem = memo(function FixturesHistoryItem({
   const timeSinceUpdate = fixture.lastUpdate ? now - fixture.lastUpdate : null
   const timeAgo = timeSinceUpdate ? formatUptime(Math.floor(timeSinceUpdate / 1000)) : '-'
 
+  // Check if this fixture has drop information
+  const hasDropInfo = fixture.filter_matches?.some(match => {
+    const path = match.left_operand?.path || match.right_operand?.path
+    return path?.includes('@') && path?.includes('(t:')
+  })
+
   return (
     <div
       onClick={() => onSelect(fixture.id)}
@@ -99,7 +116,12 @@ export const FixturesHistoryItem = memo(function FixturesHistoryItem({
         }`}
     >
       <div className="flex justify-between items-center">
-        <span className="text-[#00ff88] font-semibold">#{fixture.id}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[#00ff88] font-semibold">#{fixture.id}</span>
+          {hasDropInfo && (
+            <span className="text-[#ff9500] text-[8px] bg-[#ff9500]/10 px-1 py-0.5 rounded">📉</span>
+          )}
+        </div>
         <span className="text-[#888] text-[9px]">{timeAgo}</span>
       </div>
       <div className="text-[10px] text-white truncate">

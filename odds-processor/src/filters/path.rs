@@ -14,7 +14,7 @@ pub fn resolve_field(path: &FieldPath, ctx: &FilterContext) -> Option<ResolvedVa
                 let var_name = &s[1..];
                 return ctx.vars.get(var_name).cloned();
             }
-            resolve_json_path(ctx.data, s)
+            resolve_json_path(s, ctx)
         },
         FieldPath::Computed(comp) => {
             evaluate_arithmetic(comp, ctx)
@@ -64,20 +64,22 @@ pub fn extract_field_path(v: &ValueOrComputed) -> Option<String> {
 // CORE PATH RESOLUTION
 // ============================================================================
 
-pub fn resolve_json_path(data: &Value, path: &str) -> Option<ResolvedValue> {
+pub fn resolve_json_path(path: &str, ctx: &FilterContext) -> Option<ResolvedValue> {
     let parts: Vec<&str> = path.split('.').collect();
-    let mut current = data;
+    let mut current = ctx.data;
     let mut current_path = String::new();
     
     for (idx, part) in parts.iter().enumerate() {
-        if idx > 0 {
-            current_path.push('.');
-        }
-        
         // Handle bracket syntax: ou_o[2.5], ah_h[-0.5]
         if let Some(start_bracket) = part.find('[') {
-            current = resolve_line_access(data, current, &parts, idx, part, start_bracket, &mut current_path)?;
+            if idx > 0 {
+                current_path.push('.');
+            }
+            current = resolve_line_access(ctx.data, current, &parts, idx, part, start_bracket, &mut current_path)?;
         } else if let Some(field_value) = current.get(part) {
+            if idx > 0 {
+                current_path.push('.');
+            }
             current = field_value;
             current_path.push_str(part);
         } else {
@@ -99,7 +101,7 @@ pub fn resolve_json_path(data: &Value, path: &str) -> Option<ResolvedValue> {
     if let Some(arr) = current.as_array() {
         // Find parent to get lines array
         let last_part = parts.last()?;
-        let mut parent = data;
+        let mut parent = ctx.data;
         for i in 0..parts.len().saturating_sub(1) {
             parent = parent.get(parts[i])?;
         }
@@ -187,11 +189,12 @@ fn resolve_aggregate(
     current_path: &str,
     source_path: &str,
 ) -> Option<ResolvedValue> {
-    let prefix = if current_path.is_empty() { 
-        String::new() 
-    } else { 
-        format!("{}.", current_path) 
+    let prefix = if current_path.is_empty() {
+        String::new()
+    } else {
+        format!("{}.", current_path)
     };
+    tracing::debug!("resolve_aggregate: part={}, current_path='{}', prefix='{}'", part, current_path, prefix);
     
     let (values, paths) = match part {
         "ou" => {
@@ -269,19 +272,23 @@ fn expand_line_array(
 fn expand_x12(current: &Value, prefix: &str, fair: bool) -> (Vec<f64>, Vec<String>) {
     let mut values = Vec::new();
     let mut paths = Vec::new();
-    
+
     let fields = if fair {
         ["fair_x12_h", "fair_x12_x", "fair_x12_a"]
     } else {
         ["x12_h", "x12_x", "x12_a"]
     };
-    
+
     for field in fields {
         if let Some(v) = current.get(field).and_then(|v| v.as_f64()) {
             values.push(v);
-            paths.push(format!("{}{}", prefix, field));
+            let path = format!("{}{}", prefix, field);
+            tracing::debug!("expand_x12: field={}, path={}", field, path);
+            paths.push(path);
         }
     }
-    
+
     (values, paths)
 }
+
+

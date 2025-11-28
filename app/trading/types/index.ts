@@ -53,6 +53,35 @@ export interface WsMessage {
   }>
 }
 
+export interface DropInfo {
+  timestamp: number
+  market: string
+  bookmaker: string
+  droppedOdds: number
+  historicalOdds: number
+  dropRatio: number
+}
+
+export interface ValueInfo {
+  market: string
+  bookmaker: string
+  line?: number
+  valueRatio: number
+  odds: number
+  fairOdds?: number
+}
+
+export interface ArbInfo {
+  market: string
+  line?: number
+  profit: number
+  probabilitySum: number
+}
+
+
+
+
+
 export interface FixtureWithOdds extends Fixture {
   bookmakers?: Record<string, BookmakerOdds>
   lastUpdate?: number

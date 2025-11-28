@@ -1,6 +1,6 @@
-use crate::types::{ProcessorStats, WsMessage, ClientState};
+use crate::types::{ProcessorStats, WsMessage, ClientState, FixtureData};
 use crate::cache::Cache;
-use crate::filters::{FilterExpr, evaluate, FilterContext};
+use crate::filters::{FilterExpr, evaluate, FilterContext, HistoryProvider};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use tracing::{info, warn};
 use serde::Deserialize;
+use serde_json::Value;
 
 pub type SharedState = Arc<AppState>;
 
@@ -66,6 +67,42 @@ pub async fn ws_handler(
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
+struct FixtureHistoryProvider<'a> {
+    fixture: &'a FixtureData,
+    now: i64,  // Current system time in milliseconds
+}
+
+impl<'a> HistoryProvider for FixtureHistoryProvider<'a> {
+    /// Get the OLDEST historical snapshot that is still within max_age_ms.
+    /// 
+    /// Example: max_age_ms = 60000 (60 seconds), now = 1000000
+    /// - History: [990000, 950000, 920000, 880000] (ages: 10s, 50s, 80s, 120s)
+    /// - Returns snapshot at 950000 (oldest one still within 60s window)
+    /// 
+    /// Uses actual system time, not data timestamps, for reliable age calculation.
+    fn get_snapshot(&self, bookmaker: &str, max_age_ms: i64) -> Option<Value> {
+        let bookie_odds = self.fixture.bookmakers.get(bookmaker)?;
+        
+        // History is stored newest-first (front = most recent)
+        // Find the OLDEST snapshot that is still within max_age_ms of NOW
+        let mut best: Option<&crate::types::OddsSnapshot> = None;
+        
+        for snapshot in &bookie_odds.history {
+            let age = self.now - snapshot.timestamp;
+            if age <= max_age_ms {
+                // This snapshot is within the time window, keep it as candidate
+                // (we want the oldest one, so keep updating)
+                best = Some(snapshot);
+            } else {
+                // Too old, stop searching
+                break;
+            }
+        }
+        
+        best.and_then(|s| serde_json::to_value(s).ok())
+    }
+}
+
 /// Handle individual WebSocket connection
 async fn handle_socket(socket: WebSocket, state: SharedState) {
     let (sender, mut receiver) = socket.split();
@@ -98,10 +135,19 @@ async fn handle_socket(socket: WebSocket, state: SharedState) {
                                 let mut state = client_state_clone.write().await;
                                 if let Some(expr) = &state.filter {
                                     if let Ok(value) = serde_json::to_value(&msg) {
-                                        let mut ctx = FilterContext::new(&value);
-                                        let matches_now = evaluate(expr, &mut ctx);
+                                        // Lock cache to get history provider
+                                        let cache = cache_clone.read().await;
+                                        let now = chrono::Utc::now().timestamp_millis();
+                                        let (matches_now, traces) = if let Some(fixture) = cache.fixtures.get(&fixture_id) {
+                                            let provider = FixtureHistoryProvider { fixture, now };
+                                            let mut ctx = FilterContext::with_history(&value, &provider);
+                                            (evaluate(expr, &mut ctx), ctx.get_traces())
+                                        } else {
+                                            let mut ctx = FilterContext::new(&value);
+                                            (evaluate(expr, &mut ctx), ctx.get_traces())
+                                        };
+                                        
                                         let was_matching = state.matching_fixtures.contains(&fixture_id);
-                                        let traces = ctx.get_traces();
 
                                         match (matches_now, was_matching) {
                                             (true, false) => {
@@ -230,9 +276,11 @@ async fn send_filtered_snapshot<'a>(
         let base_msg = fixture.to_ws_message("odds_snapshot");
 
         let filter_ref = client_state.as_ref().and_then(|cs| cs.filter.as_ref());
+        let now = chrono::Utc::now().timestamp_millis();
         let (should_send, traces) = if let Some(expr) = filter_ref {
             if let Ok(value) = serde_json::to_value(&base_msg) {
-                let mut ctx = FilterContext::new(&value);
+                let provider = FixtureHistoryProvider { fixture, now };
+                let mut ctx = FilterContext::with_history(&value, &provider);
                 let result = evaluate(expr, &mut ctx);
 
                 (result, ctx.get_traces())
@@ -274,4 +322,3 @@ pub async fn get_stats(State(state): State<SharedState>) -> impl IntoResponse {
     let stats = state.stats.read().await;
     axum::Json(stats.clone())
 }
-

@@ -264,7 +264,7 @@ impl PinnacleService {
         // Pinnacle bookie_id = 2, decimals = 3
         let bookie_id = 2i64;
         let decimals = 3i32;
-        let timestamp = chrono::Utc::now().timestamp();
+        let timestamp = chrono::Utc::now().timestamp_millis();
 
         let mut update = OddsUpdate {
             fixture_id,

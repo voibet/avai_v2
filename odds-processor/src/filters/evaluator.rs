@@ -84,7 +84,7 @@ fn resolve_field_with_details(field: &FieldPath, ctx: &mut FilterContext) -> Opt
                 let var_name = &s[1..];
                 ctx.vars.get(var_name).cloned()
             } else {
-                resolve_json_path(ctx.data, s)
+                resolve_json_path(s, ctx)
             }
         },
         FieldPath::Computed(comp) => evaluate_arithmetic_with_ctx(comp, ctx),

@@ -1,14 +1,18 @@
 import type { FixtureWithOdds } from '../types'
-import { formatOdds, getLatencyClass } from '../utils'
+import { formatOdds, getLatencyClass, parseDropInfo, parseValueInfo, parseArbInfo, formatTimestamp } from '../utils'
 
 interface FixtureDetailsProps {
   selectedFixture: FixtureWithOdds | null
 }
 
 export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
+  const dropInfo = selectedFixture ? parseDropInfo(selectedFixture.filter_matches, selectedFixture) : null
+  const valueInfo = selectedFixture ? parseValueInfo(selectedFixture.filter_matches, selectedFixture) : null
+  const arbInfo = selectedFixture ? parseArbInfo(selectedFixture.filter_matches) : null
+
   return (
     <div className="bg-[#12121a] rounded flex flex-col"
-         style={{ gridArea: 'details' }}>
+      style={{ gridArea: 'details' }}>
       <div className="px-2.5 py-2 bg-[#1a1a2e] text-[10px] font-semibold shrink-0">
         <span>Fixture Details</span>
         {selectedFixture && (
@@ -49,12 +53,113 @@ export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
               </div>
             </div>
 
+            {/* Drop Information */}
+            {dropInfo && (
+              <div className="bg-[#0a0a0f] rounded p-2 border border-[#ff9500]/30">
+                <div className="text-[#ff9500] text-[9px] font-semibold uppercase mb-1.5">📉 Drop Information</div>
+                <div className="space-y-1 text-[9px]">
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Drop Time:</span>
+                    <span className="text-white font-mono">{formatTimestamp(dropInfo.timestamp)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Bookmaker:</span>
+                    <span className="text-[#00ff88] font-semibold">{dropInfo.bookmaker}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Market:</span>
+                    <span className="text-[#00ff88] font-semibold">{dropInfo.market}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Current Odds:</span>
+                    <span className="text-white font-mono">
+                      {formatOdds(dropInfo.droppedOdds)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Historical Odds:</span>
+                    <span className="text-[#888] font-mono">
+                      {formatOdds(dropInfo.historicalOdds)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Drop Ratio:</span>
+                    <span className="text-[#ff9500] font-mono">×{dropInfo.dropRatio.toFixed(4)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Value Information */}
+            {valueInfo && (
+              <div className="bg-[#0a0a0f] rounded p-2 border border-[#00ff88]/30">
+                <div className="text-[#00ff88] text-[9px] font-semibold uppercase mb-1.5">🔥 Value Information</div>
+                <div className="space-y-1 text-[9px]">
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Bookmaker:</span>
+                    <span className="text-[#00ff88] font-semibold">{valueInfo.bookmaker}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Market:</span>
+                    <span className="text-[#00ff88] font-semibold">
+                      {valueInfo.market}
+                      {valueInfo.line !== undefined && (
+                        <span className="text-white ml-1">[{valueInfo.line}]</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Odds:</span>
+                    <span className="text-white font-mono">
+                      {formatOdds(valueInfo.odds)}
+                      <span className="text-[#666] text-[8px] ml-1">({valueInfo.odds})</span>
+                    </span>
+                  </div>
+                  {valueInfo.fairOdds && (
+                    <div className="flex justify-between">
+                      <span className="text-[#666]">Fair Odds:</span>
+                      <span className="text-[#888] font-mono">{formatOdds(valueInfo.fairOdds)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Value Ratio:</span>
+                    <span className="text-[#00ff88] font-mono">{(valueInfo.valueRatio * 100 - 100).toFixed(2)}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Arb Information */}
+            {arbInfo && (
+              <div className="bg-[#0a0a0f] rounded p-2 border border-[#ff9500]/30">
+                <div className="text-[#ff9500] text-[9px] font-semibold uppercase mb-1.5">⚡ Arbitrage Information</div>
+                <div className="space-y-1 text-[9px]">
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Market:</span>
+                    <span className="text-[#00ff88] font-semibold">
+                      {arbInfo.market}
+                      {arbInfo.line !== undefined && (
+                        <span className="text-white ml-1">[{arbInfo.line}]</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#666]">Profit:</span>
+                    <span className="text-[#00ff88] font-mono font-bold">{arbInfo.profit.toFixed(2)}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+
+
             {/* Filter Matches - Why this fixture was shown */}
             {selectedFixture.filter_matches && selectedFixture.filter_matches.length > 0 && (
               <div className="bg-[#0a0a0f] rounded p-2 border border-[#00ff88]/20">
                 <div className="text-[#00ff88] text-[9px] font-semibold uppercase mb-1">Filter Matches</div>
                 <div className="space-y-1">
                   {selectedFixture.filter_matches.map((match, idx) => (
+
                     <div key={idx} className="bg-[#12121a] rounded p-1.5 border-l-2 border-[#00ff88]">
                       <div className="flex items-baseline gap-2 mb-0.5">
                         <span className="text-[#00ff88] font-bold text-[8px]">
@@ -72,12 +177,20 @@ export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
                         <div className="text-[8px] font-mono space-y-0.5">
                           <div className="flex gap-1">
                             <span className="text-[#2196F3] truncate">{match.left_operand.path}</span>
-                            <span className="text-white">= {formatOdds(match.left_operand.value)}</span>
+                            <span className="text-white">
+                              = {match.left_operand.value >= 100
+                                ? formatOdds(match.left_operand.value)
+                                : match.left_operand.value.toFixed(4)}
+                            </span>
                           </div>
                           {match.right_operand && (
                             <div className="flex gap-1">
                               <span className="text-[#9C27B0] truncate">{match.right_operand.path}</span>
-                              <span className="text-white">= {formatOdds(match.right_operand.value)}</span>
+                              <span className="text-white">
+                                = {match.right_operand.value >= 100
+                                  ? formatOdds(match.right_operand.value)
+                                  : match.right_operand.value.toFixed(4)}
+                              </span>
                             </div>
                           )}
                         </div>

@@ -3,6 +3,7 @@ use crate::types::OddsUpdate;
 use serde_json::Value;
 use tracing::{info, error, warn};
 use tokio::sync::broadcast;
+use chrono::NaiveDateTime;
 
 fn row_to_odds_update(row: &PgRow) -> Option<OddsUpdate> {
     let fixture_id: i64 = row.get("fixture_id");
@@ -13,8 +14,9 @@ fn row_to_odds_update(row: &PgRow) -> Option<OddsUpdate> {
     
     let bookmaker: String = row.get("bookie");
     let decimals: i32 = row.get("decimals");
-    let updated_at: chrono::NaiveDateTime = row.get("updated_at");
-    let timestamp = updated_at.and_utc().timestamp();
+    // updated_at is stored as TIMESTAMP in the database
+    let updated_at: NaiveDateTime = row.get("updated_at");
+    let timestamp = updated_at.and_utc().timestamp_millis();  // Unix timestamp in milliseconds
     
     // We normalize everything to 3 decimals as expected by the app
     let target_decimals = 3;
@@ -23,7 +25,7 @@ fn row_to_odds_update(row: &PgRow) -> Option<OddsUpdate> {
         bookie_id,
         bookmaker,
         timestamp,
-        start: timestamp * 1000,
+        start: timestamp,
         decimals: target_decimals,
         ..Default::default()
     };

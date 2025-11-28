@@ -47,6 +47,10 @@ fn evaluate_standard_arithmetic(comp: &ComputedValue, ctx: &FilterContext) -> Op
     let left = resolve_value_or_computed(&comp.left, ctx)?;
     let right = resolve_value_or_computed(&comp.right, ctx)?;
 
+    if let ArithOp::History = comp.op {
+        return evaluate_history(left, right, ctx);
+    }
+
     let mut result_values = Vec::new();
     let mut result_paths = Vec::new();
 
@@ -56,25 +60,42 @@ fn evaluate_standard_arithmetic(comp: &ComputedValue, ctx: &FilterContext) -> Op
     
     // If BOTH sides have line-based paths, always match by line (even if one side has 1 value)
     if left_has_lines && right_has_lines {
-        // Match by line value, not by index!
+        // Pre-process right side to make lookups easier and safer
+        // We need to know if an exact base match exists for a given line
+        let right_info: Vec<(usize, f64, String)> = right.paths.iter().enumerate()
+            .filter_map(|(i, p)| {
+                extract_line_from_path_str(p).map(|line| {
+                    (i, line, extract_base_field(p).to_string())
+                })
+            })
+            .collect();
+
+        // Match by line value, AND prefer matching base field
         for (l_idx, l_path) in left.paths.iter().enumerate() {
-            let l_line = extract_line_from_path_str(l_path);
+            let Some(l_line) = extract_line_from_path_str(l_path) else { continue };
+            let l_base = extract_base_field(l_path);
             
-            // Find matching line in right side
-            for (r_idx, r_path) in right.paths.iter().enumerate() {
-                let r_line = extract_line_from_path_str(r_path);
-                
-                // Match if lines are equal (with float tolerance)
-                if let (Some(l), Some(r)) = (l_line, r_line) {
-                    if (l - r).abs() < 0.001 {
-                        let l_val = left.values[l_idx];
-                        let r_val = right.values[r_idx];
-                        if let Some(res) = perform_op(comp.op, l_val, r_val) {
-                            result_values.push(res);
-                            result_paths.push(l_path.clone());
-                        }
-                        break; // Found match, move to next left value
-                    }
+            // Find all candidates in right side that match the line
+            let candidates: Vec<&(usize, f64, String)> = right_info.iter()
+                .filter(|(_, r_line, _)| (l_line - r_line).abs() < 0.001)
+                .collect();
+            
+            if candidates.is_empty() { continue; }
+
+            // If we have candidates, try to find one with matching base field
+            // e.g. if left is "ah_h", look for "ah_h" in candidates
+            // If not found, fall back to the first candidate (allows ah_h vs ah_a comparison if explicit)
+            let best_match = candidates.iter()
+                .find(|(_, _, r_base)| r_base == l_base)
+                .or_else(|| candidates.first())
+                .copied();
+
+            if let Some((r_idx, _, _)) = best_match {
+                let l_val = left.values[l_idx];
+                let r_val = right.values[*r_idx];
+                if let Some(res) = perform_op(comp.op, l_val, r_val) {
+                    result_values.push(res);
+                    result_paths.push(l_path.clone());
                 }
             }
         }
@@ -86,6 +107,28 @@ fn evaluate_standard_arithmetic(comp: &ComputedValue, ctx: &FilterContext) -> Op
                     if let Some(res) = perform_op(comp.op, left.values[i], right.values[i]) {
                         result_values.push(res);
                         result_paths.push(left.paths[i].clone());
+                    }
+                }
+            },
+            (l, r) if l > 1 && r > 1 => {
+                // Arrays of different lengths - try to match by path suffix (e.g., x12_h, x12_x, x12_a)
+                for (l_idx, l_path) in left.paths.iter().enumerate() {
+                    // Extract the field name (last part after final dot or @)
+                    let l_field = extract_field_suffix(l_path);
+                    
+                    // Find matching field in right side
+                    for (r_idx, r_path) in right.paths.iter().enumerate() {
+                        let r_field = extract_field_suffix(r_path);
+                        
+                        if l_field == r_field {
+                            let l_val = left.values[l_idx];
+                            let r_val = right.values[r_idx];
+                            if let Some(res) = perform_op(comp.op, l_val, r_val) {
+                                result_values.push(res);
+                                result_paths.push(l_path.clone());
+                            }
+                            break;
+                        }
                     }
                 }
             },
@@ -137,6 +180,27 @@ fn extract_line_from_path_str(path: &str) -> Option<f64> {
     path[start+1..end].parse().ok()
 }
 
+/// Extract field suffix from path like "bookmakers.Pinnacle.x12_h" -> "x12_h"
+/// Or "bookmakers.Pinnacle.x12_h@60000ms" -> "x12_h"
+fn extract_field_suffix(path: &str) -> &str {
+    // First remove any @timestamp suffix
+    let without_timestamp = path.split('@').next().unwrap_or(path);
+    
+    // Then get the last part after the last dot
+    without_timestamp.rsplit('.').next().unwrap_or(without_timestamp)
+}
+
+/// Extract base field from path like "bookmakers.Pinnacle.ah_h[1]" -> "ah_h"
+/// Handles stripping @timestamp and [line]
+fn extract_base_field(path: &str) -> &str {
+    let suffix = extract_field_suffix(path);
+    if let Some(idx) = suffix.find('[') {
+        &suffix[..idx]
+    } else {
+        suffix
+    }
+}
+
 // ============================================================================
 // LINE MATCHING ARITHMETIC
 // ============================================================================
@@ -182,8 +246,9 @@ fn evaluate_with_line_matching(
         
         // X12 fields are scalars
         if left_side.contains("x12") {
-            let left_val = resolve_json_path(data, left_specific_path)?.values.first().copied()?;
-            let right_val = resolve_json_path(data, &right_specific_path)?.values.first().copied()?;
+            let temp_ctx = FilterContext::new(data);
+            let left_val = resolve_json_path(left_specific_path, &temp_ctx)?.values.first().copied()?;
+            let right_val = resolve_json_path(&right_specific_path, &temp_ctx)?.values.first().copied()?;
             
             if let Some(result) = perform_op(comp.op, left_val, right_val) {
                 let left_full = format!("{}.{}", left_parent, left_side);
@@ -275,6 +340,7 @@ fn perform_op(op: ArithOp, l: f64, r: f64) -> Option<f64> {
         ArithOp::Subtract => Some(l - r),
         ArithOp::Multiply => Some(l * r),
         ArithOp::Divide => if r != 0.0 { Some(l / r) } else { None },
+        ArithOp::History => None, // Handled separately
     }
 }
 
@@ -284,6 +350,7 @@ fn op_to_string(op: ArithOp) -> &'static str {
         ArithOp::Subtract => "subtract",
         ArithOp::Multiply => "multiply",
         ArithOp::Divide => "divide",
+        ArithOp::History => "history",
     }
 }
 
@@ -319,7 +386,6 @@ fn expand_aggregate_path(path: &str) -> Vec<(String, String)> {
     vec![(path.to_string(), field.to_string())]
 }
 
-/// Find matching right path - maps standard ↔ fair sides
 fn find_matching_right_path(left_side: &str, right_expanded: &[(String, String)]) -> Option<(String, String)> {
     let corresponding = match left_side {
         "ah_h" => "fair_ah_h",
@@ -343,4 +409,85 @@ fn find_matching_right_path(left_side: &str, right_expanded: &[(String, String)]
     right_expanded.iter()
         .find(|(_, s)| s == corresponding || s == left_side)
         .map(|(p, s)| (p.clone(), s.clone()))
+}
+
+/// Evaluate history operator.
+/// 
+/// Logic:
+/// - left: field path(s) like "bookmakers.Pinnacle.x12_h"
+/// - right: max age in milliseconds (e.g., 60000 = within last 60 seconds)
+/// 
+/// Returns the OLDEST historical value(s) that is still within the time window.
+/// This maximizes trend detection - comparing current to the oldest recent data.
+fn evaluate_history(left: ResolvedValue, right: ResolvedValue, ctx: &FilterContext) -> Option<ResolvedValue> {
+    // Right operand is the maximum age in milliseconds
+    let max_age_ms = right.values.first().copied()? as i64;
+    
+    let mut result_values = Vec::new();
+    let mut result_paths = Vec::new();
+    
+    for path in &left.paths {
+        // Parse: "bookmakers.Pinnacle.x12_h" -> bookmaker="Pinnacle", field="x12_h"
+        let Some((bookmaker, field)) = parse_bookmaker_path(path) else { continue };
+        
+        // Get oldest historical snapshot within max_age_ms
+        let Some(provider) = ctx.history_provider else { continue };
+        let Some(snapshot) = provider.get_snapshot(bookmaker, max_age_ms) else { continue };
+        
+        // Resolve the field in the historical snapshot
+        let temp_ctx = FilterContext::new(&snapshot);
+        let Some(resolved) = resolve_json_path(field, &temp_ctx) else { continue };
+        
+        // Match values by line if applicable
+        for (val, p) in resolved.values.iter().zip(resolved.paths.iter()) {
+            // If original path has a line bracket, only include matching lines
+            if let Some(orig_line) = extract_line_from_path_str(path) {
+                if let Some(res_line) = extract_line_from_path_str(p) {
+                    // Only include if lines match (with tolerance for floating point)
+                    if (orig_line - res_line).abs() > 0.001 {
+                        continue;
+                    }
+                } else {
+                    // Historical path doesn't have a line bracket, skip it
+                    // This can happen if historical data structure is different
+                    continue;
+                }
+            }
+
+            result_values.push(*val);
+            
+            let suffix = if let Some(ts) = snapshot.get("timestamp").and_then(|t| t.as_i64()) {
+                format!("@{}ms(t:{})", max_age_ms, ts)
+            } else {
+                format!("@{}ms", max_age_ms)
+            };
+            result_paths.push(format!("{}{}", path, suffix));
+        }
+    }
+    
+    if result_values.is_empty() {
+        None
+    } else {
+        Some(ResolvedValue {
+            values: result_values,
+            paths: result_paths,
+            source_path: format!("history({}, {})", left.source_path, max_age_ms),
+        })
+    }
+}
+
+fn parse_bookmaker_path(path: &str) -> Option<(&str, &str)> {
+    let parts: Vec<&str> = path.split('.').collect();
+    if parts.len() >= 3 && parts[0] == "bookmakers" {
+        // parts[1] is bookmaker
+        // parts[2..] is relative path
+        let bookmaker = parts[1];
+        // Reconstruct relative path
+        // We need to find where "bookmakers.Bookie." ends in the original string to slice it safely
+        let prefix = format!("bookmakers.{}.", bookmaker);
+        if path.starts_with(&prefix) {
+            return Some((bookmaker, &path[prefix.len()..]));
+        }
+    }
+    None
 }

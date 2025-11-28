@@ -42,48 +42,54 @@ impl Cache {
             .entry(update.bookmaker.clone())
             .or_insert_with(BookmakerOdds::default);
 
+        // Push current to history if it has data (newest first, max 20 snapshots)
+        if bookie_odds.current.timestamp > 0 {
+            bookie_odds.history.push_front(bookie_odds.current.clone());
+            if bookie_odds.history.len() > 20 {
+                bookie_odds.history.pop_back();
+            }
+        }
+
         // Apply base fields
         bookie_odds.bookie_id = update.bookie_id;
         bookie_odds.decimals = update.decimals;
-        bookie_odds.timestamp = update.timestamp;
+        bookie_odds.current.timestamp = update.timestamp;
 
         // Apply odds (only update fields that are Some)
         if let Some(x12) = update.x12 {
-            bookie_odds.x12_h = Some(x12[0]);
-            bookie_odds.x12_x = Some(x12[1]);
-            bookie_odds.x12_a = Some(x12[2]);
+            bookie_odds.current.x12_h = Some(x12[0]);
+            bookie_odds.current.x12_x = Some(x12[1]);
+            bookie_odds.current.x12_a = Some(x12[2]);
         }
         if let Some(ah_lines) = update.ah_lines {
-            bookie_odds.ah_lines = ah_lines;
+            bookie_odds.current.ah_lines = ah_lines;
         }
         if let Some(ah_h) = update.ah_h {
-            bookie_odds.ah_h = ah_h;
+            bookie_odds.current.ah_h = ah_h;
         }
         if let Some(ah_a) = update.ah_a {
-            bookie_odds.ah_a = ah_a;
+            bookie_odds.current.ah_a = ah_a;
         }
         if let Some(ou_lines) = update.ou_lines {
-            bookie_odds.ou_lines = ou_lines;
+            bookie_odds.current.ou_lines = ou_lines;
         }
         if let Some(ou_o) = update.ou_o {
-            bookie_odds.ou_o = ou_o;
+            bookie_odds.current.ou_o = ou_o;
         }
         if let Some(ou_u) = update.ou_u {
-            bookie_odds.ou_u = ou_u;
+            bookie_odds.current.ou_u = ou_u;
         }
 
         // Apply DB-format fields (ids, max_stakes, latest_t)
         if update.ids.is_some() {
-            bookie_odds.ids = update.ids;
+            bookie_odds.current.ids = update.ids;
         }
         if update.max_stakes.is_some() {
-            bookie_odds.max_stakes = update.max_stakes;
+            bookie_odds.current.max_stakes = update.max_stakes;
         }
         if update.latest_t.is_some() {
-            bookie_odds.latest_t = update.latest_t;
+            bookie_odds.current.latest_t = update.latest_t;
         }
-
-
 
         // Update fixture timestamp
         fixture.last_update = update.timestamp;
@@ -93,46 +99,46 @@ impl Cache {
 
         // Recalculate fair odds for this bookmaker
         // X12 - calculate fair odds if all three outcomes are present
-        if let (Some(h), Some(x), Some(a)) = (bookie_odds.x12_h, bookie_odds.x12_x, bookie_odds.x12_a) {
+        if let (Some(h), Some(x), Some(a)) = (bookie_odds.current.x12_h, bookie_odds.current.x12_x, bookie_odds.current.x12_a) {
             let x12_odds = [h, x, a];
             if let Some(fair) = calculate_fair_odds(&x12_odds, bookie_odds.decimals, 3) {
-                bookie_odds.fair_x12_h = Some(fair[0]);
-                bookie_odds.fair_x12_x = Some(fair[1]);
-                bookie_odds.fair_x12_a = Some(fair[2]);
+                bookie_odds.current.fair_x12_h = Some(fair[0]);
+                bookie_odds.current.fair_x12_x = Some(fair[1]);
+                bookie_odds.current.fair_x12_a = Some(fair[2]);
             }
         }
 
         // AH
-        bookie_odds.fair_ah_h.clear();
-        bookie_odds.fair_ah_a.clear();
-        for i in 0..bookie_odds.ah_lines.len() {
-             let h = *bookie_odds.ah_h.get(i).unwrap_or(&0);
-             let a = *bookie_odds.ah_a.get(i).unwrap_or(&0);
+        bookie_odds.current.fair_ah_h.clear();
+        bookie_odds.current.fair_ah_a.clear();
+        for i in 0..bookie_odds.current.ah_lines.len() {
+             let h = *bookie_odds.current.ah_h.get(i).unwrap_or(&0);
+             let a = *bookie_odds.current.ah_a.get(i).unwrap_or(&0);
              let odds = [h, a];
 
              if let Some(fair) = calculate_fair_odds(&odds, bookie_odds.decimals, 2) {
-                 bookie_odds.fair_ah_h.push(fair[0]);
-                 bookie_odds.fair_ah_a.push(fair[1]);
+                 bookie_odds.current.fair_ah_h.push(fair[0]);
+                 bookie_odds.current.fair_ah_a.push(fair[1]);
              } else {
-                 bookie_odds.fair_ah_h.push(0);
-                 bookie_odds.fair_ah_a.push(0);
+                 bookie_odds.current.fair_ah_h.push(0);
+                 bookie_odds.current.fair_ah_a.push(0);
              }
         }
 
         // OU
-        bookie_odds.fair_ou_o.clear();
-        bookie_odds.fair_ou_u.clear();
-        for i in 0..bookie_odds.ou_lines.len() {
-             let o = *bookie_odds.ou_o.get(i).unwrap_or(&0);
-             let u = *bookie_odds.ou_u.get(i).unwrap_or(&0);
+        bookie_odds.current.fair_ou_o.clear();
+        bookie_odds.current.fair_ou_u.clear();
+        for i in 0..bookie_odds.current.ou_lines.len() {
+             let o = *bookie_odds.current.ou_o.get(i).unwrap_or(&0);
+             let u = *bookie_odds.current.ou_u.get(i).unwrap_or(&0);
              let odds = [o, u];
 
              if let Some(fair) = calculate_fair_odds(&odds, bookie_odds.decimals, 2) {
-                 bookie_odds.fair_ou_o.push(fair[0]);
-                 bookie_odds.fair_ou_u.push(fair[1]);
+                 bookie_odds.current.fair_ou_o.push(fair[0]);
+                 bookie_odds.current.fair_ou_u.push(fair[1]);
              } else {
-                 bookie_odds.fair_ou_o.push(0);
-                 bookie_odds.fair_ou_u.push(0);
+                 bookie_odds.current.fair_ou_o.push(0);
+                 bookie_odds.current.fair_ou_u.push(0);
              }
         }
 

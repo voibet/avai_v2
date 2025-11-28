@@ -1,5 +1,5 @@
 import type { FixtureWithOdds } from '../types'
-import { VALUE_FILTER, ARBITRAGE_FILTER, getFilterJson } from '../filters/presets'
+import { VALUE_FILTER, ARBITRAGE_FILTER, PINNACLE_DROP, DEFAULT_VALUE_FILTER, getFilterJson } from '../filters/presets'
 
 interface FilterPanelProps {
   showFilter: boolean
@@ -43,10 +43,22 @@ export function FilterPanel({
               🔥 Value
             </button>
             <button
+              onClick={() => setFilterInput(getFilterJson(DEFAULT_VALUE_FILTER))}
+              className="px-2 py-1 bg-[#1a1a2e] text-[#2196F3] rounded text-[9px] hover:bg-[#252540] border border-[#2196F3]/20"
+            >
+              💎 Default
+            </button>
+            <button
               onClick={() => setFilterInput(getFilterJson(ARBITRAGE_FILTER))}
               className="px-2 py-1 bg-[#1a1a2e] text-[#ff9500] rounded text-[9px] hover:bg-[#252540] border border-[#ff9500]/20"
             >
               ⚡ Arb
+            </button>
+            <button
+              onClick={() => setFilterInput(getFilterJson(PINNACLE_DROP))}
+              className="px-2 py-1 bg-[#1a1a2e] text-[#ff4444] rounded text-[9px] hover:bg-[#252540] border border-[#ff4444]/20"
+            >
+              📉 Drop
             </button>
           </div>
 

@@ -252,7 +252,7 @@ fn build_odds_update(
     // Monaco bookie_id = 1, decimals = 3
     let bookie_id = 1i64;
     let decimals = 3i32;
-    let timestamp = chrono::Utc::now().timestamp();
+    let timestamp = chrono::Utc::now().timestamp_millis();
 
     // Build IDs from outcome mappings
     let ids = build_monaco_ids(timestamp, market_mapping, order_book);
