@@ -34,7 +34,7 @@ export function FilterPanel({
       </div>
 
       {showFilter && (
-        <div className="p-2 bg-[#0a0a0f]">
+        <div className="p-2 bg-[#0a0a0f] overflow-y-auto min-h-0 flex-shrink-0" style={{ maxHeight: '400px' }}>
           <div className="flex gap-1 mb-2">
             <button
               onClick={() => setFilterInput(getFilterJson(DEFAULT_VALUE_FILTER))}

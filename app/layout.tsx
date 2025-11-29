@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import Link from 'next/link'
+import UserMenu from '@/components/UserMenu'
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -27,6 +28,7 @@ export default function RootLayout({
                 <Link href="/fixtures" className="text-gray-400 hover:text-white transition-colors pointer-events-auto" style={{ zIndex: 2147483647 }}>FIXTURES</Link>
                 <Link href="/trading" className="text-gray-400 hover:text-white transition-colors pointer-events-auto" style={{ zIndex: 2147483647 }}>TRADING</Link>
                 <Link href="/admin" className="text-gray-400 hover:text-white transition-colors pointer-events-auto" style={{ zIndex: 2147483647 }}>ADMIN</Link>
+                <UserMenu />
               </div>
             </div>
           </nav>

@@ -19,6 +19,7 @@ export default function Home() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <NavCard href="/fixtures" title="FIXTURES" color="blue" />
+      <NavCard href="/trading" title="TRADING" color="blue" />
       <NavCard href="/admin" title="ADMIN" color="red" />
     </div>
   )

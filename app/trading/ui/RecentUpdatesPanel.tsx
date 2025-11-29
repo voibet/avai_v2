@@ -74,7 +74,7 @@ export function RecentUpdatesPanel({
       </div>
 
       {showRecentUpdates && (
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
           {loading ? (
             <div className="text-center py-4 text-[#666]">Loading...</div>
           ) : recentlyUpdated.length === 0 ? (

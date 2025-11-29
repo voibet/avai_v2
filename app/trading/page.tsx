@@ -64,17 +64,17 @@ export default function TradingPage() {
       />
 
       {/* Main Grid */}
-      <div className="grid gap-3 flex-1"
-           style={{
-             gridTemplateColumns: '280px 1fr 320px',
-             gridTemplateRows: '1fr 2fr',
-             gridTemplateAreas: `
+      <div className="grid gap-3 flex-1 overflow-hidden"
+        style={{
+          gridTemplateColumns: '280px 1fr 320px',
+          gridTemplateRows: 'minmax(0, 1fr) minmax(0, 2fr)',
+          gridTemplateAreas: `
                "filters fixtures details"
                "filters odds details"
              `
-           }}>
-        <div className="bg-[#12121a] rounded flex flex-col"
-             style={{ gridArea: 'filters' }}>
+        }}>
+        <div className="bg-[#12121a] rounded flex flex-col overflow-hidden min-h-0"
+          style={{ gridArea: 'filters' }}>
           <FilterPanel
             showFilter={showFilter}
             setShowFilter={setShowFilter}

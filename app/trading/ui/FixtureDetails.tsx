@@ -13,7 +13,7 @@ export function FixtureDetails({ selectedFixture }: FixtureDetailsProps) {
   const arbInfo = selectedFixture ? parseArbInfo(selectedFixture.filter_matches) : null
 
   return (
-    <div className="bg-[#12121a] rounded flex flex-col"
+    <div className="bg-[#12121a] rounded flex flex-col overflow-hidden min-h-0"
       style={{ gridArea: 'details' }}>
       <div className="px-2.5 py-2 bg-[#1a1a2e] text-[10px] font-semibold shrink-0">
         <span>Fixture Details</span>

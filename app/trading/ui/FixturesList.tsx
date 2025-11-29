@@ -17,8 +17,8 @@ export function FixturesList({
   now,
 }: FixturesListProps) {
   return (
-    <div className="bg-[#12121a] rounded flex flex-col"
-         style={{ gridArea: 'fixtures' }}>
+    <div className="bg-[#12121a] rounded flex flex-col overflow-hidden min-h-0"
+      style={{ gridArea: 'fixtures' }}>
       <div className="px-2.5 py-2 bg-[#1a1a2e] text-[10px] font-semibold flex justify-between shrink-0">
         <span>All Fixtures</span>
         <span>{sortedFixtures.length}</span>

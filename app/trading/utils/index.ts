@@ -119,10 +119,10 @@ export const parseDropInfo = (
 
     if (!pathWithDrop) continue
 
-    // Match pattern: bookmakers.Bookmaker.market@Xms(t:timestamp)
+    // Match pattern: bookmakers.Bookmaker.market@Xms(t:timestamp) or bookmakers.Bookmaker.market[index]@Xms(t:timestamp)
     const dropMatch = pathWithDrop.match(/bookmakers\.([^.]+)\.([^@]+)@\d+ms\(t:(\d+)\)/)
     if (dropMatch) {
-      const [, bookmaker, market, timestampStr] = dropMatch
+      const [, bookmaker, marketWithIndex, timestampStr] = dropMatch
       const timestamp = parseInt(timestampStr, 10)
 
       // The result is the ratio (historical / current)
@@ -132,15 +132,40 @@ export const parseDropInfo = (
       // Get current odds from the fixture
       if (fixture.bookmakers?.[bookmaker]) {
         const bookieData = fixture.bookmakers[bookmaker]
-        const currentOdds = bookieData[market]
 
-        if (currentOdds) {
+        // Check if market has array index notation like ou_o[3]
+        const arrayMatch = marketWithIndex.match(/^(.+)\[(\d+)\]$/)
+        let currentOdds: number | null = null
+        let displayMarket = marketWithIndex
+
+        if (arrayMatch) {
+          // Array-indexed market (e.g., ou_o[3])
+          const [, marketName, indexStr] = arrayMatch
+          const index = parseInt(indexStr, 10)
+          const marketArray = bookieData[marketName]
+
+          if (Array.isArray(marketArray) && index >= 0 && index < marketArray.length) {
+            currentOdds = marketArray[index]
+            // For display, show the market name with the line value if available
+            const linesKey = marketName.includes('ah_') ? 'ah_lines' : marketName.includes('ou_') ? 'ou_lines' : null
+            if (linesKey && Array.isArray(bookieData[linesKey]) && index < bookieData[linesKey].length) {
+              const lineValue = bookieData[linesKey][index]
+              displayMarket = `${marketName} [${lineValue}]`
+            }
+          }
+        } else {
+          // Scalar market (e.g., x12_h)
+          currentOdds = bookieData[marketWithIndex]
+          displayMarket = marketWithIndex
+        }
+
+        if (currentOdds && currentOdds > 0) {
           // Calculate historical odds: historical = current * ratio
           const historicalOdds = currentOdds * dropRatio
 
           return {
             timestamp,
-            market,
+            market: displayMarket,
             bookmaker,
             droppedOdds: currentOdds,
             historicalOdds,

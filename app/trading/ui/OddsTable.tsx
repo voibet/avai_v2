@@ -8,8 +8,8 @@ interface OddsTableProps {
 
 export function OddsTable({ selectedFixture, selectedBookmakers }: OddsTableProps) {
   return (
-    <div className="bg-[#12121a] rounded flex flex-col h-full"
-         style={{ gridArea: 'odds' }}>
+    <div className="bg-[#12121a] rounded flex flex-col overflow-hidden min-h-0"
+      style={{ gridArea: 'odds' }}>
       <div className="px-2.5 py-2 bg-[#1a1a2e] text-[10px] font-semibold shrink-0">
         <span>Selected Fixture Odds</span>
         <span className="ml-2 text-[#00ff88]">#{selectedFixture.id}</span>
@@ -54,10 +54,10 @@ export function OddsTable({ selectedFixture, selectedBookmakers }: OddsTableProp
                           return (
                             <td key={bookie} className="p-0 text-center">
                               {value ? (
-                              <div className={`rounded px-1 py-0 ${isHighlighted ? 'bg-[#00ff88]/20 border border-[#00ff88]/40' : 'bg-black'}`}>
-                                <div className="text-white font-medium">{formatOdds(value)}</div>
-                                {fairValue && bookie !== 'Prediction' && <div className={`${fairHighlighted ? 'text-[#00ff88]' : 'text-[#56b6c2]'} text-[7px]`}>{formatOdds(fairValue)}</div>}
-                              </div>
+                                <div className={`rounded px-1 py-0 ${isHighlighted ? 'bg-[#00ff88]/20 border border-[#00ff88]/40' : 'bg-black'}`}>
+                                  <div className="text-white font-medium">{formatOdds(value)}</div>
+                                  {fairValue && bookie !== 'Prediction' && <div className={`${fairHighlighted ? 'text-[#00ff88]' : 'text-[#56b6c2]'} text-[7px]`}>{formatOdds(fairValue)}</div>}
+                                </div>
                               ) : (
                                 <div className="text-[#444]">-</div>
                               )}
